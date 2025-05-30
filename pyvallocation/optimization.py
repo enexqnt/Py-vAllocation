@@ -13,6 +13,10 @@ import numbers
 import warnings
 import logging
 from typing import Dict, List, Optional, Sequence, Tuple, Union
+try: 
+    import pandas as pd
+except ImportError:
+    pd = None
 
 import numpy as np
 from cvxopt import matrix, solvers, sparse
