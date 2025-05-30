@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+.ipynb_checkpoints/
+.vscode/
+.DS_Store
+
+# OSQP cache files
+*.so
+*.dll
+*.dylib
+
+# Documentation
+docs/_build/

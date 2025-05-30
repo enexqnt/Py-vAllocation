@@ -1,0 +1,7 @@
+# Minimal requirements for pyvallocation package
+numpy>=1.20.0
+cvxopt>=1.2.0
+
+# Optional dependencies
+# pandas is optional but recommended for enhanced functionality and pandas compatibility
+pandas>=1.0.0
