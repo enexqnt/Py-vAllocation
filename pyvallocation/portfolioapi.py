@@ -67,6 +67,16 @@ class AssetsDistribution:
     probabilities: Optional[Union[np.ndarray, 'pd.Series']] = None
 
     def __post_init__(self):
+        # store original pandas inputs for index labels
+        if _has_pandas:
+            if isinstance(self.mu, pd.Series):
+                self._pd_mu = self.mu.copy()
+            if isinstance(self.cov, pd.DataFrame):
+                self._pd_cov = self.cov.copy()
+            if isinstance(self.scenarios, pd.DataFrame):
+                self._pd_scenarios = self.scenarios.copy()
+            if isinstance(self.probabilities, pd.Series):
+                self._pd_probabilities = self.probabilities.copy()
         if self.mu is not None and self.cov is not None:
             if _has_pandas and isinstance(self.mu, pd.Series):
                 self.mu = self.mu.values
@@ -192,6 +202,15 @@ class PortfolioWrapper(AssetsDistribution):
         self.dist = dist
         self.alpha = alpha
         self.risk_measure = None
+        # pandas detection
+        if _has_pandas and hasattr(assets_distribution, '_pd_mu'):
+            self._pandas = True
+            self._asset_index = assets_distribution._pd_mu.index
+        elif _has_pandas and hasattr(assets_distribution, '_pd_cov'):
+            self._pandas = True
+            self._asset_index = assets_distribution._pd_cov.columns
+        else:
+            self._pandas = False
 
     def validate_data(self):
         if self.mu is not None and self.cov is not None:
@@ -251,6 +270,13 @@ class PortfolioWrapper(AssetsDistribution):
             logger.warning('Setting default optimizer, call initialize_optimizer to customize it')
             self.initialize_optimizer()
         self.efficient_frontier = self.optimizer.efficient_frontier(self.num_portfolios)
+        if getattr(self, '_pandas', False):
+            import pandas as _pd
+            self.efficient_frontier = _pd.DataFrame(
+                self.efficient_frontier,
+                index=self._asset_index,
+                columns=range(self.efficient_frontier.shape[1])
+            )
         if self.verbose:
             logger.info("Efficient frontier set.")
 
@@ -266,10 +292,18 @@ class PortfolioWrapper(AssetsDistribution):
         ef = self._efficient_frontier()
         if self.risk_measure == 'CVaR':
             cvar = portfolio_cvar(ef, self.scenarios, self.probabilities.reshape(-1, 1), self.alpha)
-            return self._search_risk(maxrisk, cvar, ef)
+            result = self._search_risk(maxrisk, cvar, ef)
+            if getattr(self, '_pandas', False):
+                import pandas as _pd
+                result = [_pd.Series(r, index=self._asset_index) for r in result]
+            return result
         elif self.risk_measure == 'Variance':
             vol = np.sqrt(np.sum(ef.T @ self.cov * ef.T, axis=1))
-            return self._search_risk(maxrisk, vol, ef)
+            result = self._search_risk(maxrisk, vol, ef)
+            if getattr(self, '_pandas', False):
+                import pandas as _pd
+                result = [_pd.Series(r, index=self._asset_index) for r in result]
+            return result
         else:
             raise KeyError('risk_measure must be "Variance" or "CVaR"')
 
@@ -279,22 +313,40 @@ class PortfolioWrapper(AssetsDistribution):
         """
         ef = self._efficient_frontier()
         if (isinstance(lowerret, float) or (hasattr(lowerret, '__len__') and len(lowerret) < 2)) and self.efficient_frontier is None:
-            return self.optimizer.efficient_portfolio(lowerret)
+            result = self.optimizer.efficient_portfolio(lowerret)
+            if getattr(self, '_pandas', False):
+                import pandas as _pd
+                result = _pd.Series(result, index=self._asset_index)
+            return result
         else:
             returns = self.mu @ ef if self.mu is not None else self.scenarios @ self.probabilities
-            return self._search_returns(lowerret, returns, ef)
+            result = self._search_returns(lowerret, returns, ef)
+            if getattr(self, '_pandas', False):
+                import pandas as _pd
+                result = [_pd.Series(r, index=self._asset_index) for r in result]
+            return result
 
     @staticmethod
     def _search_risk(maxrisk, risk, ef) -> List[np.ndarray]:
+        import pandas as _pd
         maxrisk_arr = np.atleast_1d(maxrisk)
         indices = np.array([max(np.sum(risk <= tgt) - 1, 0) for tgt in maxrisk_arr])
-        return [ef[:, idx] for idx in indices]
+        if isinstance(ef, _pd.DataFrame):
+            arr = ef.values
+        else:
+            arr = ef
+        return [arr[:, idx] for idx in indices]
 
     @staticmethod
     def _search_returns(lowerret, returns, ef) -> List[np.ndarray]:
+        import pandas as _pd
         lowerret_arr = np.atleast_1d(lowerret)
         indices = np.array([max(np.sum(tgt >= returns) - 1, 0) for tgt in lowerret_arr])
-        return [ef[:, idx] for idx in indices]
+        if isinstance(ef, _pd.DataFrame):
+            arr = ef.values
+        else:
+            arr = ef
+        return [arr[:, idx] for idx in indices]
 
     def get_minrisk_portfolio(self) -> np.ndarray:
         """
@@ -304,4 +356,5 @@ class PortfolioWrapper(AssetsDistribution):
             self.initialize_optimizer()
         if self.efficient_frontier is None:
             self.set_efficient_frontier()
-        return self.efficient_frontier[:, 0]
+        result = self.efficient_frontier.iloc[:, 0] if getattr(self, '_pandas', False) else self.efficient_frontier[:, 0]
+        return result
