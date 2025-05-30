@@ -300,6 +300,8 @@ class PortfolioWrapper(AssetsDistribution):
         """
         Returns the minimum risk portfolio from the efficient frontier or optimizer.
         """
+        if self.optimizer is None:
+            self.initialize_optimizer()
         if self.efficient_frontier is None:
-            return self.optimizer.efficient_portfolio()
+            self.set_efficient_frontier()
         return self.efficient_frontier[:, 0]
