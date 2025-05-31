@@ -203,12 +203,18 @@ class PortfolioWrapper(AssetsDistribution):
         self.alpha = alpha
         self.risk_measure = None
         # pandas detection
-        if _has_pandas and hasattr(assets_distribution, '_pd_mu'):
-            self._pandas = True
-            self._asset_index = assets_distribution._pd_mu.index
-        elif _has_pandas and hasattr(assets_distribution, '_pd_cov'):
-            self._pandas = True
-            self._asset_index = assets_distribution._pd_cov.columns
+        if _has_pandas:
+            if hasattr(assets_distribution, '_pd_mu'):
+                self._pandas = True
+                self._asset_index = assets_distribution._pd_mu.index
+            elif hasattr(assets_distribution, '_pd_cov'):
+                self._pandas = True
+                self._asset_index = assets_distribution._pd_cov.columns
+            elif hasattr(assets_distribution, '_pd_scenarios'):
+                self._pandas = True
+                self._asset_index = assets_distribution._pd_scenarios.columns
+            else:
+                self._pandas = False
         else:
             self._pandas = False
 

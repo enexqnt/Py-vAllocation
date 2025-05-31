@@ -38,11 +38,20 @@ def entropy_pooling(
         len_h = len(h)
         bounds = Bounds([-np.inf] * len_b + [0] * len_h, [np.inf] * (len_b + len_h))
 
-    log_p = np.log(p)
+    log_p = np.log(p + 1e-12) # Add a small epsilon to prevent log(0)
     dual_solution = minimize(
         _dual_objective, x0=np.zeros(lhs.shape[0]), args=(log_p, lhs, rhs),
         method=method, jac=True, bounds=bounds, options={'maxfun': 10000})
+    
+    # Check for numerical stability of the dual solution
+    if not dual_solution.success or np.any(np.isnan(dual_solution.x)) or np.any(np.isinf(dual_solution.x)):
+        warnings.warn("Optimization for entropy pooling failed or returned unstable results. Returning prior probabilities.")
+        return p # Fallback to prior probabilities
+    
+    # Calculate q and clamp to avoid extreme values and ensure sum to 1
     q = np.exp(log_p - 1 - lhs.T @ dual_solution.x[:, np.newaxis])
+    q = np.maximum(q, 1e-12) # Clamp probabilities to be at least a small positive number
+    q /= np.sum(q) # Re-normalize to ensure probabilities sum to 1
     return q
 
 
@@ -61,8 +70,14 @@ def _dual_objective(
         Dual objective value and gradient.
     """
     lagrange_multipliers = lagrange_multipliers[:, np.newaxis]
-    log_x = log_p - 1 - lhs.T @ lagrange_multipliers
+    
+    # Clamp log_x to prevent overflow/underflow before np.exp
+    log_x = np.clip(log_p - 1 - lhs.T @ lagrange_multipliers, -700, 700) 
     x = np.exp(log_x)
+    
+    # Add a small epsilon to x to prevent issues if x becomes exactly zero
+    x = np.maximum(x, 1e-12) 
+
     gradient = rhs - lhs @ x
     objective = x.T @ (log_x - log_p) - lagrange_multipliers.T @ gradient
     return -1000 * objective.item(), 1000 * gradient.flatten()
@@ -167,6 +182,11 @@ class FlexibleViewsProcessor:
 
             N = mu.size
 
+            # Add a small regularization to the covariance matrix
+            # to ensure it's positive definite and prevent numerical issues
+            # with multivariate_normal.
+            cov = cov + np.eye(N) * 1e-6 
+
             rng = np.random.default_rng(random_state)
 
             if distribution_fn is None:
@@ -191,8 +211,8 @@ class FlexibleViewsProcessor:
         self.p0 = p0
 
         mu0 = (R.T @ p0).flatten()
-        diff = R - mu0
-        cov0 = (diff * p0).T @ diff
+        # Use np.cov for more robust covariance calculation
+        cov0 = np.cov(R.T, aweights=p0.flatten())
         var0 = np.diag(cov0)
 
         self.mu0, self.var0 = mu0, var0
@@ -228,8 +248,8 @@ class FlexibleViewsProcessor:
 
         q = self.posterior_probabilities
         mu_post = (R.T @ q).flatten()
-        diff_post = R - mu_post
-        cov_post = (diff_post * q).T @ diff_post
+        # Use np.cov for more robust covariance calculation
+        cov_post = np.cov(R.T, aweights=q.flatten())
 
         if self._use_pandas:
             self.posterior_returns = pd.Series(mu_post, index=self.assets)
@@ -431,7 +451,7 @@ class FlexibleViewsProcessor:
     # ====================================================================== #
     def get_posterior_probabilities(self) -> np.ndarray:
         """Return the (S × 1) posterior probability vector."""
-        return self.posterior_probabilities
+        return self.posterior_probabilities.flatten()
 
     def get_posterior(
         self,
