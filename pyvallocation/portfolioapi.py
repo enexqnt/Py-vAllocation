@@ -10,6 +10,7 @@ except ImportError:
     _has_pandas = False
 
 from .optimization import build_G_h_A_b, MeanCVaR, MeanVariance
+from .probabilities import generate_uniform_probabilities
 from . import probabilities
 from .utils.functions import portfolio_cvar
 
@@ -67,7 +68,6 @@ class AssetsDistribution:
     probabilities: Optional[Union[np.ndarray, 'pd.Series']] = None
 
     def __post_init__(self):
-        # store original pandas inputs for index labels
         if _has_pandas:
             if isinstance(self.mu, pd.Series):
                 self._pd_mu = self.mu.copy()
@@ -83,10 +83,12 @@ class AssetsDistribution:
             if _has_pandas and isinstance(self.cov, pd.DataFrame):
                 self.cov = self.cov.values if hasattr(self.cov, 'values') else self.cov
             self.N = self.mu.shape[0]
-        elif self.scenarios is not None and self.probabilities is not None:
+        elif self.scenarios is not None:
             if _has_pandas and isinstance(self.scenarios, pd.DataFrame):
                 self.scenarios = self.scenarios.values
-            if _has_pandas and isinstance(self.probabilities, pd.Series):
+            if self.probabilities is None:
+                self.probabilities = generate_uniform_probabilities(len(self.scenarios))
+            elif _has_pandas and isinstance(self.probabilities, pd.Series):
                 self.probabilities = self.probabilities.values
             self.T, self.N = self.scenarios.shape
         else:
@@ -325,7 +327,7 @@ class PortfolioWrapper(AssetsDistribution):
                 result = _pd.Series(result, index=self._asset_index)
             return result
         else:
-            returns = self.mu @ ef if self.mu is not None else self.scenarios @ self.probabilities
+            returns = self.mu @ ef if self.mu is not None else self.scenarios.T @ self.probabilities
             result = self._search_returns(lowerret, returns, ef)
             if getattr(self, '_pandas', False):
                 import pandas as _pd

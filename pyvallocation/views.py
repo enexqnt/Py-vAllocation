@@ -1,9 +1,10 @@
 # entropy_pooling and _dual_objective functions are adapted from fortituto-tech https://github.com/fortitudo-tech/fortitudo.tech
 
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-from scipy.optimize import minimize, Bounds
+from collections.abc import Sequence
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize, Bounds
 import warnings
 
 def entropy_pooling(
@@ -459,227 +460,277 @@ class FlexibleViewsProcessor:
         """Return *(posterior mean, posterior covariance)*."""
         return self.posterior_returns, self.posterior_cov
 
-    
+
 class BlackLittermanProcessor:
     """
-    Canonical Black–Litterman model.
-
-    Combines a prior (user-specified or market-implied returns) with views
-    to yield posterior mean and return covariance that fully reflects
-    both sample uncertainty and view uncertainty.
-
-    Implicit assumptions:
-      - CAPM equilibrium when using `market_weights` to imply pi (π=δΣw).
-      - Normal returns when sampling from (mean, cov).
-      - View uncertainty proportional to τΣ unless overridden or Idzorek.
-
-    Methods adhere strictly to the Bayesian derivation:
-      posterior mean μ* = π + τΣPᵀ(PτΣPᵀ+Ω)⁻¹(Q−Pπ)
-      posterior cov Σ* = Σ + [τΣ − τΣPᵀ(PτΣPᵀ+Ω)⁻¹PτΣ]
+    Black–Litterman engine supporting **equality mean views** (absolute or
+    relative).  Inequality views (>, >=, <, <=) are *not* handled.
 
     Parameters
     ----------
-    prior_mean : array-like (N,), optional
-        Prior mean returns π; used if `pi` and `market_weights` are None.
-    prior_cov : array-like (N×N)
-        Covariance Σ of returns.
-    market_weights : array-like (N,), optional
-        To compute π = δΣw (CAPM assumption).
-    risk_aversion : float, default=1.0
-        δ in π = δΣw.
-    tau : float, default=0.05
-        Scalar on prior uncertainty τ.
-    pi : array-like (N,), optional
-        Direct user-specified π, overrides `prior_mean` and `market_weights`.
-    absolute_views : dict or array-like (N,), optional
-        Dict {asset: view} or full-vector Q of length N.
-    relative_views : dict, optional
-        {(asset_i, asset_j): view_diff}.
-    view_confidences : dict or list, optional
-        If dict: map view-key to confidence c∈[0,1].
-        If list: list of length K in view order.
-    omega : 'idzorek', array-like (K,), or (K×K), optional
-        If 'idzorek', build Ω via Idzorek's formula from confidences.
-        If None, set Ω = τ diag(PΣPᵀ); if array, diag or full matrix.
-    verbose : bool, default=False
-        Print implicit assumptions and processing steps.
+    prior_cov : (N, N) array-like
+        Prior (sample- or market-implied) covariance Σ.
+    prior_mean, market_weights, pi
+        Mutually exclusive ways to provide the prior mean π.  Exactly one
+        of them must be supplied (see Notes below).
+    risk_aversion : float, default 1.0
+        δ in π = δ Σ w when *market_weights* is supplied.  
+        **Must be positive.**
+    tau : float, default 0.05
+        Prior shrinkage parameter τ.
+    idzorek_use_tau : bool, default True
+        When constructing Ω from Idzorek confidences, decide whether to use
+        τ Σ (True — original He & Litterman convention) or Σ (False — the
+        alternative sometimes found in practice).
+    mean_views : dict, optional
+        Equality mean views in *FlexibleViewsProcessor* grammar:
+        ``{"Asset": 0.02, ("A", "B"): 0.00}``.
+    view_confidences : float | list | dict, optional
+        Confidence c ∈ (0, 1] per view (used only if Ω = "idzorek").
+    omega : {"idzorek"} | array-like, optional
+        View-covariance matrix Ω.  If omitted, Ω = τ·diag(P Σ Pᵀ).
+    verbose : bool, default False
+        Print processing steps.
 
-    Raises
-    ------
-    ValueError
-        For missing or mismatched inputs.
-    RuntimeError
-        If underlying solver fails.
+    Notes
+    -----
+    The prior mean π can be supplied in three mutually exclusive ways:
+
+    1. **pi**              – direct numeric vector.
+    2. **market_weights**  – CAPM equilibrium π = δ Σ w.
+    3. **prior_mean**      – treat the sample mean as π.
+
+    Methods
+    -------
+    get_posterior() -> (posterior_mean, posterior_cov)
+        Return posterior quantities as NumPy arrays or Pandas objects,
+        matching the type of the inputs.
     """
+
+    # ------------------------------------------------------------------ #
+    # public helper
+    # ------------------------------------------------------------------ #
+    def get_posterior(
+        self,
+    ) -> Tuple[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.DataFrame]]:
+        """Return *(posterior_mean, posterior_covariance)*."""
+        return self._posterior_mean, self._posterior_cov
+
+    # ------------------------------------------------------------------ #
+    # constructor
+    # ------------------------------------------------------------------ #
     def __init__(
         self,
-        prior_mean:       Optional[Union[np.ndarray, pd.Series]] = None,
-        prior_cov:        Optional[Union[np.ndarray, pd.DataFrame]] = None,
-        market_weights:   Optional[Union[np.ndarray, pd.Series]] = None,
-        risk_aversion:    float   = 1.0,
-        tau:              float   = 0.05,
-        pi:               Optional[Union[np.ndarray, pd.Series]] = None,
-        absolute_views:   Any     = None,
-        relative_views:   Optional[Dict] = None,
-        view_confidences: Any     = None,
-        omega:            Any     = None,
-        verbose:          bool    = False
-    ):
+        *,
+        prior_cov: Union[np.ndarray, pd.DataFrame],
+        prior_mean: Optional[Union[np.ndarray, pd.Series]] = None,
+        market_weights: Optional[Union[np.ndarray, pd.Series]] = None,
+        risk_aversion: float = 1.0,
+        tau: float = 0.05,
+        idzorek_use_tau: bool = True,
+        pi: Optional[Union[np.ndarray, pd.Series]] = None,
+        mean_views: Optional[Dict[Any, Any]] = None,
+        view_confidences: Any = None,
+        omega: Any = None,
+        verbose: bool = False,
+    ) -> None:
         import warnings
-        # 1) Validate and set Σ
-        if prior_cov is None:
-            raise ValueError("`prior_cov` is required.")
-        # detect pandas input for output type
-        self._use_pandas = isinstance(prior_cov, pd.DataFrame)
-        if self._use_pandas:
-            cov = prior_cov.values
-            self.assets = list(prior_cov.index)
-        else:
-            cov = np.atleast_2d(np.asarray(prior_cov, float))
-            self.assets = list(range(cov.shape[0]))
-        N = cov.shape[0]
-        if cov.shape != (N, N):
-            raise ValueError("`prior_cov` must be square N×N.")
-        if not np.allclose(cov, cov.T, atol=1e-8):
-            warnings.warn("`prior_cov` not symmetric; symmetrizing.")
-            cov = (cov + cov.T) / 2
-        self.Sigma = cov
 
-        # 2) Determine π
-        self._pi_source = None
+        # ---------- Σ (prior covariance) --------------------------------
+        self._is_pandas: bool = isinstance(prior_cov, pd.DataFrame)
+        self._assets: List[Union[str, int]] = (
+            list(prior_cov.index)
+            if self._is_pandas
+            else list(range(np.asarray(prior_cov).shape[0]))
+        )
+        self._sigma: np.ndarray = np.asarray(prior_cov, dtype=float)
+        n_assets: int = self._sigma.shape[0]
+
+        if self._sigma.shape != (n_assets, n_assets):
+            raise ValueError("prior_cov must be square (N, N).")
+        if not np.allclose(self._sigma, self._sigma.T, atol=1e-8):
+            warnings.warn("prior_cov not symmetric; symmetrising.")
+            self._sigma = 0.5 * (self._sigma + self._sigma.T)
+
+        # ---------- π (prior mean) --------------------------------------
+        if risk_aversion <= 0.0:
+            raise ValueError("risk_aversion must be positive.")
+        self._tau: float = float(tau)
+
         if pi is not None:
-            pi_arr = np.asarray(pi, float).ravel()
-            if pi_arr.size != N:
-                raise ValueError("`pi` must have length N.")
-            self.pi = pi_arr.reshape(-1, 1)
-            self._pi_source = 'user'
-            if verbose: print("[BL] Using user-supplied π.")
+            self._pi = np.asarray(pi, dtype=float).reshape(-1, 1)
+            src = "user π"
         elif market_weights is not None:
-            w = np.asarray(market_weights, float).ravel()
-            if w.size != N:
-                raise ValueError("`market_weights` must have length N.")
-            w = w / w.sum()
-            self.pi = risk_aversion * cov.dot(w.reshape(-1, 1))
-            self._pi_source = 'market'
-            if verbose: print("[BL] Implied π = δΣw (CAPM).")
+            weights = np.asarray(market_weights, dtype=float).ravel()
+            if weights.size != n_assets:
+                raise ValueError("market_weights length mismatch.")
+            weights /= weights.sum()
+            self._pi = risk_aversion * self._sigma @ weights.reshape(-1, 1)
+            src = "δ Σ w"
         elif prior_mean is not None:
-            mu = (prior_mean.values
-                  if isinstance(prior_mean, pd.Series)
-                  else np.asarray(prior_mean, float).ravel())
-            if mu.size != N:
-                raise ValueError("`prior_mean` must have length N.")
-            self.pi = mu.reshape(-1, 1)
-            self._pi_source = 'prior_mean'
-            if verbose: print("[BL] Using `prior_mean` as π.")
+            self._pi = np.asarray(prior_mean, dtype=float).reshape(-1, 1)
+            src = "prior_mean"
         else:
-            raise ValueError("No source for π provided.")
+            raise ValueError("Provide exactly one of pi, market_weights or prior_mean.")
+        if verbose:
+            print(f"[BL] π source: {src}.")
 
-        self.tau   = float(tau)
-        self.delta = float(risk_aversion)
+        # ---------- views P, Q ------------------------------------------
+        self._p, self._q, view_keys = self._build_views(mean_views or {})
+        self._k: int = self._p.shape[0]
+        if verbose:
+            print(f"[BL] Built P {self._p.shape}, Q {self._q.shape}.")
 
-        # 3) Parse absolute_views into dict
-        if absolute_views is None:
-            abs_dict = {}
-        elif isinstance(absolute_views, dict):
-            abs_dict = absolute_views.copy()
-        else:
-            arr = np.asarray(absolute_views, float).ravel()
-            if arr.size != N:
-                raise ValueError("`absolute_views` must have length N.")
-            abs_dict = {i: arr[i] for i in range(N)}
-            if verbose: print("[BL] Full-vector absolute views.")
+        # ---------- confidences & Ω -------------------------------------
+        self._conf: Optional[np.ndarray] = self._parse_conf(view_confidences, view_keys)
+        self._idzorek_use_tau = bool(idzorek_use_tau)
+        self._omega: np.ndarray = self._build_omega(omega, verbose)
 
-        # 4) Parse relative_views
-        rel_dict = relative_views or {}
+        # ---------- posterior -------------------------------------------
+        self._posterior_mean, self._posterior_cov = self._compute_posterior(verbose)
+        if self._is_pandas:
+            self._posterior_mean = pd.Series(self._posterior_mean, index=self._assets)
+            self._posterior_cov = pd.DataFrame(
+                self._posterior_cov, index=self._assets, columns=self._assets
+            )
 
-        # 5) Build P and Q
-        P_rows, Q_vals = [], []
-        for asset, val in abs_dict.items():
-            idx = (self.assets.index(asset)
-                   if isinstance(asset, str) else asset)
-            row = np.zeros(N); row[idx] = 1.0
-            P_rows.append(row); Q_vals.append(float(val))
-        for (a, b), val in rel_dict.items():
-            i = (self.assets.index(a)
-                 if isinstance(a, str) else a)
-            j = (self.assets.index(b)
-                 if isinstance(b, str) else b)
-            row = np.zeros(N); row[i] = 1.0; row[j] = -1.0
-            P_rows.append(row); Q_vals.append(float(val))
-        self.P = np.vstack(P_rows) if P_rows else np.zeros((0, N))
-        self.Q = np.array(Q_vals).reshape(-1, 1) if Q_vals else np.zeros((0, 1))
-        self.K = self.P.shape[0]
-        if verbose: print(f"[BL] Built P {self.P.shape}, Q {self.Q.shape}.")
+    # ------------------------------------------------------------------ #
+    # internal utilities
+    # ------------------------------------------------------------------ #
+    # asset index lookup
+    def _asset_index(self, label: Union[str, int]) -> int:
+        if label in self._assets:
+            return self._assets.index(label)
+        if isinstance(label, str) and label.isdigit():
+            idx = int(label)
+            if idx < len(self._assets):
+                return idx
+        raise ValueError(f"Unknown asset label '{label}'.")
 
-        # 6) Parse confidences
-        if view_confidences is None:
-            self.conf = None
-        elif isinstance(view_confidences, dict):
-            keys = list(abs_dict.keys()) + list(rel_dict.keys())
-            self.conf = np.array([
-                float(view_confidences.get(k, 1.0)) for k in keys
-            ])
-        else:
-            arr = np.asarray(view_confidences, float).ravel()
-            if arr.size != self.K:
-                raise ValueError("`view_confidences` must match number of views.")
-            self.conf = arr
-        if self.conf is not None and verbose:
-            print(f"[BL] View confidences: {self.conf}.")
+    # ---- views --------------------------------------------------------
+    def _build_views(
+        self, mean_views: Dict[Any, Any]
+    ) -> Tuple[np.ndarray, np.ndarray, List[Any]]:
+        rows: List[np.ndarray] = []
+        targets: List[float] = []
+        keys: List[Any] = []
+        n = len(self._assets)
 
-        # 7) Build Omega
-        if isinstance(omega, str) and omega.lower() == 'idzorek':
-            if self.conf is None:
-                raise ValueError("Idzorek requires view_confidences.")
-            omegas = []
-            for k in range(self.K):
-                c = np.clip(self.conf[k], 1e-6, 1-1e-6)
-                factor = (1 - c) / c
-                Pi_k = self.P[k:k+1, :]
-                var_k = Pi_k.dot(self.tau * cov).dot(Pi_k.T).item()
-                omegas.append(self.tau * factor * var_k)
-            self.Omega = np.diag(omegas)
-            if verbose: print("[BL] Ω from Idzorek formula.")
-        elif omega is None:
-            diag = np.diag(self.P.dot(self.tau * cov).dot(self.P.T))
-            self.Omega = np.diag(diag)
-            if verbose: print("[BL] Ω = τ diag(PΣPᵀ).")
-        else:
-            Om = np.asarray(omega, float)
-            if Om.ndim == 1 and Om.size == self.K:
-                self.Omega = np.diag(Om)
-            elif Om.shape == (self.K, self.K):
-                self.Omega = Om
+        for key, value in mean_views.items():
+            # Accept either scalar or single-element tuple/list
+            if isinstance(value, Sequence):
+                if len(value) != 1:
+                    raise ValueError("Inequality views not supported – use scalar value.")
+                target = float(value[0])
             else:
-                raise ValueError("omega must be 'idzorek', length-K, or K×K.")
-            if verbose: print("[BL] Using user-provided Ω.")
+                target = float(value)
 
-        # 8) Compute posterior
-        mu_post, cov_post = self._compute_posterior(verbose)
-        # wrap outputs according to original input
-        if self._use_pandas:
-            self.posterior_returns = pd.Series(mu_post, index=self.assets)
-            self.posterior_cov = pd.DataFrame(cov_post, index=self.assets, columns=self.assets)
+            if isinstance(key, tuple):  # relative view μ_i − μ_j = target
+                asset_i, asset_j = key
+                i_idx, j_idx = self._asset_index(asset_i), self._asset_index(asset_j)
+                row = np.zeros(n)
+                row[i_idx], row[j_idx] = 1.0, -1.0
+            else:  # absolute view μ_i = target
+                idx = self._asset_index(key)
+                row = np.zeros(n)
+                row[idx] = 1.0
+
+            rows.append(row)
+            targets.append(target)
+            keys.append(key)
+
+        p_mat = np.vstack(rows) if rows else np.zeros((0, n))
+        q_vec = (
+            np.array(targets, dtype=float).reshape(-1, 1) if targets else np.zeros((0, 1))
+        )
+        return p_mat, q_vec, keys
+
+    # ---- confidences --------------------------------------------------
+    @staticmethod
+    def _parse_conf(conf: Any, keys: List[Any]) -> Optional[np.ndarray]:
+        if conf is None:
+            return None
+        if isinstance(conf, (int, float)):
+            return np.full(len(keys), float(conf))
+        if isinstance(conf, dict):
+            return np.array([float(conf.get(k, 1.0)) for k in keys])
+        arr = np.asarray(conf, dtype=float).ravel()
+        if arr.size != len(keys):
+            raise ValueError("view_confidences length mismatch.")
+        return arr
+
+    # ---- Ω construction ----------------------------------------------
+    def _build_omega(self, omega: Any, verbose: bool) -> np.ndarray:
+        if self._k == 0:  # no views → empty Ω
+            return np.zeros((0, 0))
+
+        tau_sigma = self._tau * self._sigma
+
+        # -- Idzorek -----------------------------------------------------
+        if isinstance(omega, str) and omega.lower() == "idzorek":
+            if self._conf is None:
+                raise ValueError("Idzorek requires view_confidences.")
+            diag = []
+            base_sigma = tau_sigma if self._idzorek_use_tau else self._sigma
+            for i, conf in enumerate(self._conf):
+                p_i = self._p[i : i + 1]  # (1, N)
+                var_i = (p_i @ base_sigma @ p_i.T).item()  # σ²(view)
+                c = np.clip(conf, 1e-6, 1.0 - 1e-6)
+                factor = (1.0 - c) / c
+                diag.append(factor * var_i)
+            omega_mat = np.diag(diag)
+            if verbose:
+                suffix = "τ Σ" if self._idzorek_use_tau else "Σ"
+                print(f"[BL] Ω from Idzorek confidences (base = {suffix}).")
+
+        # -- default diagonal -------------------------------------------
+        elif omega is None:
+            omega_mat = np.diag(np.diag(self._p @ tau_sigma @ self._p.T))
+            if verbose:
+                print("[BL] Ω = τ·diag(P Σ Pᵀ).")
+
+        # -- user-supplied ----------------------------------------------
         else:
-            self.posterior_returns = mu_post
-            self.posterior_cov = cov_post
+            omega_arr = np.asarray(omega, dtype=float)
+            if omega_arr.ndim == 1 and omega_arr.size == self._k:
+                omega_mat = np.diag(omega_arr)
+            elif omega_arr.shape == (self._k, self._k):
+                omega_mat = omega_arr
+            else:
+                raise ValueError(
+                    "omega must be 'idzorek', length-K vector, or K×K matrix."
+                )
+            if verbose:
+                print("[BL] Using user-provided Ω.")
 
-    def _compute_posterior(self, verbose: bool) -> Tuple[np.ndarray, np.ndarray]:
-        tS = self.tau * self.Sigma
-        if self.K == 0:
-            if verbose: print("[BL] No views: posterior mean = π.")
-            mu_post = self.pi.flatten()
-            cov_post = self.Sigma
-        else:
-            A = self.P.dot(tS).dot(self.P.T) + self.Omega
-            invA = np.linalg.inv(A)
-            diff = self.Q - self.P.dot(self.pi)
-            mu_post = (self.pi + tS.dot(self.P.T).dot(invA).dot(diff)).flatten()
-            var_mean = tS - tS.dot(self.P.T).dot(invA).dot(self.P.dot(tS))
-            cov_post = self.Sigma + var_mean
-            if verbose: print("[BL] Posterior mean and covariance computed.")
-        return mu_post, cov_post
+        return omega_mat
 
-    def get_posterior(self) -> Tuple[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.DataFrame]]:
-        """Return (posterior_returns, posterior_cov)."""
-        return self.posterior_returns, self.posterior_cov
+    # ---- posterior ----------------------------------------------------
+    def _compute_posterior(
+        self, verbose: bool
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        tau_sigma = self._tau * self._sigma
+
+        if self._k == 0:  # no views: posterior = prior
+            if verbose:
+                print("[BL] No views → posterior = prior.")
+            return self._pi.flatten(), self._sigma
+
+        # P τ Σ Pᵀ + Ω
+        mat_a = self._p @ tau_sigma @ self._p.T + self._omega  # (K, K)
+
+        # Solve rather than invert for numerical stability
+        rhs = self._q - self._p @ self._pi  # (K, 1)
+        mean_shift = np.linalg.solve(mat_a, rhs)  # (K, 1)
+
+        posterior_mean = (
+            self._pi + tau_sigma @ self._p.T @ mean_shift
+        ).flatten()
+
+        middle = tau_sigma @ self._p.T @ np.linalg.solve(mat_a, self._p @ tau_sigma)
+        posterior_cov = self._sigma + tau_sigma - middle
+        posterior_cov = 0.5 * (posterior_cov + posterior_cov.T)  # enforce symmetry
+
+        if verbose:
+            print("[BL] Posterior mean and covariance computed.")
+        return posterior_mean, posterior_cov
