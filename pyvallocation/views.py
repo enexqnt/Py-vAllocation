@@ -109,14 +109,11 @@ class FlexibleViewsProcessor:
         View payloads.  A value can be either ``x`` (equality) or a tuple
         ``('>=', x)``, ``('<', x)`` etc.
         *Keys* are asset names / indices (or pairs thereof for correlations).
-    view_confidences : float, array-like or dict, optional
-        Global confidence level *c* ∈ [0, 1] (scalar) or object averaged down
-        to one scalar.
     sequential : bool, default *False*
         If *True*, apply view blocks sequentially (iterated EP).
     """
 
-    def __init__( 
+    def __init__(
         self,
         prior_returns: Optional[Union[np.ndarray, pd.DataFrame]] = None,
         prior_probabilities: Optional[Union[np.ndarray, pd.Series]] = None,
@@ -132,7 +129,6 @@ class FlexibleViewsProcessor:
         vol_views: Any = None,
         corr_views: Any = None,
         skew_views: Any = None,
-        view_confidences: Any = None,
         sequential: bool = False,
     ):
         if prior_returns is not None:
@@ -186,7 +182,7 @@ class FlexibleViewsProcessor:
             # Add a small regularization to the covariance matrix
             # to ensure it's positive definite and prevent numerical issues
             # with multivariate_normal.
-            cov = cov + np.eye(N) * 1e-6 
+            cov = cov + np.eye(N) * 1e-6
 
             rng = np.random.default_rng(random_state)
 
@@ -217,16 +213,6 @@ class FlexibleViewsProcessor:
         var0 = np.diag(cov0)
 
         self.mu0, self.var0 = mu0, var0
-
-        if view_confidences is None:
-            self.c_global = 1.0
-        elif isinstance(view_confidences, (int, float)):
-            self.c_global = float(view_confidences)
-        elif isinstance(view_confidences, dict):
-            self.c_global = float(np.mean(list(view_confidences.values())))
-        else:
-            self.c_global = float(np.asarray(view_confidences, float).mean())
-        self.c_global = np.clip(self.c_global, 0.0, 1.0)
 
         def _vec_to_dict(vec_like, name):
             if vec_like is None:
@@ -290,10 +276,11 @@ class FlexibleViewsProcessor:
     def _asset_idx(self, key) -> int:
         """
         Return the position of *key* in ``self.assets``, accepting either
-        the exact label or a numeric string that can be cast to int."""
+        the exact label or a numeric string that can be cast to int.
+        """
         if key in self.assets:
             return self.assets.index(key)
-        if isinstance(key, str) and key.isdigit():         # "0", "1", …
+        if isinstance(key, str) and key.isdigit():  # "0", "1", …
             k_int = int(key)
             if k_int in self.assets:
                 return self.assets.index(k_int)
@@ -320,7 +307,7 @@ class FlexibleViewsProcessor:
             elif op in ("<=", "<"):
                 G_ineq.append(row)
                 h_ineq.append(raw)
-            else:                           # "<=" or "<"
+            else:  # "<=" or "<"
                 G_ineq.append(-row)
                 h_ineq.append(-raw)
 
@@ -332,8 +319,8 @@ class FlexibleViewsProcessor:
                 # ------------ NEW: relative view (μ_A – μ_B ▷ tgt) -------- #
                 if isinstance(key, tuple) and len(key) == 2:
                     a1, a2 = key
-                    i, j   = self._asset_idx(a1), self._asset_idx(a2)
-                    row    = R[:, i] - R[:, j]          # (S,)
+                    i, j = self._asset_idx(a1), self._asset_idx(a2)
+                    row = R[:, i] - R[:, j]  # (S,)
                     add(op, row, tgt)
                 # ------------ existing absolute view ---------------------- #
                 else:
@@ -345,7 +332,7 @@ class FlexibleViewsProcessor:
             for asset, vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
                 idx = self._asset_idx(asset)
-                raw = tgt**2 + mu[idx] ** 2      # convert σ → E[R²]
+                raw = tgt**2 + mu[idx] ** 2  # convert σ → E[R²]
                 add(op, R[:, idx] ** 2, raw)
 
         # ---- skewness (3rd moment) ................................... #
@@ -375,8 +362,8 @@ class FlexibleViewsProcessor:
     # ................................................................. #
     def _compute_posterior_probabilities(self) -> np.ndarray:
         """
-        EP core: handles “simultaneous” vs “iterated” processing and
-        blends the outcome with the prior via the global confidence *c*.
+        EP core: handles “simultaneous” vs “iterated” processing without
+        confidence blending (full confidence in views).
         """
         R, p0 = self.R, self.p0
         mu_cur, var_cur = self.mu0.copy(), self.var0.copy()
@@ -399,10 +386,10 @@ class FlexibleViewsProcessor:
 
         # ---- a) no views ............................................. #
         if not any((self.mean_views, self.vol_views, self.skew_views, self.corr_views)):
-            q_views = p0
+            return p0
 
         # ---- b) sequential (iterated) EP ............................. #
-        elif self.sequential:
+        if self.sequential:
             q_last = p0
             for mtype, vd in [
                 ("mean", self.mean_views),
@@ -411,9 +398,7 @@ class FlexibleViewsProcessor:
                 ("corr", self.corr_views),
             ]:
                 if vd:
-                    Aeq, beq, G, h = self._build_constraints(
-                        vd, mtype, mu_cur, var_cur
-                    )
+                    Aeq, beq, G, h = self._build_constraints(vd, mtype, mu_cur, var_cur)
                     q_last = do_ep(q_last, Aeq, beq, G, h)
 
                     # update running moments
@@ -421,31 +406,24 @@ class FlexibleViewsProcessor:
                     var_cur = ((R - mu_cur) ** 2).T @ q_last
                     var_cur = var_cur.flatten()
 
-            q_views = q_last
+            return q_last
 
         # ---- c) one-shot simultaneous EP ............................. #
-        else:
-            A_all, b_all, G_all, h_all = [], [], [], []
-            for mtype, vd in [
-                ("mean", self.mean_views),
-                ("vol", self.vol_views),
-                ("skew", self.skew_views),
-                ("corr", self.corr_views),
-            ]:
-                if vd:
-                    Aeq, beq, G, h = self._build_constraints(
-                        vd, mtype, mu_cur, var_cur
-                    )
-                    A_all.extend(Aeq)
-                    b_all.extend(beq)
-                    G_all.extend(G)
-                    h_all.extend(h)
+        A_all, b_all, G_all, h_all = [], [], [], []
+        for mtype, vd in [
+            ("mean", self.mean_views),
+            ("vol", self.vol_views),
+            ("skew", self.skew_views),
+            ("corr", self.corr_views),
+        ]:
+            if vd:
+                Aeq, beq, G, h = self._build_constraints(vd, mtype, mu_cur, var_cur)
+                A_all.extend(Aeq)
+                b_all.extend(beq)
+                G_all.extend(G)
+                h_all.extend(h)
 
-            q_views = do_ep(p0, A_all, b_all, G_all, h_all)
-
-        # ---- d) blend with prior using c ∈ [0,1] ..................... #
-        q = (1.0 - self.c_global) * p0 + self.c_global * q_views
-        return q
+        return do_ep(p0, A_all, b_all, G_all, h_all)
 
     # ====================================================================== #
     #  public helpers
