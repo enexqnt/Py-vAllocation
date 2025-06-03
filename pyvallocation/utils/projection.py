@@ -10,7 +10,6 @@ def convert_scenarios_compound_to_simple(scenarios):
 def convert_scenarios_simple_to_compound(scenarios):
     return np.log(1+scenarios)
 
-# ---- helpers ---------------------------------------------------------------
 def _to_numpy(x):
     """Return the underlying ndarray (no copy for ndarray)."""
     return x.to_numpy() if isinstance(x, (pd.Series, pd.DataFrame)) else np.asarray(x)
@@ -25,7 +24,6 @@ def _wrap_matrix(x_np, template):
     return (pd.DataFrame(x_np, index=template.index, columns=template.columns)
             if isinstance(template, pd.DataFrame) else x_np)
 
-# ---- log  →  simple --------------------------------------------------------
 def log2simple(mu_g, cov_g):
     """μ,Σ of log-returns → μ,Σ of simple returns (vectorised, pandas-aware)."""
     mu_g_np  = _to_numpy(mu_g)
@@ -40,12 +38,9 @@ def log2simple(mu_g, cov_g):
         - exp_mu[:, None] * exp_mu
     )
 
-    # wrap back in pandas if needed
     return (_wrap_vector(mu_r_np, mu_g),
             _wrap_matrix(cov_r_np, cov_g))
 
-
-# ---- simple  →  log --------------------------------------------------------
 def simple2log(mu_r, cov_r):
     """μ,Σ of simple returns → μ,Σ of log-returns (log-normal assumption)."""
     mu_r_np  = _to_numpy(mu_r)
@@ -127,7 +122,7 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
     is_series   = isinstance(R, pd.Series)
     is_dataframe = isinstance(R, pd.DataFrame)
     R_np = _to_numpy(R)
-    idx = np.random.choice(R_np.shape[0], size=(n_simulations, investment_horizon), p=p)
+    idx = np.random.choice(R_np.shape[0], size=(n_simulations, investment_horizon), p=p/p.sum())
     scenario_sums = R_np[idx].sum(axis=1)
 
     if is_series:

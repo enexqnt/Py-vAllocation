@@ -5,86 +5,77 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, Bounds
-import warnings
+
+def _entropy_pooling_dual_objective(
+    lagrange_multipliers: np.ndarray, 
+    log_p_col: np.ndarray, 
+    lhs: np.ndarray, 
+    rhs_squeezed: np.ndarray
+) -> Tuple[float, np.ndarray]:
+    
+    lagrange_multipliers_col = lagrange_multipliers[:, np.newaxis]
+    
+    x = np.exp(log_p_col - 1.0 - lhs.T @ lagrange_multipliers_col)
+    
+    objective_value = np.sum(x) + lagrange_multipliers @ rhs_squeezed
+    gradient_vector = rhs_squeezed - (lhs @ x).squeeze()
+    
+    return 1000.0 * objective_value, 1000.0 * gradient_vector
 
 def entropy_pooling(
-        p: np.ndarray, A: np.ndarray, b: np.ndarray, G: Optional[np.ndarray] = None,
-        h: Optional[np.ndarray] = None, method: Optional[str] = None) -> np.ndarray:
-    """Compute Entropy Pooling posterior probabilities.
+    p: np.ndarray, 
+    A: np.ndarray, 
+    b: np.ndarray, 
+    G: Optional[np.ndarray] = None,
+    h: Optional[np.ndarray] = None, 
+    method: Optional[str] = None
+) -> np.ndarray:
 
-    Args:
-        p: Prior probability vector with shape (S, 1).
-        A: Equality constraint matrix with shape (M, S).
-        b: Equality constraint vector with shape (M, 1).
-        G: Inequality constraint matrix with shape (N, S), optional.
-        h: Inequality constraint vector with shape (N, 1), optional.
-        method: Optimization method: {'TNC', 'L-BFGS-B'}. Default 'TNC'.
+    opt_method = method or 'TNC'
+    if opt_method not in ('TNC', 'L-BFGS-B'):
+        raise ValueError(f"Method {opt_method} not supported. Choose 'TNC' or 'L-BFGS-B'.")
 
-    Returns:
-        Posterior probability vector with shape (S, 1).
-    """
-    if method is None:
-        method = 'TNC'
-    elif method not in ('TNC', 'L-BFGS-B'):
-        raise ValueError(f'Method {method} not supported. Choose TNC or L-BFGS-B.')
+    p_col = p.reshape(-1, 1)
+    b_col = b.reshape(-1, 1)
 
-    len_b = len(b)
+    num_equalities = b_col.shape[0]
+
     if G is None or h is None:
-        lhs = A
-        rhs = b
-        bounds = Bounds([-np.inf] * len_b, [np.inf] * len_b)
+        current_lhs = A
+        current_rhs_stacked = b_col
+        bounds_lower = [-np.inf] * num_equalities
+        bounds_upper = [np.inf] * num_equalities
     else:
-        lhs = np.vstack((A, G))
-        rhs = np.vstack((b, h))
-        len_h = len(h)
-        bounds = Bounds([-np.inf] * len_b + [0] * len_h, [np.inf] * (len_b + len_h))
-
-    log_p = np.log(p + 1e-12) # Add a small epsilon to prevent log(0)
-    dual_solution = minimize(
-        _dual_objective, x0=np.zeros(lhs.shape[0]), args=(log_p, lhs, rhs),
-        method=method, jac=True, bounds=bounds, options={'maxfun': 10000})
+        h_col = h.reshape(-1, 1)
+        num_inequalities = h_col.shape[0]
+        current_lhs = np.vstack((A, G))
+        current_rhs_stacked = np.vstack((b_col, h_col))
+        bounds_lower = [-np.inf] * num_equalities + [0.0] * num_inequalities
+        bounds_upper = [np.inf] * (num_equalities + num_inequalities)
     
-    # Check for numerical stability of the dual solution
-    if not dual_solution.success or np.any(np.isnan(dual_solution.x)) or np.any(np.isinf(dual_solution.x)):
-        warnings.warn("Optimization for entropy pooling failed or returned unstable results. Returning prior probabilities.")
-        return p # Fallback to prior probabilities
+    log_p_col = np.log(p_col)
     
-    # Calculate q and clamp to avoid extreme values and ensure sum to 1
-    q = np.exp(log_p - 1 - lhs.T @ dual_solution.x[:, np.newaxis])
-    q = np.maximum(q, 1e-12) # Clamp probabilities to be at least a small positive number
-    q /= np.sum(q) # Re-normalize to ensure probabilities sum to 1
-    return q
-
-
-def _dual_objective(
-        lagrange_multipliers: np.ndarray, log_p: np.ndarray,
-        lhs: np.ndarray, rhs: np.ndarray) -> Tuple[float, np.ndarray]:
-    """Compute Entropy Pooling dual objective and gradient.
-
-    Args:
-        lagrange_multipliers: Lagrange multipliers with shape (M,) or (M + N,).
-        log_p: Log of prior probability vector with shape (S, 1).
-        lhs: Matrix with shape (M, S) or (M + N, S).
-        rhs: Vector with shape (M, 1) or (M + N, 1).
-
-    Returns:
-        Dual objective value and gradient.
-    """
-    lagrange_multipliers = lagrange_multipliers[:, np.newaxis]
+    initial_lagrange_multipliers = np.zeros(current_lhs.shape[0])
+    optimizer_bounds = Bounds(bounds_lower, bounds_upper)
     
-    # Clamp log_x to prevent overflow/underflow before np.exp
-    log_x = np.clip(log_p - 1 - lhs.T @ lagrange_multipliers, -700, 700) 
-    x = np.exp(log_x)
-    
-    # Add a small epsilon to x to prevent issues if x becomes exactly zero
-    x = np.maximum(x, 1e-12) 
+    solution = minimize(
+        _entropy_pooling_dual_objective, 
+        x0=initial_lagrange_multipliers,
+        args=(log_p_col, current_lhs, current_rhs_stacked.squeeze()),
+        method=opt_method, 
+        jac=True, 
+        bounds=optimizer_bounds,
+        options={'maxiter': 1000, 'maxfun': 10000}
+    )
 
-    gradient = rhs - lhs @ x
-    objective = x.T @ (log_x - log_p) - lagrange_multipliers.T @ gradient
-    return -1000 * objective.item(), 1000 * gradient.flatten()
+    optimal_lagrange_multipliers_col = solution.x[:, np.newaxis]
+    
+    q_posterior = np.exp(log_p_col - 1.0 - current_lhs.T @ optimal_lagrange_multipliers_col)
+    
+    return q_posterior
 
 class FlexibleViewsProcessor:
-    r"""
+    """
     Generic entropy-pooling engine supporting views on means, vols, skews and
     correlations – all at once (simultaneous EP) or block-wise (iterated EP).
 
@@ -179,9 +170,6 @@ class FlexibleViewsProcessor:
 
             N = mu.size
 
-            # Add a small regularization to the covariance matrix
-            # to ensure it's positive definite and prevent numerical issues
-            # with multivariate_normal.
             cov = cov + np.eye(N) * 1e-6
 
             rng = np.random.default_rng(random_state)
@@ -208,7 +196,6 @@ class FlexibleViewsProcessor:
         self.p0 = p0
 
         mu0 = (R.T @ p0).flatten()
-        # Use np.cov for more robust covariance calculation
         cov0 = np.cov(R.T, aweights=p0.flatten())
         var0 = np.diag(cov0)
 
@@ -235,7 +222,6 @@ class FlexibleViewsProcessor:
 
         q = self.posterior_probabilities
         mu_post = (R.T @ q).flatten()
-        # Use np.cov for more robust covariance calculation
         cov_post = np.cov(R.T, aweights=q.flatten())
 
         if self._use_pandas:
@@ -247,9 +233,6 @@ class FlexibleViewsProcessor:
             self.posterior_returns = mu_post
             self.posterior_cov = cov_post
 
-    # ====================================================================== #
-    #  private helpers
-    # ====================================================================== #
     @staticmethod
     def _parse_view(v: Any) -> Tuple[str, float]:
         r"""
@@ -307,35 +290,30 @@ class FlexibleViewsProcessor:
             elif op in ("<=", "<"):
                 G_ineq.append(row)
                 h_ineq.append(raw)
-            else:  # "<=" or "<"
+            else:  
                 G_ineq.append(-row)
                 h_ineq.append(-raw)
 
-        # ---- mean -------------------------------------------------------- #
         if moment_type == "mean":
             for key, vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
 
-                # ------------ NEW: relative view (μ_A – μ_B ▷ tgt) -------- #
                 if isinstance(key, tuple) and len(key) == 2:
                     a1, a2 = key
                     i, j = self._asset_idx(a1), self._asset_idx(a2)
                     row = R[:, i] - R[:, j]  # (S,)
                     add(op, row, tgt)
-                # ------------ existing absolute view ---------------------- #
                 else:
                     idx = self._asset_idx(key)
                     add(op, R[:, idx], tgt)
 
-        # ---- volatility (2nd moment) ................................. #
         elif moment_type == "vol":
             for asset, vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
                 idx = self._asset_idx(asset)
-                raw = tgt**2 + mu[idx] ** 2  # convert σ → E[R²]
+                raw = tgt**2 + mu[idx] ** 2 
                 add(op, R[:, idx] ** 2, raw)
 
-        # ---- skewness (3rd moment) ................................... #
         elif moment_type == "skew":
             for asset, vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
@@ -344,7 +322,6 @@ class FlexibleViewsProcessor:
                 raw = tgt * s**3 + 3 * mu[idx] * var[idx] + mu[idx] ** 3
                 add(op, R[:, idx] ** 3, raw)
 
-        # ---- correlation (cross-moment) .............................. #
         elif moment_type == "corr":
             for (a1, a2), vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
@@ -359,7 +336,6 @@ class FlexibleViewsProcessor:
 
         return A_eq, b_eq, G_ineq, h_ineq
 
-    # ................................................................. #
     def _compute_posterior_probabilities(self) -> np.ndarray:
         """
         EP core: handles “simultaneous” vs “iterated” processing without
@@ -368,7 +344,6 @@ class FlexibleViewsProcessor:
         R, p0 = self.R, self.p0
         mu_cur, var_cur = self.mu0.copy(), self.var0.copy()
 
-        # helper running one single EP call ................................
         def do_ep(prior, A_eq, b_eq, G_ineq, h_ineq):
             S = R.shape[0]
             A_eq.append(np.ones(S))
@@ -384,11 +359,9 @@ class FlexibleViewsProcessor:
 
             return entropy_pooling(prior, A, b, G, h)  # (S × 1)
 
-        # ---- a) no views ............................................. #
         if not any((self.mean_views, self.vol_views, self.skew_views, self.corr_views)):
             return p0
 
-        # ---- b) sequential (iterated) EP ............................. #
         if self.sequential:
             q_last = p0
             for mtype, vd in [
@@ -401,14 +374,12 @@ class FlexibleViewsProcessor:
                     Aeq, beq, G, h = self._build_constraints(vd, mtype, mu_cur, var_cur)
                     q_last = do_ep(q_last, Aeq, beq, G, h)
 
-                    # update running moments
                     mu_cur = (R.T @ q_last).flatten()
                     var_cur = ((R - mu_cur) ** 2).T @ q_last
                     var_cur = var_cur.flatten()
 
             return q_last
 
-        # ---- c) one-shot simultaneous EP ............................. #
         A_all, b_all, G_all, h_all = [], [], [], []
         for mtype, vd in [
             ("mean", self.mean_views),
@@ -425,9 +396,6 @@ class FlexibleViewsProcessor:
 
         return do_ep(p0, A_all, b_all, G_all, h_all)
 
-    # ====================================================================== #
-    #  public helpers
-    # ====================================================================== #
     def get_posterior_probabilities(self) -> np.ndarray:
         """Return the (S × 1) posterior probability vector."""
         return self.posterior_probabilities.flatten()
@@ -530,7 +498,6 @@ class BlackLittermanProcessor:
             warnings.warn("prior_cov not symmetric; symmetrising.")
             self._sigma = 0.5 * (self._sigma + self._sigma.T)
 
-        # ---------- π (prior mean) --------------------------------------
         if risk_aversion <= 0.0:
             raise ValueError("risk_aversion must be positive.")
         self._tau: float = float(tau)
@@ -553,7 +520,6 @@ class BlackLittermanProcessor:
         if verbose:
             print(f"[BL] π source: {src}.")
 
-        # ---------- views P, Q ------------------------------------------
         self._p, self._q, view_keys = self._build_views(mean_views or {})
         self._k: int = self._p.shape[0]
         if verbose:
