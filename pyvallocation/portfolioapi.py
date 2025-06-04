@@ -361,25 +361,19 @@ class PortfolioWrapper(AssetsDistribution):
 
     @staticmethod
     def _search_risk(maxrisk, risk, ef) -> List[np.ndarray]:
-        import pandas as _pd
-        maxrisk_arr = np.atleast_1d(maxrisk)
-        indices = np.array([max(np.sum(risk <= tgt) - 1, 0) for tgt in maxrisk_arr])
-        if isinstance(ef, _pd.DataFrame):
-            arr = ef.values
-        else:
-            arr = ef
-        return [arr[:, idx] for idx in indices]
+        return PortfolioWrapper._select_by_threshold(maxrisk, risk, ef, lambda v, t: v <= t)
 
     @staticmethod
     def _search_returns(lowerret, returns, ef) -> List[np.ndarray]:
+        return PortfolioWrapper._select_by_threshold(lowerret, returns, ef, lambda v, t: t >= v)
+
+    @staticmethod
+    def _select_by_threshold(thresholds, values, ef, cmp) -> List[np.ndarray]:
         import pandas as _pd
-        lowerret_arr = np.atleast_1d(lowerret)
-        indices = np.array([max(np.sum(tgt >= returns) - 1, 0) for tgt in lowerret_arr])
-        if isinstance(ef, _pd.DataFrame):
-            arr = ef.values
-        else:
-            arr = ef
-        return [arr[:, idx] for idx in indices]
+        thresh_arr = np.atleast_1d(thresholds)
+        indices = np.array([max(np.sum(cmp(values, t)) - 1, 0) for t in thresh_arr])
+        data = ef.values if isinstance(ef, _pd.DataFrame) else ef
+        return [data[:, idx] for idx in indices]
 
     def get_minrisk_portfolio(self) -> np.ndarray:
         """

@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Optional, List
+
 import numpy as np
 
 if TYPE_CHECKING:
     import pandas as pd
 
-PANDAS_AVAILABLE = False
+HAVE_PANDAS = False
 try:
     import pandas as pd
-    PANDAS_AVAILABLE = True
+    HAVE_PANDAS = True
 except ImportError:
     pass
 
@@ -19,7 +22,7 @@ def pandas_to_numpy_returns(
     fill_na_method: str = 'ffill',
 ) -> np.ndarray:
     """Convert a pandas DataFrame of prices to a numpy array of returns."""
-    if not PANDAS_AVAILABLE:
+    if not HAVE_PANDAS:
         raise ImportError("pandas is required for `pandas_to_numpy_returns` function, but it is not installed.")
     if not isinstance(dataframe, pd.DataFrame):
         raise ValueError("`dataframe` must be a pandas DataFrame.")
@@ -51,25 +54,27 @@ def pandas_to_numpy_returns(
         if price_data.empty:
             raise ValueError("No numeric columns found for price data.")
 
-    if return_calculation_method == 'log':
-        returns = np.log(price_data / price_data.shift(1))
-    elif return_calculation_method == 'simple':
-        returns = price_data.pct_change(fill_method=None)
-    else:
-        raise ValueError("`return_calculation_method` must be 'log' or 'simple'.")
+    calc_map = {
+        'log': lambda x: np.log(x / x.shift(1)),
+        'simple': lambda x: x.pct_change(fill_method=None),
+    }
+    try:
+        returns = calc_map[return_calculation_method](price_data)
+    except KeyError as exc:
+        raise ValueError("`return_calculation_method` must be 'log' or 'simple'.") from exc
 
     returns = returns.iloc[1:]  # First row will be NaN due to shift/pct_change
 
-    if fill_na_method == 'ffill':
-        returns = returns.ffill()
-    elif fill_na_method == 'bfill':
-        returns = returns.bfill()
-    elif fill_na_method == 'zero':
-        returns = returns.fillna(0)
-    elif fill_na_method == 'drop':
-        returns = returns.dropna()
-    else:
-        raise ValueError("`fill_na_method` must be 'ffill', 'bfill', 'zero', or 'drop'.")
+    fill_map = {
+        'ffill': lambda x: x.ffill(),
+        'bfill': lambda x: x.bfill(),
+        'zero': lambda x: x.fillna(0),
+        'drop': lambda x: x.dropna(),
+    }
+    try:
+        returns = fill_map[fill_na_method](returns)
+    except KeyError as exc:
+        raise ValueError("`fill_na_method` must be 'ffill', 'bfill', 'zero', or 'drop'.") from exc
 
     returns = returns.fillna(0)  # Fill any remaining NaNs with 0 after chosen method
 
@@ -78,7 +83,7 @@ def pandas_to_numpy_returns(
 
 def numpy_weights_to_pandas_series(weights: np.ndarray, asset_names: List[str]) -> 'pd.Series':
     """Convert a 1D numpy array of weights to a pandas Series with asset names as index."""
-    if not PANDAS_AVAILABLE:
+    if not HAVE_PANDAS:
         raise ImportError("pandas is required for `numpy_weights_to_pandas_series` function, but it is not installed.")
     if not isinstance(weights, np.ndarray) or weights.ndim != 1:
         raise ValueError("`weights` must be a 1D NumPy array.")
