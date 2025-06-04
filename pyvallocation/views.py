@@ -441,9 +441,10 @@ class BlackLittermanProcessor:
         When constructing Ω from Idzorek confidences, decide whether to use
         τ Σ (True — original He & Litterman convention) or Σ (False — the
         alternative sometimes found in practice).
-    mean_views : dict, optional
+    mean_views : dict or array-like, optional
         Equality mean views in *FlexibleViewsProcessor* grammar:
-        ``{"Asset": 0.02, ("A", "B"): 0.00}``.
+        ``{"Asset": 0.02, ("A", "B"): 0.00}`` or a length-N vector
+        with absolute views per asset.
     view_confidences : float | list | dict, optional
         Confidence c ∈ (0, 1] per view (used only if Ω = "idzorek").
     omega : {"idzorek"} | array-like, optional
@@ -488,7 +489,7 @@ class BlackLittermanProcessor:
         tau: float = 0.05,
         idzorek_use_tau: bool = True,
         pi: Optional[Union[np.ndarray, pd.Series]] = None,
-        mean_views: Optional[Dict[Any, Any]] = None,
+        mean_views: Any = None,
         view_confidences: Any = None,
         omega: Any = None,
         verbose: bool = False,
@@ -533,7 +534,20 @@ class BlackLittermanProcessor:
         if verbose:
             print(f"[BL] π source: {src}.")
 
-        self._p, self._q, view_keys = self._build_views(mean_views or {})
+        def _vec_to_dict(vec_like):
+            if vec_like is None:
+                return {}
+            if isinstance(vec_like, dict):
+                return vec_like
+            vec = np.asarray(vec_like, float).ravel()
+            if vec.size != n_assets:
+                raise ValueError(
+                    f"`mean_views` must have length {n_assets}."
+                )
+            return {self._assets[i]: vec[i] for i in range(n_assets)}
+
+        mv_dict = _vec_to_dict(mean_views)
+        self._p, self._q, view_keys = self._build_views(mv_dict)
         self._k: int = self._p.shape[0]
         if verbose:
             print(f"[BL] Built P {self._p.shape}, Q {self._q.shape}.")

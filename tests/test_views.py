@@ -68,3 +68,13 @@ def test_parse_view_and_asset_idx():
     assert proc._asset_idx(1) == 1
     with pytest.raises(ValueError):
         proc._asset_idx("X")
+def test_blacklitterman_mean_views_vector():
+    mu = np.array([0.01, 0.02])
+    cov = np.array([[0.1, 0.0], [0.0, 0.1]])
+    views_vec = np.array([0.03, 0.04])
+    bl_vec = BlackLittermanProcessor(prior_mean=mu, prior_cov=cov, mean_views=views_vec)
+    bl_dict = BlackLittermanProcessor(prior_mean=mu, prior_cov=cov, mean_views={0: 0.03, 1: 0.04})
+    mu_vec, cov_vec = bl_vec.get_posterior()
+    mu_dict, cov_dict = bl_dict.get_posterior()
+    np.testing.assert_allclose(mu_vec, mu_dict, atol=1e-8)
+    np.testing.assert_allclose(cov_vec, cov_dict, atol=1e-8)
