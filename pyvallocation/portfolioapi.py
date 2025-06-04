@@ -7,7 +7,7 @@ from typing import Callable, List, Optional, Sequence, Union
 import numpy as np
 
 from . import probabilities
-from .optimization import MeanCVaR, MeanVariance, build_G_h_A_b
+from .optimization import MeanCVaR, MeanVariance, RobustBayes, build_G_h_A_b
 from .optional import HAS_PANDAS, pd
 from .probabilities import generate_uniform_probabilities
 from .utils.functions import portfolio_cvar
@@ -186,6 +186,8 @@ class PortfolioWrapper(AssetsDistribution):
         n_sim_scenarios: int = 10000,
         dist: Union[str, Callable] = "Normal",
         alpha: float = 0.05,
+        rho: float = 0.0,
+        gamma: float = 3.0,
         verbose: bool = False,
     ):
         super().__init__(
@@ -206,6 +208,8 @@ class PortfolioWrapper(AssetsDistribution):
         self.n_sim_scenarios = n_sim_scenarios
         self.dist = dist
         self.alpha = alpha
+        self.rho = rho
+        self.gamma = gamma
         self.risk_measure = None
         # pandas detection
         if HAS_PANDAS:
@@ -311,8 +315,22 @@ class PortfolioWrapper(AssetsDistribution):
                 tcost_lambda=tcost_lambda,
                 prev_weights=prev_weights,
             )
+        elif risk_measure == "RobustBayes":
+            if self.mu is None or self.cov is None:
+                logger.warning("Computing mean and covariance from scenarios")
+                self._compute_mv_moments()
+            self.optimizer = RobustBayes(
+                self.mu,
+                self.cov,
+                rho=self.rho,
+                gamma=self.gamma,
+                G=self.G,
+                h=self.h,
+                A=self.A,
+                b=self.b,
+            )
         else:
-            raise KeyError('risk_measure must be "Variance" or "CVaR"')
+            raise KeyError('risk_measure must be "Variance", "CVaR", or "RobustBayes"')
         if self.verbose:
             logger.info(f"Initialized optimizer with risk measure: {risk_measure}")
 

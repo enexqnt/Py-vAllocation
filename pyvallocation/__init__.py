@@ -15,6 +15,7 @@ __all__ = [
     "Optimization",
     "MeanVariance",
     "MeanCVaR",
+    "RobustBayes",
     "build_G_h_A_b",
 ]
 
@@ -23,7 +24,13 @@ from .moments import (
     shrink_covariance_ledoit_wolf,
     shrink_mean_jorion,
 )
-from .optimization import MeanCVaR, MeanVariance, Optimization, build_G_h_A_b
+from .optimization import (
+    MeanCVaR,
+    MeanVariance,
+    RobustBayes,
+    Optimization,
+    build_G_h_A_b,
+)
 from .probabilities import (
     compute_effective_number_scenarios,
     generate_exp_decay_probabilities,

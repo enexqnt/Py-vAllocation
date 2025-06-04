@@ -679,3 +679,88 @@ class MeanCVaR(Optimization):
             G = sparse([self._G, self._expected_return_row])
             h = matrix([self._h, -return_target])
         return self._benders_algorithm(G, h)[0 : self._I]
+
+
+class RobustBayes(Optimization):
+    """Robust Bayesian portfolio optimisation via second-order cone programming."""
+
+    def __init__(
+        self,
+        mean: np.ndarray,
+        covariance_matrix: np.ndarray,
+        rho: float,
+        gamma: float,
+        G: Optional[np.ndarray] = None,
+        h: Optional[np.ndarray] = None,
+        A: Optional[np.ndarray] = None,
+        b: Optional[np.ndarray] = None,
+    ) -> None:
+        self._I = len(mean)
+        self._mean = np.asarray(mean, float).flatten()
+        self._cov = np.asarray(covariance_matrix, float)
+        self._sigma_sqrt = np.linalg.cholesky(
+            self._cov + 1e-12 * np.eye(self._I)
+        )
+        self._rho = float(rho)
+        self._gamma = float(gamma)
+        self._lambda2 = 0.5 * self._gamma * (1.0 + np.sqrt(2 * self._rho / self._gamma))
+
+        if (G is None) ^ (h is None):
+            raise ValueError("G and h must be provided together or both None")
+
+        if G is None:
+            G_base = np.zeros((0, self._I))
+            h_base = np.zeros(0)
+        else:
+            G_base = np.asarray(G, float)
+            h_base = np.asarray(h, float).flatten()
+            if G_base.shape[0] != h_base.size:
+                raise ValueError("G and h have incompatible shapes")
+
+        self._Gl = np.hstack((G_base, np.zeros((G_base.shape[0], 1))))
+        self._hl = h_base
+
+        if (A is None) ^ (b is None):
+            raise ValueError("A and b must be provided together or both None")
+        if A is None:
+            A_ext = np.hstack((np.ones(self._I).reshape(1, -1), np.zeros((1, 1))))
+            self._A = matrix(A_ext)
+            self._b = matrix([1.0])
+        else:
+            A_base = np.asarray(A, float)
+            if A_base.shape[1] != self._I:
+                raise ValueError("A has incorrect shape")
+            A_ext = np.hstack((A_base, np.zeros((A_base.shape[0], 1))))
+            self._A = matrix(A_ext)
+            self._b = matrix(b)
+
+        P_block = np.zeros((self._I + 1, self._I + 1))
+        P_block[: self._I, : self._I] = 2 * self._lambda2 * self._cov
+        self._P = matrix(P_block)
+        self._q = matrix(np.hstack((-self._mean, np.sqrt(self._rho))))
+        self._expected_return_row = matrix(np.hstack((-self._mean, 0.0)))
+
+    def _solve(self, G: matrix, h: matrix) -> np.ndarray:
+        m_l = self._Gl.shape[0]
+        dims = {"l": m_l, "q": [self._I + 1], "s": []}
+        sol = solvers.coneqp(self._P, self._q, G, h, dims=dims, A=self._A, b=self._b)
+        if sol["status"] != "optimal":
+            raise ValueError("SOCP did not converge")
+        return np.asarray(sol["x"][: self._I])
+
+    def efficient_portfolio(self, return_target: Optional[float] = None) -> np.ndarray:
+        Gl = self._Gl
+        hl = self._hl
+        if return_target is not None:
+            Gl = np.vstack((Gl, -np.hstack((self._mean, 0.0))))
+            hl = np.hstack((hl, -return_target))
+
+        soc_block = np.vstack(
+            (
+                np.hstack((np.zeros((1, self._I)), -np.ones((1, 1)))),
+                np.hstack((self._sigma_sqrt, np.zeros((self._I, 1)))),
+            )
+        )
+        G = matrix(np.vstack((Gl, soc_block)))
+        h = matrix(np.hstack((hl, np.zeros(self._I + 1))))
+        return self._solve(G, h)

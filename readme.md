@@ -6,7 +6,7 @@ Py-vAllocation is a Python package for asset allocation with a primary focus on 
 
 It's yet another portfolio optimization library, but unlike many others, **Py-vAllocation** aims to:
 - Be modular and beginner-friendly, while remaining flexible and customizable for advanced users  
-- Support both Variance and CVaR as risk measures, using either mean/variance distributions or probability-based scenarios  
+- Support Variance, CVaR and Robust Bayesian optimisation, using either mean/variance distributions or scenario probabilities
 - Avoid hidden assumptions or black-box components — every modeling choice is explicitly stated  
 - Incorporate investor views via historical flexible probabilities using entropy pooling and the Black-Litterman methodology  
 - Support shrinkage estimators and other Bayesian estimation methods  

@@ -94,3 +94,13 @@ def test_meancvar_with_tcosts():
     w = mcvar.efficient_portfolio()
     assert w.shape == (2, 1)
     assert np.isclose(np.sum(w), 1.0, atol=1e-6)
+
+
+def test_robustbayes_portfolio():
+    mean = np.array([0.05, 0.1])
+    cov = np.array([[0.02, 0.005], [0.005, 0.03]])
+    G, h, A, b = optimization.build_G_h_A_b(2)
+    rb = optimization.RobustBayes(mean, cov, rho=0.1, gamma=3.0, G=G, h=h, A=A, b=b)
+    w = rb.efficient_portfolio()
+    assert w.shape == (2, 1)
+    assert np.isclose(np.sum(w), 1.0, atol=1e-6)
