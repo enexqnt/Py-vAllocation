@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Tuple
 
 import numpy as np
-import pandas as pd
+
+from ..optional import pd, HAS_PANDAS
 
 def _return_portfolio_risk(risk: np.ndarray) -> float | np.ndarray:
     """Return scalar when matrix contains a single element, otherwise 1×N array."""

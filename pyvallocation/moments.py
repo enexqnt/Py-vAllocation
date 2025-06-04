@@ -19,10 +19,7 @@ from typing import Union, Tuple, Sequence, Optional
 import numpy as np
 from numpy.linalg import inv, LinAlgError
 
-try:
-    import pandas as pd
-except ImportError:
-    pd = None
+from .optional import pd, HAS_PANDAS
 
 from pyvallocation.utils.validation import (
     ensure_psd_matrix,

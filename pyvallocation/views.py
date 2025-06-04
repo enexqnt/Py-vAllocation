@@ -3,7 +3,7 @@
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 from collections.abc import Sequence
 import numpy as np
-import pandas as pd
+from .optional import pd, HAS_PANDAS
 from scipy.optimize import minimize, Bounds
 
 def _entropy_pooling_dual_objective(

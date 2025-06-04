@@ -4,15 +4,10 @@ from typing import TYPE_CHECKING, Optional, List
 
 import numpy as np
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover - for type checkers only
     import pandas as pd
 
-HAVE_PANDAS = False
-try:
-    import pandas as pd
-    HAVE_PANDAS = True
-except ImportError:
-    pass
+from ..optional import pd, HAS_PANDAS, require_pandas
 
 def pandas_to_numpy_returns(
     dataframe: 'pd.DataFrame',
@@ -22,8 +17,8 @@ def pandas_to_numpy_returns(
     fill_na_method: str = 'ffill',
 ) -> np.ndarray:
     """Convert a pandas DataFrame of prices to a numpy array of returns."""
-    if not HAVE_PANDAS:
-        raise ImportError("pandas is required for `pandas_to_numpy_returns` function, but it is not installed.")
+    if not HAS_PANDAS:
+        require_pandas("pandas is required for `pandas_to_numpy_returns`")
     if not isinstance(dataframe, pd.DataFrame):
         raise ValueError("`dataframe` must be a pandas DataFrame.")
 
@@ -83,8 +78,8 @@ def pandas_to_numpy_returns(
 
 def numpy_weights_to_pandas_series(weights: np.ndarray, asset_names: List[str]) -> 'pd.Series':
     """Convert a 1D numpy array of weights to a pandas Series with asset names as index."""
-    if not HAVE_PANDAS:
-        raise ImportError("pandas is required for `numpy_weights_to_pandas_series` function, but it is not installed.")
+    if not HAS_PANDAS:
+        require_pandas("pandas is required for `numpy_weights_to_pandas_series`")
     if not isinstance(weights, np.ndarray) or weights.ndim != 1:
         raise ValueError("`weights` must be a 1D NumPy array.")
     if not isinstance(asset_names, list) or not all(isinstance(name, str) for name in asset_names):

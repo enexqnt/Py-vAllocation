@@ -13,10 +13,7 @@ import numbers
 import warnings
 import logging
 from typing import Dict, List, Optional, Sequence, Tuple, Union
-try: 
-    import pandas as pd
-except ImportError:
-    pd = None
+from .optional import pd, HAS_PANDAS
 
 import numpy as np
 from cvxopt import matrix, solvers, sparse

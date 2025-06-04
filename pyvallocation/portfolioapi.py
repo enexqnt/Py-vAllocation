@@ -3,11 +3,7 @@ from typing import Union, Optional, Callable, List, Sequence
 import numpy as np
 import logging
 
-try:
-    import pandas as pd
-    _has_pandas = True
-except ImportError:
-    _has_pandas = False
+from .optional import pd, HAS_PANDAS
 
 from .optimization import build_G_h_A_b, MeanCVaR, MeanVariance
 from .probabilities import generate_uniform_probabilities
@@ -68,7 +64,7 @@ class AssetsDistribution:
     probabilities: Optional[Union[np.ndarray, 'pd.Series']] = None
 
     def __post_init__(self):
-        if _has_pandas:
+        if HAS_PANDAS:
             if isinstance(self.mu, pd.Series):
                 self._pd_mu = self.mu.copy()
             if isinstance(self.cov, pd.DataFrame):
@@ -78,17 +74,17 @@ class AssetsDistribution:
             if isinstance(self.probabilities, pd.Series):
                 self._pd_probabilities = self.probabilities.copy()
         if self.mu is not None and self.cov is not None:
-            if _has_pandas and isinstance(self.mu, pd.Series):
+            if HAS_PANDAS and isinstance(self.mu, pd.Series):
                 self.mu = self.mu.values
-            if _has_pandas and isinstance(self.cov, pd.DataFrame):
+            if HAS_PANDAS and isinstance(self.cov, pd.DataFrame):
                 self.cov = self.cov.values if hasattr(self.cov, 'values') else self.cov
             self.N = self.mu.shape[0]
         elif self.scenarios is not None:
-            if _has_pandas and isinstance(self.scenarios, pd.DataFrame):
+            if HAS_PANDAS and isinstance(self.scenarios, pd.DataFrame):
                 self.scenarios = self.scenarios.values
             if self.probabilities is None:
                 self.probabilities = generate_uniform_probabilities(len(self.scenarios))
-            elif _has_pandas and isinstance(self.probabilities, pd.Series):
+            elif HAS_PANDAS and isinstance(self.probabilities, pd.Series):
                 self.probabilities = self.probabilities.values
             self.T, self.N = self.scenarios.shape
         else:
@@ -205,7 +201,7 @@ class PortfolioWrapper(AssetsDistribution):
         self.alpha = alpha
         self.risk_measure = None
         # pandas detection
-        if _has_pandas:
+        if HAS_PANDAS:
             if hasattr(assets_distribution, '_pd_mu'):
                 self._pandas = True
                 self._asset_index = assets_distribution._pd_mu.index

@@ -1,5 +1,6 @@
 import numpy as np
-import pandas as pd
+
+from ..optional import pd, HAS_PANDAS
 
 def project_mean_covariance(mu,cov, annualization_factor):
     return mu*annualization_factor, cov *annualization_factor
@@ -55,8 +56,7 @@ def simple2log(mu_r, cov_r):
 
     return (_wrap_vector(mu_g_np, mu_r),
             _wrap_matrix(cov_g_np, cov_r))
-import numpy as np
-import pandas as pd
+
 
 def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
     """

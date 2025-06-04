@@ -32,6 +32,7 @@ See [examples here](examples/)
 - numpy >= 1.20.0
 - cvxopt >= 1.2.0
 - pandas (optional, recommended for enhanced functionality)
+  - check availability via `pyvallocation.optional.HAS_PANDAS`
 
 ## Development Status
 
