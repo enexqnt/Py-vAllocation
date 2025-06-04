@@ -104,3 +104,29 @@ def test_robustbayes_portfolio():
     w = rb.efficient_portfolio()
     assert w.shape == (2, 1)
     assert np.isclose(np.sum(w), 1.0, atol=1e-6)
+
+
+def test_robust_risk_monotone():
+    np.random.seed(0)
+    I = 3
+    M = np.random.randn(I, I)
+    cov = M @ M.T / I
+    mean = np.random.randn(I)
+    gamma_vec = optimization.RobustBayes.gamma_grid(n=4)
+    risks = []
+    for g in gamma_vec:
+        rb = optimization.RobustBayes(mean, cov, rho=0.5, gamma=g)
+        w = rb.efficient_portfolio().flatten()
+        risks.append(float(w @ cov @ w))
+    assert np.all(np.diff(risks) <= 1e-8)
+
+
+def test_robust_equals_markowitz_when_rho_zero():
+    mean = np.array([0.02, 0.03])
+    cov = np.array([[0.01, 0.002], [0.002, 0.02]])
+    G, h, A, b = optimization.build_G_h_A_b(2)
+    mv = optimization.MeanVariance(mean, cov, G, h, A, b)
+    w_mv = mv.efficient_portfolio().flatten()
+    rb = optimization.RobustBayes(mean, cov, rho=0.0, gamma=1000.0, G=G, h=h, A=A, b=b)
+    w_rb = rb.efficient_portfolio().flatten()
+    np.testing.assert_allclose(w_rb, w_mv, rtol=1e-3, atol=1e-3)

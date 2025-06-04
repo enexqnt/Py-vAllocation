@@ -188,6 +188,8 @@ class PortfolioWrapper(AssetsDistribution):
         alpha: float = 0.05,
         rho: float = 0.0,
         gamma: float = 3.0,
+        gamma_grid: Sequence[float] | int | None = None,
+        risk_budgets: Sequence[float] | None = None,
         verbose: bool = False,
     ):
         super().__init__(
@@ -204,12 +206,16 @@ class PortfolioWrapper(AssetsDistribution):
         self.num_portfolios = num_portfolios
         self.optimizer = None
         self.efficient_frontier = None
+        self._frontier_returns = None
+        self._frontier_param = None
         self.T = getattr(self, "T", None)
         self.n_sim_scenarios = n_sim_scenarios
         self.dist = dist
         self.alpha = alpha
         self.rho = rho
         self.gamma = gamma
+        self.gamma_grid = gamma_grid
+        self.risk_budgets = risk_budgets
         self.risk_measure = None
         # pandas detection
         if HAS_PANDAS:
@@ -358,6 +364,39 @@ class PortfolioWrapper(AssetsDistribution):
         if self.efficient_frontier is None:
             self.set_efficient_frontier()
         return self.efficient_frontier
+
+    def set_robust_frontier_gamma(self, gamma_grid="auto"):
+        if gamma_grid == "auto":
+            gamma_grid = RobustBayes.gamma_grid(n=self.num_portfolios)
+        W, ret = RobustBayes.frontier_by_gamma(
+            self.mu,
+            self.cov,
+            self.rho,
+            gamma_grid,
+            self.G,
+            self.h,
+            self.A,
+            self.b,
+        )
+        self.efficient_frontier = W
+        self._frontier_returns = ret
+        self._frontier_param = gamma_grid
+
+    def set_robust_frontier_risk(self, risk_vec):
+        W, ret = RobustBayes.frontier_by_risk(
+            self.mu,
+            self.cov,
+            self.rho,
+            self.gamma,
+            risk_vec,
+            self.G,
+            self.h,
+            self.A,
+            self.b,
+        )
+        self.efficient_frontier = W
+        self._frontier_returns = ret
+        self._frontier_param = risk_vec
 
     def get_portfolios_risk_constraint(
         self, maxrisk: Union[float, np.ndarray]

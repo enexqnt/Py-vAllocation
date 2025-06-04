@@ -695,6 +695,17 @@ class RobustBayes(Optimization):
         A: Optional[np.ndarray] = None,
         b: Optional[np.ndarray] = None,
     ) -> None:
+        """Initialise the robust Bayesian optimiser.
+
+        Parameters
+        ----------
+        rho : float
+            Robustness level controlling the confidence ellipsoid. See Meucci
+            (2005) eq.(23) for guidance on calibrating ``rho``.
+        gamma : float
+            Mean--variance risk aversion parameter.
+        """
+
         self._I = len(mean)
         self._mean = np.asarray(mean, float).flatten()
         self._cov = np.asarray(covariance_matrix, float)
@@ -747,6 +758,20 @@ class RobustBayes(Optimization):
         # verify feasibility and store attributes for parent utilities
         _ = self._calculate_max_expected_return(feasibility_check=True)
 
+    def _robust_risk(self, w: np.ndarray) -> float:
+        """Returns λ₂·wᵀΣ̂w  +  √ρ · ‖Σ̂½ w‖₂."""
+        quad = self._lambda2 * float(w @ self._cov @ w)
+        soc = np.sqrt(self._rho) * np.linalg.norm(self._sigma_sqrt @ w)
+        return quad + soc
+
+    def _cone_blocks(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return (G_soc, h_soc) implementing ‖Σ̂½ w‖₂ ≤ t."""
+        top = np.hstack([np.zeros((1, self._I)), -np.ones((1, 1))])
+        bot = np.hstack([self._sigma_sqrt, np.zeros((self._I, 1))])
+        G_soc = np.vstack([top, bot])
+        h_soc = np.zeros(self._I + 1)
+        return G_soc, h_soc
+
     def _solve(self, G: matrix, h: matrix) -> np.ndarray:
         total_rows = G.size[0]
         dims = {"l": total_rows - (self._I + 1), "q": [self._I + 1], "s": []}
@@ -754,6 +779,28 @@ class RobustBayes(Optimization):
         if sol["status"] != "optimal":
             raise ValueError("SOCP did not converge")
         return np.asarray(sol["x"][: self._I])
+
+    def _calculate_max_expected_return(self, feasibility_check: bool = False) -> float:
+        """Maximise μ̂ᵀ w  subject to cone & linear constraints."""
+        G_soc, h_soc = self._cone_blocks()
+        G_tot = sparse(matrix(np.vstack([self._Gl, G_soc])))
+        h_tot = matrix(np.hstack([self._hl, h_soc]))
+        c = np.zeros(self._I + 1) if feasibility_check else np.hstack([-self._mean, 0.0])
+        dims = {"l": G_tot.size[0] - (self._I + 1), "q": [self._I + 1], "s": []}
+        sol = solvers.coneqp(
+            self._P * 0,
+            matrix(c),
+            G_tot,
+            h_tot,
+            dims=dims,
+            A=self._A,
+            b=self._b,
+        )
+        if sol["status"] != "optimal":
+            if feasibility_check:
+                raise ValueError("Constraints are infeasible.")
+            raise ValueError("Expected return is unbounded under cone constraints.")
+        return -float(sol["primal objective"])
 
     def efficient_portfolio(self, return_target: Optional[float] = None) -> np.ndarray:
         Gl = self._Gl
@@ -771,3 +818,70 @@ class RobustBayes(Optimization):
         G = matrix(np.vstack((Gl, soc_block)))
         h = matrix(np.hstack((hl, np.zeros(self._I + 1))))
         return self._solve(G, h)
+
+    @staticmethod
+    def gamma_grid(gmin: float = 0.5, gmax: float = 20.0, n: int = 15) -> np.ndarray:
+        """Log-spaced grid – tunable."""
+        return np.geomspace(gmin, gmax, n)
+
+    @staticmethod
+    def frontier_by_gamma(
+        mean,
+        cov,
+        rho,
+        gamma_vec,
+        G=None,
+        h=None,
+        A=None,
+        b=None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Returns (weights matrix, worst-case returns) for a list of γ."""
+        W = []
+        mu_wc = []
+        for g in gamma_vec:
+            rb = RobustBayes(mean, cov, rho, g, G, h, A, b)
+            w = rb.efficient_portfolio().flatten()
+            W.append(w)
+            mu_wc.append(mean @ w - rb._robust_risk(w))
+        return np.column_stack(W), np.array(mu_wc)
+
+    @staticmethod
+    def frontier_by_risk(
+        mean,
+        cov,
+        rho,
+        gamma,
+        R_vec,
+        G=None,
+        h=None,
+        A=None,
+        b=None,
+    ):
+        """Fix γ, maximise μ̂ subject to robust risk ≤ R̄."""
+        weights, mu_wc = [], []
+        base = RobustBayes(mean, cov, rho, gamma, G, h, A, b)
+        G_soc, h_soc = base._cone_blocks()
+
+        for R in R_vec:
+            G_lin = copy(base._Gl)
+            h_lin = copy(base._hl)
+
+            quad_G = np.hstack([2 * base._lambda2 * base._cov, np.zeros((base._I, 1))])
+            Gtot = np.vstack([G_lin, quad_G, G_soc])
+            htot = np.hstack([h_lin, np.full(base._I, R), h_soc])
+
+            dims = {"l": Gtot.shape[0] - (base._I + 1), "q": [base._I + 1], "s": []}
+
+            sol = solvers.coneqp(
+                base._P * 0,
+                matrix(np.hstack([-base._mean, 0.0])),
+                sparse(matrix(Gtot)),
+                matrix(htot),
+                dims=dims,
+                A=base._A,
+                b=base._b,
+            )
+            w = np.asarray(sol["x"][: base._I]).flatten()
+            weights.append(w)
+            mu_wc.append(base._mean @ w)
+        return np.column_stack(weights), np.array(mu_wc)

@@ -16,6 +16,7 @@ __all__ = [
     "MeanVariance",
     "MeanCVaR",
     "RobustBayes",
+    "plot_robust_frontier",
     "build_G_h_A_b",
 ]
 
@@ -39,3 +40,4 @@ from .probabilities import (
     silverman_bandwidth,
 )
 from .views import BlackLittermanProcessor, FlexibleViewsProcessor, entropy_pooling
+from .utils import plot_robust_frontier

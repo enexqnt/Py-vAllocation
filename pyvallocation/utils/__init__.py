@@ -14,3 +14,4 @@ from .validation import (
     ensure_psd_matrix,
     is_psd,
 )
+from .plots import plot_robust_frontier
