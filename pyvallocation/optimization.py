@@ -6,7 +6,6 @@ mean-variance and mean-CVaR portfolio optimization.
 
 Uses cvxopt for quadratic and linear programming.
 """
-# MeanCVaR and MeanVariance functions are adapted from fortituto-tech https://github.com/fortitudo-tech/fortitudo.tech
 
 from __future__ import annotations
 
