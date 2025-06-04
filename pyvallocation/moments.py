@@ -1,4 +1,3 @@
-
 """Module for estimation and shrinkage of portfolio moments.
 
 Provides functions to estimate weighted sample mean and covariance,
@@ -13,21 +12,24 @@ All functions support pandas objects and numpy arrays interchangeably.
 """
 
 from __future__ import annotations
+
 import logging
-from typing import Union, Tuple, Sequence, Optional
+from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
-from numpy.linalg import inv, LinAlgError
-
-from .optional import pd, HAS_PANDAS
+from numpy.linalg import LinAlgError, inv
 
 from pyvallocation.utils.validation import (
-    ensure_psd_matrix,
     check_non_negativity,
     check_weights_sum_to_one,
+    ensure_psd_matrix,
 )
 
-ArrayLike = Union[np.ndarray, "pd.Series", "pd.DataFrame"] if pd is not None else np.ndarray
+from .optional import HAS_PANDAS, pd
+
+ArrayLike = (
+    Union[np.ndarray, "pd.Series", "pd.DataFrame"] if pd is not None else np.ndarray
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,9 @@ def estimate_sample_moments(R: ArrayLike, p: ArrayLike) -> Tuple[ArrayLike, Arra
 
     if p_arr.shape[0] != T:
         logger.error(
-            "Weight length mismatch: weights length %d, returns length %d", p_arr.shape[0], T
+            "Weight length mismatch: weights length %d, returns length %d",
+            p_arr.shape[0],
+            T,
         )
         raise ValueError("Weight length mismatch.")
     if not (check_non_negativity(p_arr) and check_weights_sum_to_one(p_arr)):
@@ -79,7 +83,10 @@ def shrink_mean_jorion(mu: ArrayLike, S: ArrayLike, T: int) -> ArrayLike:
     N = mu_arr.size
     if T <= 0 or N <= 2 or S_arr.shape != (N, N):
         logger.error(
-            "Invalid dimensions for Jorion shrinkage: T=%d, N=%d, S shape=%s", T, N, S_arr.shape
+            "Invalid dimensions for Jorion shrinkage: T=%d, N=%d, S shape=%s",
+            T,
+            N,
+            S_arr.shape,
         )
         raise ValueError("Invalid dimensions for Jorion shrinkage.")
 
@@ -110,7 +117,9 @@ def shrink_covariance_ledoit_wolf(
     T, N = R_arr.shape
     if T == 0 or S_arr.shape != (N, N):
         logger.error(
-            "Shape mismatch in inputs: R shape %s, S_hat shape %s", R_arr.shape, S_arr.shape
+            "Shape mismatch in inputs: R shape %s, S_hat shape %s",
+            R_arr.shape,
+            S_arr.shape,
         )
         raise ValueError("Shape mismatch in inputs.")
 

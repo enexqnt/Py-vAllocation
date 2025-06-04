@@ -1,8 +1,12 @@
-import numpy as np
-import numpy.linalg as la
+"""Matrix validation helpers."""
+
 import logging
 
+import numpy as np
+import numpy.linalg as la
+
 logger = logging.getLogger(__name__)
+
 
 def is_psd(matrix: np.ndarray, tolerance: float = 1e-8) -> bool:
     """Check if a matrix is positive semi-definite (PSD) within a tolerance."""
@@ -15,6 +19,7 @@ def is_psd(matrix: np.ndarray, tolerance: float = 1e-8) -> bool:
         return np.all(eigenvalues >= -tolerance)
     except la.LinAlgError:
         return False
+
 
 def ensure_psd_matrix(matrix: np.ndarray, jitter: float = 1e-8) -> np.ndarray:
     """Ensure a matrix is PSD by adding jitter to the diagonal if necessary."""
@@ -32,15 +37,21 @@ def ensure_psd_matrix(matrix: np.ndarray, jitter: float = 1e-8) -> np.ndarray:
     k = max(0, -min_eig) + jitter
     psd_matrix = matrix + k * np.eye(matrix.shape[0])
     if not is_psd(psd_matrix, tolerance=jitter):
-        logger.warning(f"Matrix still not PSD after initial jittering with k={k}. Attempting larger jitter.")
+        logger.warning(
+            f"Matrix still not PSD after initial jittering with k={k}. Attempting larger jitter."
+        )
         psd_matrix = matrix + (np.abs(min_eig) + 1e-6) * np.eye(matrix.shape[0])
         if not is_psd(psd_matrix, tolerance=jitter):
-            raise ValueError("Failed to make matrix PSD even with increased jitter. Input matrix might be severely ill-conditioned.")
+            raise ValueError(
+                "Failed to make matrix PSD even with increased jitter. Input matrix might be severely ill-conditioned."
+            )
     return psd_matrix
+
 
 def check_weights_sum_to_one(weights: np.ndarray, tolerance: float = 1e-6) -> bool:
     """Check if weights sum approximately to one within a tolerance."""
     return np.isclose(np.sum(weights), 1.0, atol=tolerance)
+
 
 def check_non_negativity(array: np.ndarray, tolerance: float = -1e-9) -> bool:
     """Check if all elements in the array are non-negative within a tolerance."""

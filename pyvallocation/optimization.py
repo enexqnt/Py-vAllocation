@@ -9,19 +9,20 @@ Uses cvxopt for quadratic and linear programming.
 
 from __future__ import annotations
 
+import logging
 import numbers
 import warnings
-import logging
+from copy import copy
 from typing import Dict, List, Optional, Sequence, Tuple, Union
-from .optional import pd, HAS_PANDAS
 
 import numpy as np
 from cvxopt import matrix, solvers, sparse
 from cvxopt.solvers import lp, options
-from copy import copy
 
-options['glpk'] = {'msg_lev': 'GLP_MSG_OFF'}
-options['show_progress'] = False
+from .optional import HAS_PANDAS, pd
+
+options["glpk"] = {"msg_lev": "GLP_MSG_OFF"}
+options["show_progress"] = False
 cvar_options = {}
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,12 @@ def build_G_h_A_b(
     additional_G_h: Optional[Sequence[Tuple[Sequence[Number], Number]]] = None,
     additional_A_b: Optional[Sequence[EqRow]] = None,
     return_none_if_empty: bool = True,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+) -> Tuple[
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+]:
     if not isinstance(n_assets, int) or n_assets <= 0:
         logger.error("n_assets must be a positive integer, got %s", n_assets)
         raise ValueError("n_assets must be a positive integer")
@@ -75,7 +81,9 @@ def build_G_h_A_b(
     if bounds is not None:
         if isinstance(bounds, tuple):
             if len(bounds) != 2:
-                logger.error("bounds tuple must be (lower, upper), got length %d", len(bounds))
+                logger.error(
+                    "bounds tuple must be (lower, upper), got length %d", len(bounds)
+                )
                 raise ValueError("bounds tuple must be (lower, upper)")
             lower, upper = bounds
             if lower is not None:
@@ -96,10 +104,17 @@ def build_G_h_A_b(
         elif isinstance(bounds, dict):
             for idx, lu in bounds.items():
                 if not (0 <= idx < n_assets):
-                    logger.error("asset index %d out of range (0..%d)", idx, n_assets - 1)
-                    raise IndexError(f"asset index {idx} out of range (0..{n_assets-1})")
+                    logger.error(
+                        "asset index %d out of range (0..%d)", idx, n_assets - 1
+                    )
+                    raise IndexError(
+                        f"asset index {idx} out of range (0..{n_assets-1})"
+                    )
                 if len(lu) != 2:
-                    logger.error("each bounds value must be (lower, upper), got length %d", len(lu))
+                    logger.error(
+                        "each bounds value must be (lower, upper), got length %d",
+                        len(lu),
+                    )
                     raise ValueError("each bounds value must be (lower, upper)")
                 lower, upper = lu
                 if lower is not None:
@@ -107,7 +122,9 @@ def build_G_h_A_b(
                 if upper is not None:
                     _check_number(upper, f"upper bound for asset {idx}")
                 if lower is not None and upper is not None and lower > upper:
-                    logger.error("asset %d: lower bound %s > upper bound %s", idx, lower, upper)
+                    logger.error(
+                        "asset %d: lower bound %s > upper bound %s", idx, lower, upper
+                    )
                     raise ValueError(f"asset {idx}: lower bound > upper bound")
                 if lower is not None:
                     row = np.zeros(n_assets)
@@ -123,7 +140,11 @@ def build_G_h_A_b(
         else:
             bounds_seq = list(bounds)  # type: ignore[arg-type]
             if len(bounds_seq) != n_assets:
-                logger.error("bounds list length %d must equal n_assets %d", len(bounds_seq), n_assets)
+                logger.error(
+                    "bounds list length %d must equal n_assets %d",
+                    len(bounds_seq),
+                    n_assets,
+                )
                 raise ValueError("bounds list length must equal n_assets")
             for idx, (lower, upper) in enumerate(bounds_seq):
                 if lower is not None:
@@ -131,7 +152,9 @@ def build_G_h_A_b(
                 if upper is not None:
                     _check_number(upper, f"upper bound for asset {idx}")
                 if lower is not None and upper is not None and lower > upper:
-                    logger.error("asset %d: lower bound %s > upper bound %s", idx, lower, upper)
+                    logger.error(
+                        "asset %d: lower bound %s > upper bound %s", idx, lower, upper
+                    )
                     raise ValueError(f"asset {idx}: lower bound > upper bound")
                 if lower is not None:
                     row = np.zeros(n_assets)
@@ -147,7 +170,10 @@ def build_G_h_A_b(
     if relative_bounds is not None:
         for triple in relative_bounds:
             if len(triple) != 3:
-                logger.error("each relative_bounds entry must be (i, j, k), got length %d", len(triple))
+                logger.error(
+                    "each relative_bounds entry must be (i, j, k), got length %d",
+                    len(triple),
+                )
                 raise ValueError("each relative_bounds entry must be (i, j, k)")
             i, j, k = triple
             if not (0 <= i < n_assets and 0 <= j < n_assets):
@@ -194,16 +220,26 @@ def build_G_h_A_b(
             UserWarning,
             stacklevel=2,
         )
-        logger.warning("No position bounds given and long_only=False – feasible set may be unbounded.")
+        logger.warning(
+            "No position bounds given and long_only=False – feasible set may be unbounded."
+        )
 
-    if long_only and bounds is not None and isinstance(bounds, tuple) and bounds[0] is not None and bounds[0] >= 0:
+    if (
+        long_only
+        and bounds is not None
+        and isinstance(bounds, tuple)
+        and bounds[0] is not None
+        and bounds[0] >= 0
+    ):
         warnings.warn(
             "long_only=True already enforces w ≥ 0; supplying a non-negative lower "
             "bound duplicates that constraint.",
             UserWarning,
             stacklevel=2,
         )
-        logger.warning("long_only=True already enforces w ≥ 0; supplying a non-negative lower bound duplicates that constraint.")
+        logger.warning(
+            "long_only=True already enforces w ≥ 0; supplying a non-negative lower bound duplicates that constraint."
+        )
 
     def _stack(rows: List[np.ndarray]) -> Optional[np.ndarray]:
         if rows:
@@ -211,9 +247,17 @@ def build_G_h_A_b(
         return None if return_none_if_empty else np.zeros((0, n_assets))
 
     G = _stack(G_rows)
-    h = np.asarray(h_vals) if h_vals else (None if return_none_if_empty else np.zeros(0))
+    h = (
+        np.asarray(h_vals)
+        if h_vals
+        else (None if return_none_if_empty else np.zeros(0))
+    )
     A = _stack(A_rows)
-    b = np.asarray(b_vals, float) if b_vals else (None if return_none_if_empty else np.zeros(0))
+    b = (
+        np.asarray(b_vals, float)
+        if b_vals
+        else (None if return_none_if_empty else np.zeros(0))
+    )
 
     logger.debug("Built constraint matrices G, h, A, b.")
     return G, h, A, b
@@ -233,15 +277,23 @@ class Optimization:
     _mean: np.ndarray
 
     def _calculate_max_expected_return(self, feasibility_check: bool = False) -> float:
-        c = matrix(np.zeros(self._G.size[1])) if feasibility_check else self._expected_return_row.T
+        c = (
+            matrix(np.zeros(self._G.size[1]))
+            if feasibility_check
+            else self._expected_return_row.T
+        )
         sol = solvers.lp(c, self._G, self._h, self._A, self._b, solver="glpk")
         if sol["status"] == "optimal":
             return -sol["primal objective"]
         if feasibility_check:
             logger.error("Constraints are infeasible.")
-            raise ValueError("Constraints are infeasible. Please specify feasible constraints.")
+            raise ValueError(
+                "Constraints are infeasible. Please specify feasible constraints."
+            )
         logger.error("Expected return is unbounded.")
-        raise ValueError("Expected return is unbounded. Unable to compute efficient frontier.")
+        raise ValueError(
+            "Expected return is unbounded. Unable to compute efficient frontier."
+        )
 
     def efficient_frontier(self, num_portfolios: int = 9) -> np.ndarray:
         frontier = np.full((self._I, num_portfolios), np.nan)
@@ -297,9 +349,15 @@ class MeanVariance(Optimization):
             self._tcost_lambda = tcost_arr
 
         if np.any(self._tcost_lambda > 0):
-            prev = np.zeros(self._I) if prev_weights is None else np.asarray(prev_weights, float).flatten()
+            prev = (
+                np.zeros(self._I)
+                if prev_weights is None
+                else np.asarray(prev_weights, float).flatten()
+            )
             if prev.shape != (self._I,):
-                logger.error("prev_weights must have shape (%d,), got %s", self._I, prev.shape)
+                logger.error(
+                    "prev_weights must have shape (%d,), got %s", self._I, prev.shape
+                )
                 raise ValueError("prev_weights must match number of assets")
             self._prev_weights = prev
             self._aux = self._I
@@ -310,10 +368,12 @@ class MeanVariance(Optimization):
         total_vars = self._I + self._aux
 
         self._expected_return_row = -matrix(np.hstack((mean, np.zeros(self._aux)))).T
-        P_block = np.block([
-            [1000 * covariance_matrix, np.zeros((self._I, self._aux))],
-            [np.zeros((self._aux, self._I + self._aux))],
-        ])
+        P_block = np.block(
+            [
+                [1000 * covariance_matrix, np.zeros((self._I, self._aux))],
+                [np.zeros((self._aux, self._I + self._aux))],
+            ]
+        )
         self._P = matrix(P_block)
         if self._aux:
             q = np.hstack((np.zeros(self._I), self._tcost_lambda))
@@ -434,9 +494,15 @@ class MeanCVaR(Optimization):
             self._tcost_lambda = tcost_arr
 
         if np.any(self._tcost_lambda > 0):
-            prev = np.zeros(self._I) if prev_weights is None else np.asarray(prev_weights, float).flatten()
+            prev = (
+                np.zeros(self._I)
+                if prev_weights is None
+                else np.asarray(prev_weights, float).flatten()
+            )
             if prev.shape != (self._I,):
-                logger.error("prev_weights must have shape (%d,), got %s", self._I, prev.shape)
+                logger.error(
+                    "prev_weights must have shape (%d,), got %s", self._I, prev.shape
+                )
                 raise ValueError("prev_weights must match number of assets")
             self._prev_weights = prev
             self._aux = self._I
@@ -476,7 +542,11 @@ class MeanCVaR(Optimization):
             G_base = np.asarray(G, float)
             h_base = np.asarray(h, float).flatten()
             if G_base.shape[0] != h_base.size:
-                logger.error("G and h have incompatible shapes: %s vs %s", G_base.shape, h_base.shape)
+                logger.error(
+                    "G and h have incompatible shapes: %s vs %s",
+                    G_base.shape,
+                    h_base.shape,
+                )
                 raise ValueError("G and h have incompatible shapes")
 
         G_ext = np.hstack((G_base, np.zeros((G_base.shape[0], self._aux + 2))))
@@ -486,9 +556,13 @@ class MeanCVaR(Optimization):
         h_full = np.hstack((h_base, [0.0]))
 
         if self._aux:
-            tc_G1 = np.hstack((np.eye(self._I), -np.eye(self._I), np.zeros((self._I, 2))))
+            tc_G1 = np.hstack(
+                (np.eye(self._I), -np.eye(self._I), np.zeros((self._I, 2)))
+            )
             tc_h1 = self._prev_weights
-            tc_G2 = np.hstack((-np.eye(self._I), -np.eye(self._I), np.zeros((self._I, 2))))
+            tc_G2 = np.hstack(
+                (-np.eye(self._I), -np.eye(self._I), np.zeros((self._I, 2)))
+            )
             tc_h2 = -self._prev_weights
             G_full = np.vstack((G_full, tc_G1, tc_G2))
             h_full = np.hstack((h_full, tc_h1, tc_h2))
@@ -523,36 +597,41 @@ class MeanCVaR(Optimization):
             self._losses = -self._R_scalar * R
 
     def _set_options(self, options: dict) -> None:
-        self._demean = options.get('demean', True)
+        self._demean = options.get("demean", True)
         if not isinstance(self._demean, bool):
             logger.error("demean must be a boolean, got %s", type(self._demean))
-            raise ValueError('demean must be a boolean equal to True or False.')
-        self._R_scalar = options.get('R_scalar', 1000)
+            raise ValueError("demean must be a boolean equal to True or False.")
+        self._R_scalar = options.get("R_scalar", 1000)
         if not isinstance(self._R_scalar, (int, float)) or self._R_scalar <= 0:
             logger.error("R_scalar must be positive number, got %s", self._R_scalar)
-            raise ValueError('R_scalar must be a positive integer or float.')
-        self._maxiter = options.get('maxiter', 500)
+            raise ValueError("R_scalar must be a positive integer or float.")
+        self._maxiter = options.get("maxiter", 500)
         if not isinstance(self._maxiter, int) or self._maxiter < 100:
             logger.error("maxiter must be integer >= 100, got %s", self._maxiter)
-            raise ValueError('maxiter must be a positive integer greater than or equal to 100.')
-        self._reltol = options.get('reltol', 1e-8)
+            raise ValueError(
+                "maxiter must be a positive integer greater than or equal to 100."
+            )
+        self._reltol = options.get("reltol", 1e-8)
         if not 1e-8 <= self._reltol <= 1e-4:
             logger.error("reltol must be in [1e-8, 1e-4], got %s", self._reltol)
-            raise ValueError('reltol must be in [1e-8, 1e-4].')
-        self._abstol = options.get('abstol', 1e-8)
+            raise ValueError("reltol must be in [1e-8, 1e-4].")
+        self._abstol = options.get("abstol", 1e-8)
         if not 1e-8 <= self._abstol <= 1e-4:
             logger.error("abstol must be in [1e-8, 1e-4], got %s", self._abstol)
-            raise ValueError('abstol must be in [1e-8, 1e-4].')
+            raise ValueError("abstol must be in [1e-8, 1e-4].")
 
     def _benders_algorithm(self, G: sparse, h: matrix) -> np.ndarray:
         eta = self._p @ self._losses
         p = 1
-        solution, w, F_lower, G_benders, h_benders, eta, p = self._benders_main(G, h, eta, p)
+        solution, w, F_lower, G_benders, h_benders, eta, p = self._benders_main(
+            G, h, eta, p
+        )
         F_star = F_lower + self._c[-1] * (w - solution[-1])
         v = 1
         while self._benders_stopping_criteria(F_star, F_lower) and v <= self._maxiter:
             solution, w, F_lower, G_benders, h_benders, eta, p = self._benders_main(
-                G_benders, h_benders, eta, p)
+                G_benders, h_benders, eta, p
+            )
             F_star = min(F_lower + self._c[-1] * (w - solution[-1]), F_star)
             v += 1
         logger.debug("Benders algorithm completed in %d iterations.", v)
@@ -568,14 +647,18 @@ class MeanCVaR(Optimization):
         new_row = np.hstack((eta, np.zeros((1, self._aux)), [[-p, -1]]))
         G_benders = sparse([G_benders, matrix(new_row)])
         h_benders = matrix([h_benders, 0])
-        solution = np.array(lp(c=self._c, G=G_benders, h=h_benders, A=self._A, b=self._b, solver='glpk')['x'])
+        solution = np.array(
+            lp(
+                c=self._c, G=G_benders, h=h_benders, A=self._A, b=self._b, solver="glpk"
+            )["x"]
+        )
         eta, p = self._benders_cut(solution)
-        w = eta @ solution[0:self._I] - p * solution[self._I + self._aux]
+        w = eta @ solution[0 : self._I] - p * solution[self._I + self._aux]
         F_lower = self._c.T @ solution
         return solution, w, F_lower, G_benders, h_benders, eta, p
 
     def _benders_cut(self, solution: np.ndarray) -> Tuple[np.ndarray, float]:
-        K = (self._losses @ solution[0:self._I] >= solution[-2])[:, 0]
+        K = (self._losses @ solution[0 : self._I] >= solution[-2])[:, 0]
         eta = self._p[:, K] @ self._losses[K, :]
         p = np.sum(self._p[0, K])
         return eta, p
@@ -594,4 +677,4 @@ class MeanCVaR(Optimization):
         else:
             G = sparse([self._G, self._expected_return_row])
             h = matrix([self._h, -return_target])
-        return self._benders_algorithm(G, h)[0:self._I]
+        return self._benders_algorithm(G, h)[0 : self._I]

@@ -1,14 +1,18 @@
+"""Portfolio risk helper functions."""
+
 from __future__ import annotations
 
 from typing import Tuple
 
 import numpy as np
 
-from ..optional import pd, HAS_PANDAS
+from ..optional import HAS_PANDAS, pd
+
 
 def _return_portfolio_risk(risk: np.ndarray) -> float | np.ndarray:
     """Return scalar when matrix contains a single element, otherwise 1×N array."""
     return risk.item() if risk.size == 1 else risk
+
 
 def _var_cvar_preprocess(
     e: np.ndarray,
@@ -17,6 +21,7 @@ def _var_cvar_preprocess(
     alpha: float | None,
     demean: bool | None,
 ) -> tuple[np.ndarray, np.ndarray, float]:
+    """Common preprocessing steps for VaR and CVaR."""
     alpha = 0.95 if alpha is None else float(alpha)
     if not 0 < alpha < 1:
         raise ValueError("alpha must be a float in the interval (0, 1).")
@@ -38,6 +43,7 @@ def _var_cvar_preprocess(
     pf_pnl = R_arr @ e
 
     return pf_pnl, p, alpha
+
 
 def portfolio_cvar(
     e: np.ndarray,
@@ -66,7 +72,9 @@ def portfolio_cvar(
     cvar = weighted.sum(axis=0) / denom
     return _return_portfolio_risk(-cvar.reshape(1, -1))
 
+
 def _var_calc(pf_pnl: np.ndarray, p: np.ndarray, alpha: float) -> np.ndarray:
+    """Compute the historical VaR for each column of ``pf_pnl``."""
     num_portfolios = pf_pnl.shape[1]
     var = np.full((1, num_portfolios), np.nan)
     for i, pnl in enumerate(pf_pnl.T):
@@ -74,8 +82,9 @@ def _var_calc(pf_pnl: np.ndarray, p: np.ndarray, alpha: float) -> np.ndarray:
         probs = p[order, 0]
         idx = np.searchsorted(np.cumsum(probs) - probs / 2, 1 - alpha)
         lo = max(idx - 1, 0)
-        var[0, i] = pnl[order[lo:idx + 1]].mean()
+        var[0, i] = pnl[order[lo : idx + 1]].mean()
     return var
+
 
 def portfolio_var(
     e: np.ndarray,

@@ -1,27 +1,34 @@
+"""Investor views processing via entropy pooling and Black–Litterman."""
+
 # entropy_pooling and _dual_objective functions are adapted from fortituto-tech https://github.com/fortitudo-tech/fortitudo.tech
 
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 from collections.abc import Sequence
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
 import numpy as np
-from .optional import pd, HAS_PANDAS
-from scipy.optimize import minimize, Bounds
+from scipy.optimize import Bounds, minimize
+
+from .optional import HAS_PANDAS, pd
+
 
 def _entropy_pooling_dual_objective(
-    lagrange_multipliers: np.ndarray, 
-    log_p_col: np.ndarray, 
-    lhs: np.ndarray, 
-    rhs_squeezed: np.ndarray
+    lagrange_multipliers: np.ndarray,
+    log_p_col: np.ndarray,
+    lhs: np.ndarray,
+    rhs_squeezed: np.ndarray,
 ) -> Tuple[float, np.ndarray]:
-    
+    """Objective and gradient for entropy pooling dual optimisation."""
+
     lagrange_multipliers_col = lagrange_multipliers[:, np.newaxis]
-    
+
     x = np.exp(log_p_col - 1.0 - lhs.T @ lagrange_multipliers_col)
-    
+
     rhs_vec = np.atleast_1d(rhs_squeezed)
     objective_value = np.sum(x) + lagrange_multipliers @ rhs_vec
     gradient_vector = rhs_vec - (lhs @ x).squeeze()
-    
+
     return 1000.0 * objective_value, 1000.0 * gradient_vector
+
 
 # Backwards compatible alias expected by older tests
 def _dual_objective(
@@ -35,18 +42,21 @@ def _dual_objective(
         lagrange_multipliers, log_p_col, lhs, rhs_squeezed
     )
 
+
 def entropy_pooling(
-    p: np.ndarray, 
-    A: np.ndarray, 
-    b: np.ndarray, 
+    p: np.ndarray,
+    A: np.ndarray,
+    b: np.ndarray,
     G: Optional[np.ndarray] = None,
-    h: Optional[np.ndarray] = None, 
-    method: Optional[str] = None
+    h: Optional[np.ndarray] = None,
+    method: Optional[str] = None,
 ) -> np.ndarray:
 
-    opt_method = method or 'TNC'
-    if opt_method not in ('TNC', 'L-BFGS-B'):
-        raise ValueError(f"Method {opt_method} not supported. Choose 'TNC' or 'L-BFGS-B'.")
+    opt_method = method or "TNC"
+    if opt_method not in ("TNC", "L-BFGS-B"):
+        raise ValueError(
+            f"Method {opt_method} not supported. Choose 'TNC' or 'L-BFGS-B'."
+        )
 
     p_col = p.reshape(-1, 1)
     b_col = b.reshape(-1, 1)
@@ -65,27 +75,30 @@ def entropy_pooling(
         current_rhs_stacked = np.vstack((b_col, h_col))
         bounds_lower = [-np.inf] * num_equalities + [0.0] * num_inequalities
         bounds_upper = [np.inf] * (num_equalities + num_inequalities)
-    
+
     log_p_col = np.log(p_col)
-    
+
     initial_lagrange_multipliers = np.zeros(current_lhs.shape[0])
     optimizer_bounds = Bounds(bounds_lower, bounds_upper)
-    
+
     solution = minimize(
-        _entropy_pooling_dual_objective, 
+        _entropy_pooling_dual_objective,
         x0=initial_lagrange_multipliers,
         args=(log_p_col, current_lhs, current_rhs_stacked.squeeze()),
-        method=opt_method, 
-        jac=True, 
+        method=opt_method,
+        jac=True,
         bounds=optimizer_bounds,
-        options={'maxiter': 1000, 'maxfun': 10000}
+        options={"maxiter": 1000, "maxfun": 10000},
     )
 
     optimal_lagrange_multipliers_col = solution.x[:, np.newaxis]
-    
-    q_posterior = np.exp(log_p_col - 1.0 - current_lhs.T @ optimal_lagrange_multipliers_col)
-    
+
+    q_posterior = np.exp(
+        log_p_col - 1.0 - current_lhs.T @ optimal_lagrange_multipliers_col
+    )
+
     return q_posterior
+
 
 class FlexibleViewsProcessor:
     """
@@ -303,7 +316,7 @@ class FlexibleViewsProcessor:
             elif op in ("<=", "<"):
                 G_ineq.append(row)
                 h_ineq.append(raw)
-            else:  
+            else:
                 G_ineq.append(-row)
                 h_ineq.append(-raw)
 
@@ -324,7 +337,7 @@ class FlexibleViewsProcessor:
             for asset, vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
                 idx = self._asset_idx(asset)
-                raw = tgt**2 + mu[idx] ** 2 
+                raw = tgt**2 + mu[idx] ** 2
                 add(op, R[:, idx] ** 2, raw)
 
         elif moment_type == "skew":
@@ -433,7 +446,7 @@ class BlackLittermanProcessor:
         Mutually exclusive ways to provide the prior mean π.  Exactly one
         of them must be supplied (see Notes below).
     risk_aversion : float, default 1.0
-        δ in π = δ Σ w when *market_weights* is supplied.  
+        δ in π = δ Σ w when *market_weights* is supplied.
         **Must be positive.**
     tau : float, default 0.05
         Prior shrinkage parameter τ.
@@ -541,9 +554,7 @@ class BlackLittermanProcessor:
                 return vec_like
             vec = np.asarray(vec_like, float).ravel()
             if vec.size != n_assets:
-                raise ValueError(
-                    f"`mean_views` must have length {n_assets}."
-                )
+                raise ValueError(f"`mean_views` must have length {n_assets}.")
             return {self._assets[i]: vec[i] for i in range(n_assets)}
 
         mv_dict = _vec_to_dict(mean_views)
@@ -591,7 +602,9 @@ class BlackLittermanProcessor:
             # Accept either scalar or single-element tuple/list
             if isinstance(value, Sequence):
                 if len(value) != 1:
-                    raise ValueError("Inequality views not supported – use scalar value.")
+                    raise ValueError(
+                        "Inequality views not supported – use scalar value."
+                    )
                 target = float(value[0])
             else:
                 target = float(value)
@@ -612,7 +625,9 @@ class BlackLittermanProcessor:
 
         p_mat = np.vstack(rows) if rows else np.zeros((0, n))
         q_vec = (
-            np.array(targets, dtype=float).reshape(-1, 1) if targets else np.zeros((0, 1))
+            np.array(targets, dtype=float).reshape(-1, 1)
+            if targets
+            else np.zeros((0, 1))
         )
         return p_mat, q_vec, keys
 
@@ -677,9 +692,7 @@ class BlackLittermanProcessor:
         return omega_mat
 
     # ---- posterior ----------------------------------------------------
-    def _compute_posterior(
-        self, verbose: bool
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def _compute_posterior(self, verbose: bool) -> Tuple[np.ndarray, np.ndarray]:
         tau_sigma = self._tau * self._sigma
 
         if self._k == 0:  # no views: posterior = prior
@@ -694,9 +707,7 @@ class BlackLittermanProcessor:
         rhs = self._q - self._p @ self._pi  # (K, 1)
         mean_shift = np.linalg.solve(mat_a, rhs)  # (K, 1)
 
-        posterior_mean = (
-            self._pi + tau_sigma @ self._p.T @ mean_shift
-        ).flatten()
+        posterior_mean = (self._pi + tau_sigma @ self._p.T @ mean_shift).flatten()
 
         middle = tau_sigma @ self._p.T @ np.linalg.solve(mat_a, self._p @ tau_sigma)
         posterior_cov = self._sigma + tau_sigma - middle
