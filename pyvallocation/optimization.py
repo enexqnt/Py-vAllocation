@@ -273,12 +273,56 @@ class MeanVariance(Optimization):
         A: Optional[np.ndarray] = None,
         b: Optional[np.ndarray] = None,
         v: Optional[np.ndarray] = None,
+        *,
+        tcost_lambda: Union[float, Sequence[float]] = 0.0,
+        prev_weights: Optional[np.ndarray] = None,
     ):
         self._I = len(mean)
         self._mean = mean
-        self._expected_return_row = -matrix(mean).T
-        self._P = matrix(1000 * covariance_matrix)
-        self._q = matrix(np.zeros(self._I))
+
+        if np.isscalar(tcost_lambda):
+            if tcost_lambda < 0:
+                logger.error("tcost_lambda must be non-negative, got %s", tcost_lambda)
+                raise ValueError("tcost_lambda must be non-negative")
+            self._tcost_lambda = np.full(self._I, float(tcost_lambda))
+        else:
+            tcost_arr = np.asarray(tcost_lambda, float).flatten()
+            if tcost_arr.shape != (self._I,):
+                logger.error(
+                    "tcost_lambda must have shape (%d,), got %s",
+                    self._I,
+                    tcost_arr.shape,
+                )
+                raise ValueError("tcost_lambda must match number of assets")
+            if np.any(tcost_arr < 0):
+                logger.error("tcost_lambda entries must be non-negative")
+                raise ValueError("tcost_lambda entries must be non-negative")
+            self._tcost_lambda = tcost_arr
+
+        if np.any(self._tcost_lambda > 0):
+            prev = np.zeros(self._I) if prev_weights is None else np.asarray(prev_weights, float).flatten()
+            if prev.shape != (self._I,):
+                logger.error("prev_weights must have shape (%d,), got %s", self._I, prev.shape)
+                raise ValueError("prev_weights must match number of assets")
+            self._prev_weights = prev
+            self._aux = self._I
+        else:
+            self._prev_weights = np.zeros(self._I)
+            self._aux = 0
+
+        total_vars = self._I + self._aux
+
+        self._expected_return_row = -matrix(np.hstack((mean, np.zeros(self._aux)))).T
+        P_block = np.block([
+            [1000 * covariance_matrix, np.zeros((self._I, self._aux))],
+            [np.zeros((self._aux, self._I + self._aux))],
+        ])
+        self._P = matrix(P_block)
+        if self._aux:
+            q = np.hstack((np.zeros(self._I), self._tcost_lambda))
+        else:
+            q = np.zeros(self._I)
+        self._q = matrix(q)
         self._v = (np.ones(self._I) if v is None else v).reshape(1, -1)
 
         if (G is None) ^ (h is None):
@@ -288,14 +332,39 @@ class MeanVariance(Optimization):
             logger.error("A and b must be provided together or both None")
             raise ValueError("A and b must be provided together or both None")
 
-        self._G = sparse(matrix(G)) if G is not None else sparse(matrix(np.zeros((1, self._I))))
-        self._h = matrix(h) if h is not None else matrix([0.0])
+        if G is not None:
+            G_base = np.asarray(G, float)
+            if G_base.shape[1] != self._I:
+                logger.error("G must have %d columns, got %d", self._I, G_base.shape[1])
+                raise ValueError("G has incorrect shape")
+            G_ext = np.hstack((G_base, np.zeros((G_base.shape[0], self._aux))))
+            h_base = np.asarray(h, float)
+        else:
+            G_ext = np.zeros((1, total_vars))
+            h_base = np.array([0.0])
+        # trading cost constraints
+        if self._aux:
+            tc_G1 = np.hstack((np.eye(self._I), -np.eye(self._I)))
+            tc_h1 = self._prev_weights
+            tc_G2 = np.hstack((-np.eye(self._I), -np.eye(self._I)))
+            tc_h2 = -self._prev_weights
+            G_ext = np.vstack((G_ext, tc_G1, tc_G2))
+            h_base = np.hstack((h_base, tc_h1, tc_h2))
+
+        self._G = sparse(matrix(G_ext))
+        self._h = matrix(h_base)
 
         if A is not None:
-            self._A = sparse(matrix(A))
+            A_base = np.asarray(A, float)
+            if A_base.shape[1] != self._I:
+                logger.error("A must have %d columns, got %d", self._I, A_base.shape[1])
+                raise ValueError("A has incorrect shape")
+            A_ext = np.hstack((A_base, np.zeros((A_base.shape[0], self._aux))))
+            self._A = sparse(matrix(A_ext))
             self._b = matrix(b)
         else:
-            self._A = sparse(matrix(self._v))
+            A_ext = np.hstack((self._v, np.zeros((1, self._aux))))
+            self._A = sparse(matrix(A_ext))
             self._b = matrix([1.0])
 
         _ = self._calculate_max_expected_return(feasibility_check=True)
@@ -303,12 +372,12 @@ class MeanVariance(Optimization):
     def efficient_portfolio(self, return_target: Optional[float] = None) -> np.ndarray:
         if return_target is None:
             sol = solvers.qp(self._P, self._q, self._G, self._h, self._A, self._b)
-            return np.asarray(sol["x"])
+            return np.asarray(sol["x"][: self._I])
 
         G_ext = sparse([self._G, self._expected_return_row])
         h_ext = matrix([self._h, -return_target])
         sol = solvers.qp(self._P, self._q, G_ext, h_ext, self._A, self._b)
-        return np.asarray(sol["x"])
+        return np.asarray(sol["x"][: self._I])
 
 
 class MeanCVaR(Optimization):
@@ -324,6 +393,9 @@ class MeanCVaR(Optimization):
         v: Optional[np.ndarray] = None,
         p: Optional[np.ndarray] = None,
         alpha: float = 0.95,
+        *,
+        tcost_lambda: Union[float, Sequence[float]] = 0.0,
+        prev_weights: Optional[np.ndarray] = None,
         **kwargs: dict,
     ):
         self._S, self._I = R.shape
@@ -344,20 +416,57 @@ class MeanCVaR(Optimization):
             logger.error("alpha must be a float in (0, 1), got %s", alpha)
             raise ValueError("alpha must be a float in (0, 1)")
         self._alpha = float(alpha)
-        self._c = matrix(
-            np.hstack(
-                (np.zeros(self._I), [1.0, 1.0 / (1.0 - self._alpha)])
+
+        if np.isscalar(tcost_lambda):
+            if tcost_lambda < 0:
+                logger.error("tcost_lambda must be non-negative, got %s", tcost_lambda)
+                raise ValueError("tcost_lambda must be non-negative")
+            self._tcost_lambda = np.full(self._I, float(tcost_lambda))
+        else:
+            tcost_arr = np.asarray(tcost_lambda, float).flatten()
+            if tcost_arr.shape != (self._I,):
+                logger.error(
+                    "tcost_lambda must have shape (%d,), got %s",
+                    self._I,
+                    tcost_arr.shape,
+                )
+                raise ValueError("tcost_lambda must match number of assets")
+            if np.any(tcost_arr < 0):
+                logger.error("tcost_lambda entries must be non-negative")
+                raise ValueError("tcost_lambda entries must be non-negative")
+            self._tcost_lambda = tcost_arr
+
+        if np.any(self._tcost_lambda > 0):
+            prev = np.zeros(self._I) if prev_weights is None else np.asarray(prev_weights, float).flatten()
+            if prev.shape != (self._I,):
+                logger.error("prev_weights must have shape (%d,), got %s", self._I, prev.shape)
+                raise ValueError("prev_weights must match number of assets")
+            self._prev_weights = prev
+            self._aux = self._I
+        else:
+            self._prev_weights = np.zeros(self._I)
+            self._aux = 0
+
+        total_vars = self._I + self._aux + 2
+
+        c_vec = np.hstack(
+            (
+                np.zeros(self._I),
+                self._tcost_lambda if self._aux else np.array([]),
+                [1.0, 1.0 / (1.0 - self._alpha)],
             )
         )
+        self._c = matrix(c_vec)
+
         self._expected_return_row = matrix(
-            np.hstack((-self._mean, np.zeros((1, 2))))
+            np.hstack((-self._mean, np.zeros((1, self._aux + 2))))
         )
 
         v_vec = np.ones(self._I) if v is None else np.asarray(v, float)
         if v_vec.shape != (self._I,):
             logger.error("v must have shape (I,), got %s", v_vec.shape)
             raise ValueError("v must have shape (I,)")
-        self._v = np.hstack((v_vec.reshape(1, -1), np.zeros((1, 2))))
+        self._v = np.hstack((v_vec.reshape(1, -1), np.zeros((1, self._aux + 2))))
 
         if (G is None) ^ (h is None):
             logger.error("G and h must be provided together or both None")
@@ -373,11 +482,19 @@ class MeanCVaR(Optimization):
                 logger.error("G and h have incompatible shapes: %s vs %s", G_base.shape, h_base.shape)
                 raise ValueError("G and h have incompatible shapes")
 
-        G_ext = np.hstack((G_base, np.zeros((G_base.shape[0], 2))))
-        z_row = np.zeros(self._I + 2)
+        G_ext = np.hstack((G_base, np.zeros((G_base.shape[0], self._aux + 2))))
+        z_row = np.zeros(self._I + self._aux + 2)
         z_row[-1] = -1.0
         G_full = np.vstack((G_ext, z_row))
         h_full = np.hstack((h_base, [0.0]))
+
+        if self._aux:
+            tc_G1 = np.hstack((np.eye(self._I), -np.eye(self._I), np.zeros((self._I, 2))))
+            tc_h1 = self._prev_weights
+            tc_G2 = np.hstack((-np.eye(self._I), -np.eye(self._I), np.zeros((self._I, 2))))
+            tc_h2 = -self._prev_weights
+            G_full = np.vstack((G_full, tc_G1, tc_G2))
+            h_full = np.hstack((h_full, tc_h1, tc_h2))
 
         self._G = sparse(matrix(G_full))
         self._h = matrix(h_full)
@@ -387,10 +504,15 @@ class MeanCVaR(Optimization):
             raise ValueError("A and b must be provided together or both None")
 
         if A is None:
-            self._A = sparse(matrix(self._v))
+            A_ext = np.hstack((self._v, np.zeros((1, self._aux + 2))))
+            self._A = sparse(matrix(A_ext))
             self._b = matrix([1.0])
         else:
-            A_ext = np.hstack((A, np.zeros((A.shape[0], 2))))
+            A_base = np.asarray(A, float)
+            if A_base.shape[1] != self._I:
+                logger.error("A must have %d columns, got %d", self._I, A_base.shape[1])
+                raise ValueError("A has incorrect shape")
+            A_ext = np.hstack((A_base, np.zeros((A_base.shape[0], self._aux + 2))))
             self._A = sparse(matrix(A_ext))
             self._b = matrix(b)
 
@@ -446,12 +568,12 @@ class MeanCVaR(Optimization):
         eta: np.ndarray,
         p: float,
     ) -> Tuple[np.ndarray, float, float, sparse, matrix, np.ndarray, float]:
-        G_benders = sparse([G_benders, matrix(np.block([eta, -p, -1]))])
+        new_row = np.hstack((eta, np.zeros((1, self._aux)), [[-p, -1]]))
+        G_benders = sparse([G_benders, matrix(new_row)])
         h_benders = matrix([h_benders, 0])
-        solution = np.array(
-            lp(c=self._c, G=G_benders, h=h_benders, A=self._A, b=self._b, solver='glpk')['x'])
+        solution = np.array(lp(c=self._c, G=G_benders, h=h_benders, A=self._A, b=self._b, solver='glpk')['x'])
         eta, p = self._benders_cut(solution)
-        w = eta @ solution[0:-2] - p * solution[-2]
+        w = eta @ solution[0:self._I] - p * solution[self._I + self._aux]
         F_lower = self._c.T @ solution
         return solution, w, F_lower, G_benders, h_benders, eta, p
 
@@ -475,4 +597,4 @@ class MeanCVaR(Optimization):
         else:
             G = sparse([self._G, self._expected_return_row])
             h = matrix([self._h, -return_target])
-        return self._benders_algorithm(G, h)[0:-2]
+        return self._benders_algorithm(G, h)[0:self._I]

@@ -17,10 +17,23 @@ def _entropy_pooling_dual_objective(
     
     x = np.exp(log_p_col - 1.0 - lhs.T @ lagrange_multipliers_col)
     
-    objective_value = np.sum(x) + lagrange_multipliers @ rhs_squeezed
-    gradient_vector = rhs_squeezed - (lhs @ x).squeeze()
+    rhs_vec = np.atleast_1d(rhs_squeezed)
+    objective_value = np.sum(x) + lagrange_multipliers @ rhs_vec
+    gradient_vector = rhs_vec - (lhs @ x).squeeze()
     
     return 1000.0 * objective_value, 1000.0 * gradient_vector
+
+# Backwards compatible alias expected by older tests
+def _dual_objective(
+    lagrange_multipliers: np.ndarray,
+    log_p_col: np.ndarray,
+    lhs: np.ndarray,
+    rhs_squeezed: np.ndarray,
+) -> Tuple[float, np.ndarray]:
+    """Alias for :func:`_entropy_pooling_dual_objective`."""
+    return _entropy_pooling_dual_objective(
+        lagrange_multipliers, log_p_col, lhs, rhs_squeezed
+    )
 
 def entropy_pooling(
     p: np.ndarray, 
@@ -222,7 +235,7 @@ class FlexibleViewsProcessor:
 
         q = self.posterior_probabilities
         mu_post = (R.T @ q).flatten()
-        cov_post = np.cov(R.T, aweights=q.flatten())
+        cov_post = np.cov(R.T, aweights=q.flatten(), bias=True)
 
         if self._use_pandas:
             self.posterior_returns = pd.Series(mu_post, index=self.assets)
@@ -398,7 +411,7 @@ class FlexibleViewsProcessor:
 
     def get_posterior_probabilities(self) -> np.ndarray:
         """Return the (S × 1) posterior probability vector."""
-        return self.posterior_probabilities.flatten()
+        return self.posterior_probabilities
 
     def get_posterior(
         self,

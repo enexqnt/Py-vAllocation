@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Union, Optional, Callable, List
+from typing import Union, Optional, Callable, List, Sequence
 import numpy as np
 import logging
 
@@ -253,7 +253,13 @@ class PortfolioWrapper(AssetsDistribution):
         if self.verbose:
             logger.info(f"Simulated {self.n_sim_scenarios} scenarios using distribution {self.dist}.")
 
-    def initialize_optimizer(self, risk_measure: str = 'Variance'):
+    def initialize_optimizer(
+        self,
+        risk_measure: str = 'Variance',
+        *,
+        tcost_lambda: Union[float, Sequence[float]] = 0.0,
+        prev_weights: Optional[np.ndarray] = None,
+    ):
         self.risk_measure = risk_measure
         if self.G is None or self.h is None:
             logger.warning('No custom constraints specified, using default ones')
@@ -262,12 +268,31 @@ class PortfolioWrapper(AssetsDistribution):
             if self.mu is None or self.cov is None:
                 logger.warning('Computing mean and covariance from scenarios')
                 self._compute_mv_moments()
-            self.optimizer = MeanVariance(self.mu, self.cov, self.G, self.h, self.A, self.b)
+            self.optimizer = MeanVariance(
+                self.mu,
+                self.cov,
+                self.G,
+                self.h,
+                self.A,
+                self.b,
+                tcost_lambda=tcost_lambda,
+                prev_weights=prev_weights,
+            )
         elif risk_measure == 'CVaR':
             if self.scenarios is None or self.probabilities is None:
                 logger.warning(f'Computing scenarios from mu and cov, using distribution: {self.dist}')
                 self._simulate_scenarios()
-            self.optimizer = MeanCVaR(self.scenarios, self.G, self.h, self.A, self.b, p=self.probabilities)
+            self.optimizer = MeanCVaR(
+                self.scenarios,
+                self.G,
+                self.h,
+                self.A,
+                self.b,
+                p=self.probabilities,
+                alpha=self.alpha,
+                tcost_lambda=tcost_lambda,
+                prev_weights=prev_weights,
+            )
         else:
             raise KeyError('risk_measure must be "Variance" or "CVaR"')
         if self.verbose:

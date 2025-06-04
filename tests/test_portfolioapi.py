@@ -63,6 +63,22 @@ def test_set_efficient_frontier_and_minrisk():
     assert minw.shape == (2,)
     assert np.isclose(np.sum(minw), 1.0)
 
+
+def test_wrapper_with_tcosts():
+    mu = np.array([0.05, 0.1])
+    cov = np.array([[0.02, 0.005], [0.005, 0.03]])
+    dist = AssetsDistribution(mu=mu, cov=cov)
+    wrapper = PortfolioWrapper(dist)
+    wrapper.set_constraints()
+    wrapper.initialize_optimizer(
+        'Variance',
+        tcost_lambda=np.array([0.1, 0.2]),
+        prev_weights=np.array([0.6, 0.4]),
+    )
+    w = wrapper.optimizer.efficient_portfolio()
+    assert w.shape == (2, 1)
+    assert np.isclose(np.sum(w), 1.0)
+
 def test_portfolio_cvar_function():
     ef = np.array([[0.5, 0.5], [0.5, 0.5]])
     scenarios = np.array([[0.1, -0.1], [0.2, -0.2], [0.0, 0.0]])

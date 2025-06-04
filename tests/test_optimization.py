@@ -55,3 +55,42 @@ def test_meancvar_efficient_portfolio_shape():
     w = mcvar.efficient_portfolio()
     assert w.shape == (2, 1)
     assert np.isclose(np.sum(w), 1.0, atol=1e-6)
+
+
+def test_meanvariance_with_tcosts():
+    mean = np.array([0.1, 0.2])
+    cov = np.array([[0.01, 0.002], [0.002, 0.02]])
+    G, h, A, b = optimization.build_G_h_A_b(2)
+    prev = np.array([0.4, 0.6])
+    mv = optimization.MeanVariance(
+        mean,
+        cov,
+        G,
+        h,
+        A,
+        b,
+        tcost_lambda=np.array([0.1, 0.2]),
+        prev_weights=prev,
+    )
+    w = mv.efficient_portfolio()
+    assert w.shape == (2, 1)
+    assert np.isclose(np.sum(w), 1.0)
+
+
+def test_meancvar_with_tcosts():
+    R = np.random.randn(10, 2)
+    G, h, A, b = optimization.build_G_h_A_b(2)
+    prev = np.array([0.3, 0.7])
+    mcvar = optimization.MeanCVaR(
+        R,
+        G,
+        h,
+        A,
+        b,
+        alpha=0.9,
+        tcost_lambda=np.array([0.1, 0.2]),
+        prev_weights=prev,
+    )
+    w = mcvar.efficient_portfolio()
+    assert w.shape == (2, 1)
+    assert np.isclose(np.sum(w), 1.0, atol=1e-6)
