@@ -734,15 +734,22 @@ class RobustBayes(Optimization):
             self._A = matrix(A_ext)
             self._b = matrix(b)
 
+        # store linear constraints for compatibility with base methods
+        self._G = matrix(self._Gl)
+        self._h = matrix(self._hl)
+
         P_block = np.zeros((self._I + 1, self._I + 1))
         P_block[: self._I, : self._I] = 2 * self._lambda2 * self._cov
         self._P = matrix(P_block)
         self._q = matrix(np.hstack((-self._mean, np.sqrt(self._rho))))
-        self._expected_return_row = matrix(np.hstack((-self._mean, 0.0)))
+        self._expected_return_row = matrix(np.hstack((-self._mean, 0.0))).T
+
+        # verify feasibility and store attributes for parent utilities
+        _ = self._calculate_max_expected_return(feasibility_check=True)
 
     def _solve(self, G: matrix, h: matrix) -> np.ndarray:
-        m_l = self._Gl.shape[0]
-        dims = {"l": m_l, "q": [self._I + 1], "s": []}
+        total_rows = G.size[0]
+        dims = {"l": total_rows - (self._I + 1), "q": [self._I + 1], "s": []}
         sol = solvers.coneqp(self._P, self._q, G, h, dims=dims, A=self._A, b=self._b)
         if sol["status"] != "optimal":
             raise ValueError("SOCP did not converge")

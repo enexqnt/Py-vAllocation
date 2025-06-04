@@ -376,7 +376,7 @@ class PortfolioWrapper(AssetsDistribution):
 
                 result = [_pd.Series(r, index=self._asset_index) for r in result]
             return result
-        elif self.risk_measure == "Variance":
+        elif self.risk_measure in {"Variance", "RobustBayes"}:
             vol = np.sqrt(np.sum(ef.T @ self.cov * ef.T, axis=1))
             result = self._search_risk(maxrisk, vol, ef)
             if getattr(self, "_pandas", False):
@@ -385,7 +385,7 @@ class PortfolioWrapper(AssetsDistribution):
                 result = [_pd.Series(r, index=self._asset_index) for r in result]
             return result
         else:
-            raise KeyError('risk_measure must be "Variance" or "CVaR"')
+            raise KeyError('risk_measure must be "Variance", "CVaR", or "RobustBayes"')
 
     def get_portfolios_return_constraint(
         self, lowerret: Union[float, np.ndarray]
