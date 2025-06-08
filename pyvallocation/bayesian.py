@@ -18,7 +18,7 @@ def _cholesky_pd(mat: npt.NDArray[np.floating], jitter: float = 1e-12) -> npt.ND
     If `mat` is not positive-definite, this function attempts to add a small
     multiple of the identity matrix (`jitter * I`) and retries the Cholesky
     decomposition once. This approach is discussed in Meucci's robust
-    allocation framework [cite: 1], Appendix 7.2.
+    allocation framework [cite: 8], Appendix 7.2.
 
     Args:
         mat: The square matrix (N×N) for which to compute the Cholesky decomposition.
@@ -55,7 +55,7 @@ def chi2_quantile(p: float, dof: int, sqrt: bool = False) -> float:
     This function returns the value q such that P(X <= q) = p, where X is a
     chi-square random variable with `dof` degrees of freedom. This is used, for
     example, to determine radius factors for credibility ellipsoids as in
-    Meucci's robust allocation methodology (Eqs. 6–7 in [cite: 1]).
+    Meucci's robust allocation methodology (Eqs. 6–7 in [cite: 8]).
 
     Args:
         p: The probability level (0 < p < 1).
@@ -81,13 +81,13 @@ class NIWParams:
     Container for Normal–Inverse–Wishart (NIW) posterior parameters.
 
     These parameters are computed from an NIW prior and sample statistics
-    following the update rules in Meucci's framework (Eqs. 11–14 in [cite: 1]).
+    following the update rules in Meucci's framework (Eqs. 11–14 in [cite: 8]).
 
     Attributes:
-        T1: Posterior pseudo-count for the mean (scalar integer)[cite: 1].
-        mu1: Posterior mean vector as a NumPy array or pandas.Series[cite: 1].
-        nu1: Posterior pseudo-count for the covariance (scalar integer)[cite: 1].
-        sigma1: Posterior scale matrix for the covariance (NumPy array or pandas.DataFrame)[cite: 1].
+        T1: Posterior pseudo-count for the mean (scalar integer)[cite: 8].
+        mu1: Posterior mean vector as a NumPy array or pandas.Series[cite: 8].
+        nu1: Posterior pseudo-count for the covariance (scalar integer)[cite: 8].
+        sigma1: Posterior scale matrix for the covariance (NumPy array or pandas.DataFrame)[cite: 8].
     """
     T1: int
     mu1: Union[npt.NDArray[np.floating], "pd.Series[np.floating]"]
@@ -101,12 +101,12 @@ class NIWPosterior:
 
     This class implements the Bayesian update rules for an NIW distribution,
     assuming normally distributed returns and an NIW prior. The updates follow
-    Eqs. 11–14 in Meucci's framework [cite: 1]. It also provides methods to
+    Eqs. 11–14 in Meucci's framework [cite: 8]. It also provides methods to
     calculate classical-equivalent estimators and credibility-related factors
-    used in robust Bayesian asset allocation[cite: 1].
+    used in robust Bayesian asset allocation[cite: 8].
 
     The NIW distribution is a conjugate prior for a multivariate normal
-    distribution with unknown mean and covariance matrix[cite: 1].
+    distribution with unknown mean and covariance matrix[cite: 8].
 
     How to Use:
     1.  Initialize the `NIWPosterior` object with prior parameters:
@@ -114,14 +114,14 @@ class NIWPosterior:
           a NumPy array or pandas.Series.
         * `prior_sigma` ($\Sigma_0$): Your initial estimate for the scale matrix of
           the covariance, can be a NumPy array or pandas.DataFrame.
-        * `t0` ($T_0$): Your confidence in `prior_mu`, expressed as a pseudo-count of observations[cite: 1].
-        * `nu0` ($\nu_0$): Your confidence in `prior_sigma`, expressed as a pseudo-count of observations[cite: 1].
+        * `t0` ($T_0$): Your confidence in `prior_mu`, expressed as a pseudo-count of observations[cite: 8].
+        * `nu0` ($\nu_0$): Your confidence in `prior_sigma`, expressed as a pseudo-count of observations[cite: 8].
     2.  Call the `update()` method with sample statistics derived from observed data:
         * `sample_mu` ($\hat{\mu}$): The mean vector calculated from your sample data,
           can be a NumPy array or pandas.Series.
         * `sample_sigma` ($\hat{\Sigma}$): The covariance matrix calculated from your
           sample data, can be a NumPy array or pandas.DataFrame.
-        * `n_obs` ($T$): The number of observations in your sample data.
+        * `n_obs` ($T$): The number of observations in your sample data[cite: 8].
     3.  The `update()` method returns an `NIWParams` object containing the posterior
         parameters ($T_1, \mu_1, \nu_1, \Sigma_1$). If inputs were pandas, then
         $\mu_1$ is a pandas.Series and $\Sigma_1$ is a pandas.DataFrame.
@@ -153,8 +153,8 @@ class NIWPosterior:
         Args:
             prior_mu: 1D array (length N) of prior means (μ₀), or pandas.Series.
             prior_sigma: 2D array (N×N) of the prior scale matrix (Σ₀), or pandas.DataFrame.
-            t0: Prior pseudo-count for the mean (T₀). Must be > 0[cite: 1].
-            nu0: Prior pseudo-count for the covariance (ν₀). Must be ≥ 0[cite: 1].
+            t0: Prior pseudo-count for the mean (T₀). Must be > 0[cite: 8].
+            nu0: Prior pseudo-count for the covariance (ν₀). Must be ≥ 0[cite: 8].
 
         Raises:
             ValueError: If input parameters have inconsistent shapes or invalid values.
@@ -212,16 +212,16 @@ class NIWPosterior:
         """
         Updates the posterior parameters using sample statistics.
 
-        This method implements Eqs. 11–14 from Meucci's framework [cite: 1]:
-          * $T_1 = T_0 + T$ [cite: 1]
-          * $\mu_1 = (T_0 \mu_0 + T \hat{\mu}) / T_1$ [cite: 1]
-          * $\nu_1 = \nu_0 + T$ [cite: 1]
-          * $\Sigma_1 = [\nu_0 \Sigma_0 + T \hat{\Sigma} + (\mu_0 - \hat{\mu})(\mu_0 - \hat{\mu})^T / (1/T + 1/T_0)] / \nu_1$ [cite: 1]
+        This method implements Eqs. 11–14 from Meucci's framework [cite: 8]:
+          * $T_1 = T_0 + T$ [cite: 8]
+          * $\mu_1 = (T_0 \mu_0 + T \hat{\mu}) / T_1$ [cite: 8]
+          * $\nu_1 = \nu_0 + T$ [cite: 8]
+          * $\Sigma_1 = [\nu_0 \Sigma_0 + T \hat{\Sigma} + (\mu_0 - \hat{\mu})(\mu_0 - \hat{\mu})^T / (1/T + 1/T_0)] / \nu_1$ [cite: 8]
 
         Args:
             sample_mu: 1D array (length N) of sample means ($\hat{\mu}$) or pandas.Series.
             sample_sigma: 2D array (N×N) of sample covariance matrix ($\hat{\Sigma}$) or pandas.DataFrame.
-            n_obs: Number of observations in the sample (T)[cite: 1]. Must be > 0.
+            n_obs: Number of observations in the sample (T)[cite: 8]. Must be > 0.
 
         Returns:
             A NIWParams instance containing the updated posterior parameters (T₁, μ₁, ν₁, Σ₁).
@@ -252,9 +252,9 @@ class NIWPosterior:
         _ = _cholesky_pd(ssigma)  # Ensure sample_sigma is PD or near-PD
 
         # Compute posterior scalars
-        T1 = self.t0 + n_obs     # Eq. (11) [cite: 1]
-        nu1 = self.nu0 + n_obs   # Eq. (13) [cite: 1]
-        mu1_array = (self.t0 * self.prior_mu + n_obs * smu) / T1  # Eq. (12) [cite: 1]
+        T1 = self.t0 + n_obs     # Eq. (11) [cite: 8]
+        nu1 = self.nu0 + n_obs   # Eq. (13) [cite: 8]
+        mu1_array = (self.t0 * self.prior_mu + n_obs * smu) / T1  # Eq. (12) [cite: 8]
 
         cross_term_weight_denominator = (1.0 / n_obs + 1.0 / self.t0)
         diff_mu = self.prior_mu - smu
@@ -266,7 +266,7 @@ class NIWPosterior:
                             + cross_term_weighted)
         if nu1 <= 0:
             raise ValueError("Posterior degrees of freedom ν₁ must be positive.")
-        sigma1_array = sigma1_numerator / nu1  # Eq. (14) [cite: 1]
+        sigma1_array = sigma1_numerator / nu1  # Eq. (14) [cite: 8]
 
         _ = _cholesky_pd(sigma1_array)  # Ensure Σ₁ is PD or near-PD
 
@@ -298,7 +298,7 @@ class NIWPosterior:
         """
         Computes the classical-equivalent estimator for the mean ($\hat{\mu}_{ce}$).
 
-        As per Meucci's framework (Eq. 15 in [cite: 1]), $\hat{\mu}_{ce} = \mu_1$.
+        As per Meucci's framework (Eq. 15 in [cite: 8]), $\hat{\mu}_{ce} = \mu_1$.
         Returns as a pandas.Series if prior_mu was provided as pandas.Series.
 
         Returns:
@@ -319,9 +319,9 @@ class NIWPosterior:
         """
         Computes the scatter matrix $S_{\mu}$ for the marginal posterior distribution of $\mu$.
 
-        As per Eq. 16 in Meucci's framework[cite: 1],
+        As per Eq. 16 in Meucci's framework[cite: 8],
         $S_{\mu} = (1 / T_1) * (\nu_1 / (\nu_1 - 2)) * \Sigma_1$.
-        This quantity is used in defining the location-dispersion ellipsoid for $\mu$[cite: 1].
+        This quantity is used in defining the location-dispersion ellipsoid for $\mu$[cite: 8].
         Requires $\nu_1 > 2$. Returns as a pandas.DataFrame if prior_sigma was pandas.DataFrame.
 
         Returns:
@@ -336,7 +336,7 @@ class NIWPosterior:
         if self._posterior.nu1 <= 2:
             raise ValueError("Posterior degrees of freedom ν₁ must be greater than 2 to compute S_μ.")
         factor = self._posterior.nu1 / (self._posterior.T1 * (self._posterior.nu1 - 2.0))
-        S_mu_array = factor * (
+        S_mu_array = (
             self._posterior.sigma1.values
             if isinstance(self._posterior.sigma1, pd.DataFrame)
             else self._posterior.sigma1
@@ -349,7 +349,7 @@ class NIWPosterior:
         """
         Computes the classical-equivalent estimator for the covariance matrix ($\hat{\Sigma}_{ce}$).
 
-        As per Eq. 17 in Meucci's framework[cite: 1],
+        As per Eq. 17 in Meucci's framework[cite: 8],
         $\hat{\Sigma}_{ce} = (\nu_1 / (\nu_1 + N + 1)) * \Sigma_1$.
         Returns as a pandas.DataFrame if prior_sigma was provided as pandas.DataFrame.
 
@@ -380,9 +380,9 @@ class NIWPosterior:
         """
         Computes the credibility factor γ_μ for the mean's uncertainty ellipsoid.
 
-        As per Eq. 20 in Meucci's framework[cite: 1],
+        As per Eq. 20 in Meucci's framework[cite: 8],
         γ_μ = sqrt[(q_μ^2 / T₁) * (ν₁ / (ν₁ − 2))]
-        with $q_μ^2 = Q_{χ²_N}(p_μ)$ as in Meucci[cite: 1].
+        with $q_μ^2 = Q_{χ²_N}(p_mu)$ as in Meucci[cite: 8].
 
         Args:
             p_mu: Confidence level for μ (0 < p_mu < 1).
@@ -410,7 +410,7 @@ class NIWPosterior:
         """
         Computes the credibility factor C_Σ related to Σ for robust allocation.
 
-        As per Eq. 47 in Meucci's framework[cite: 1],
+        As per Eq. 47 in Meucci's framework[cite: 8],
         C_Σ = [ν₁ / (ν₁ + N + 1)] + sqrt[2 ν₁² q_Σ² / (ν₁ + N + 1)³],
         where $q_Σ² = Q_{χ²_{dof}}(p_Σ)$ with $dof = N(N+1)/2$.
 

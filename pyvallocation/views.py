@@ -103,7 +103,7 @@ class FlexibleViewsProcessor:
     """
     Generic entropy-pooling engine supporting views on means, vols, skews and
     correlations – all at once (simultaneous EP) or block-wise (iterated EP).
-    Implements Meucci's Fully Flexible Views approach[cite: 2].
+    Implements Meucci's Fully Flexible Views approach[cite: 1].
 
     Parameters
     ----------
@@ -718,4 +718,3 @@ class BlackLittermanProcessor:
         if verbose:
             print("[BL] Posterior mean and covariance computed.")
         return posterior_mean, posterior_cov
-    

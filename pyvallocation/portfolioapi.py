@@ -218,7 +218,7 @@ class PortfolioWrapper:
             self.set_constraints({'long_only': True, 'total_weight': 1.0})
 
     def mean_variance_frontier(self, num_portfolios: int = 20) -> PortfolioFrontier:
-        """Computes the classical Mean-Variance efficient frontier[cite: 7]."""
+        """Computes the classical Mean-Variance efficient frontier[cite: 6]."""
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Mean-Variance optimization requires `mu` and `cov`.")
         self._ensure_default_constraints()
@@ -235,7 +235,7 @@ class PortfolioWrapper:
         )
         
     def mean_cvar_frontier(self, num_portfolios: int = 20, alpha: float = 0.05) -> PortfolioFrontier:
-        """Computes the Mean-CVaR efficient frontier following Rockafellar and Uryasev[cite: 6]."""
+        """Computes the Mean-CVaR efficient frontier following Rockafellar and Uryasev[cite: 5]."""
         scenarios, probs = self.dist.scenarios, self.dist.probabilities
         if scenarios is None:
             if self.dist.mu is None or self.dist.cov is None:
@@ -259,7 +259,7 @@ class PortfolioWrapper:
         )
 
     def robust_lambda_frontier(self, num_portfolios: int = 20, max_lambda: float = 2.0) -> PortfolioFrontier:
-        """Computes the robust frontier using the λ-variant from Meucci's framework[cite: 1]."""
+        """Computes the robust frontier using the λ-variant from Meucci's framework[cite: 8]."""
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Robust optimization requires `mu` (μ₁) and `cov` (Σ₁).")
         logger.info(
@@ -284,7 +284,7 @@ class PortfolioWrapper:
         )
 
     def solve_robust_gamma_portfolio(self, gamma_mu: float, gamma_sigma_sq: float) -> Tuple[pd.Series, float, float]:
-        """Solves the γ-variant robust problem from Meucci's framework[cite: 1]."""
+        """Solves the γ-variant robust problem from Meucci's framework[cite: 8]."""
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Robust optimization requires `mu` (μ₁) and `cov` (Σ₁).")
         logger.info(

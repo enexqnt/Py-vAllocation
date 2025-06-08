@@ -52,7 +52,7 @@ class Optimization:
 
 
 class MeanVariance(Optimization):
-    """Classical mean–variance optimization via Quadratic Programming[cite: 7]."""
+    """Classical mean–variance optimization via Quadratic Programming[cite: 6]."""
 
     def __init__(
         self,
@@ -127,7 +127,7 @@ class MeanCVaR(Optimization):
     """
     Mean-CVaR optimizer using a Linear Programming formulation.
 
-    CVaR is the expected loss in the worst `alpha` fraction of cases[cite: 6].
+    CVaR is the expected loss in the worst `alpha` fraction of cases[cite: 5].
     """
     
     def __init__(
@@ -229,7 +229,7 @@ class MeanCVaR(Optimization):
 class RobustOptimizer:
     """
     Robust portfolio optimization using Second-Order Cone Programming
-    following Meucci's robust allocation framework[cite: 1].
+    following Meucci's robust allocation framework[cite: 8].
 
     This optimizer is designed to handle parameter uncertainty. It assumes the
     user provides the posterior mean (as `expected_return`) and the posterior
@@ -256,7 +256,7 @@ class RobustOptimizer:
 
     def solve_lambda_variant(self, lam: float) -> OptimizationResult:
         """
-        Solves `max μᵀw − λ·‖Σ′¹/²w‖₂` (Eq. 22 in Meucci's framework[cite: 1]).
+        Solves `max μᵀw − λ·‖Σ′¹/²w‖₂` (Eq. 22 in Meucci's framework[cite: 8]).
         """
         if not isinstance(lam, numbers.Real) or lam < 0:
             raise ValueError("Lambda (λ) must be a non-negative real number.")
@@ -265,7 +265,7 @@ class RobustOptimizer:
     def solve_gamma_variant(self, gamma_mu: float, gamma_sigma_sq: float) -> OptimizationResult:
         """
         Solves `max μᵀw − γμ·t` subject to
-        `‖Σ′¹/²w‖₂ ≤ t ≤ √γ_σ` (Eq. 19 in Meucci's framework[cite: 1]).
+        `‖Σ′¹/²w‖₂ ≤ t ≤ √γ_σ` (Eq. 19 in Meucci's framework[cite: 8]).
         """
         if not isinstance(gamma_mu, numbers.Real) or gamma_mu < 0:
             raise ValueError("Gamma mu (γ_μ) must be a non-negative real number.")
