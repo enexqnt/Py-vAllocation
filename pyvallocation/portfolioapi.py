@@ -21,21 +21,31 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True, frozen=True)
 class AssetsDistribution:
-    """
-    An immutable container for asset return distributions.
+    """An immutable container for asset return distributions.
 
-    This class holds either the parametric representation (mean and covariance)
-    or the scenario-based representation (scenarios and probabilities) of
-    asset returns. It performs extensive validation to ensure data consistency.
+    This class validates and stores the statistical properties of assets, which can
+    be represented either parametrically (mean and covariance) or non-parametrically
+    (scenarios and their probabilities). It automatically handles both numpy arrays
+    and pandas Series/DataFrames, ensuring data consistency.
 
     Attributes:
-        mu (Optional[np.ndarray]): 1D array of expected returns (N,).
-        cov (Optional[np.ndarray]): 2D array of covariance matrix (N, N).
-        scenarios (Optional[np.ndarray]): 2D array of scenarios (T, N).
-        probabilities (Optional[np.ndarray]): 1D array of probabilities (T,).
-        N (int): Number of assets (calculated).
-        T (Optional[int]): Number of scenarios (calculated).
-        asset_names (List[str]): Names of the assets, inferred from pandas inputs or provided.
+        mu: A 1D array of expected returns for each asset.
+        cov: A 2D covariance matrix of asset returns.
+        scenarios: A 2D array (T, N) where each row is a market scenario.
+        probabilities: A 1D array of probabilities corresponding to each scenario.
+        asset_names: A list of names for the assets.
+        N: The number of assets, inferred from the input data.
+        T: The number of scenarios, inferred from the input data.
+
+    Assumptions & Design Choices:
+        - If `scenarios` are provided without `probabilities`, probabilities are
+          assumed to be uniform across all scenarios.
+        - If provided `probabilities` do not sum to 1.0, they are automatically
+          normalized with a warning. This choice ensures downstream solvers
+          receive valid probability distributions.
+        - If pandas objects are used for inputs, asset names are inferred from
+          their indices or columns. It is assumed that the order and names are
+          consistent across all provided pandas objects.
     """
     mu: Optional[Union[npt.NDArray[np.floating], pd.Series]] = None
     cov: Optional[Union[npt.NDArray[np.floating], pd.DataFrame]] = None
@@ -43,12 +53,12 @@ class AssetsDistribution:
     probabilities: Optional[Union[npt.NDArray[np.floating], pd.Series]] = None
     asset_names: Optional[List[str]] = None
     
-    # FIX: Declare N and T as non-initialized fields to work with slots=True
     N: int = field(init=False, repr=False)
     T: Optional[int] = field(init=False, repr=False)
 
 
     def __post_init__(self):
+        """Validates inputs and initializes calculated fields."""
         # Use object.__setattr__ as the dataclass is frozen
         mu, cov, scenarios, probs = self.mu, self.cov, self.scenarios, self.probabilities
         asset_names = self.asset_names
@@ -86,13 +96,15 @@ class AssetsDistribution:
             if scenarios.ndim != 2: raise ValueError("`scenarios` must be a 2D array (T, N).")
             T_val, N_val = scenarios.shape
             if probs is None:
+                logger.info("No probabilities provided for scenarios. Assuming a uniform distribution.")
                 probs = generate_uniform_probabilities(T_val)
             else:
                 probs = np.asarray(probs, dtype=float)
                 if probs.shape != (T_val,): raise ValueError("Probabilities must match the number of scenarios.")
-                if not np.isclose(np.sum(probs), 1.0):
-                    logger.warning("Probabilities do not sum to 1. Normalizing.")
-                    probs /= np.sum(probs)
+                prob_sum = np.sum(probs)
+                if not np.isclose(prob_sum, 1.0):
+                    logger.warning(f"Probabilities sum to {prob_sum:.4f}, not 1.0. Normalizing to enforce valid distribution.")
+                    probs /= prob_sum
             object.__setattr__(self, 'N', N_val)
             object.__setattr__(self, 'T', T_val)
         else:
@@ -113,12 +125,19 @@ class AssetsDistribution:
 
 @dataclass(frozen=True)
 class PortfolioFrontier:
-    """
-    Represents an efficient frontier of portfolios.
+    """Represents an efficient frontier of optimal portfolios.
 
-    This is an immutable container for the results of an optimization that
-    produces a set of efficient portfolios. It provides convenient methods
-    for analyzing the frontier.
+    This immutable container holds the results of an optimization run that
+    generates a series of efficient portfolios. It provides methods to easily
+    query and analyze specific portfolios on the frontier.
+
+    Attributes:
+        weights: A 2D array (N, M) of portfolio weights, where N is the
+          number of assets and M is the number of portfolios on the frontier.
+        returns: A 1D array (M,) of the expected returns for each portfolio.
+        risks: A 1D array (M,) of the risk values for each portfolio.
+        risk_measure: A string describing the risk measure used.
+        asset_names: An optional list of names for the assets.
     """
     weights: npt.NDArray[np.floating]
     returns: npt.NDArray[np.floating]
@@ -127,25 +146,40 @@ class PortfolioFrontier:
     asset_names: Optional[List[str]] = None
 
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
-        """Converts a numpy array to a pandas Series, using asset_names as the index."""
+        """Converts a numpy weights array to a named pandas Series."""
         return pd.Series(w, index=self.asset_names, name=name)
 
     def get_min_risk_portfolio(self) -> Tuple[pd.Series, float, float]:
-        """Finds the portfolio with the minimum risk on this frontier."""
+        """Finds the portfolio with the minimum risk on the frontier.
+
+        Returns:
+            A tuple containing the portfolio weights, return, and risk.
+        """
         min_risk_idx = np.argmin(self.risks)
         w = self.weights[:, min_risk_idx]
         ret, risk = self.returns[min_risk_idx], self.risks[min_risk_idx]
         return self._to_pandas(w, "Min Risk Portfolio"), ret, risk
 
     def get_max_return_portfolio(self) -> Tuple[pd.Series, float, float]:
-        """Finds the portfolio with the maximum return on this frontier."""
+        """Finds the portfolio with the maximum return on the frontier.
+
+        Returns:
+            A tuple containing the portfolio weights, return, and risk.
+        """
         max_ret_idx = np.argmax(self.returns)
         w = self.weights[:, max_ret_idx]
         ret, risk = self.returns[max_ret_idx], self.risks[max_ret_idx]
         return self._to_pandas(w, "Max Return Portfolio"), ret, risk
 
     def get_tangency_portfolio(self, risk_free_rate: float) -> Tuple[pd.Series, float, float]:
-        """Calculates the tangency portfolio (maximum Sharpe ratio)."""
+        """Calculates the tangency portfolio (maximum Sharpe ratio).
+
+        Args:
+            risk_free_rate: The risk-free rate of return.
+
+        Returns:
+            A tuple containing the portfolio weights, return, and risk.
+        """
         if np.all(np.isclose(self.risks, 0)):
              logger.warning("All portfolios on the frontier have zero risk. Sharpe ratio is undefined.")
              nan_weights = np.full(self.weights.shape[0], np.nan)
@@ -160,7 +194,18 @@ class PortfolioFrontier:
         return self._to_pandas(w, f"Tangency Portfolio (rf={risk_free_rate:.2%})"), ret, risk
 
     def portfolio_at_risk_target(self, max_risk: float) -> Tuple[pd.Series, float, float]:
-        """Finds the portfolio that maximizes return for a risk level at or below `max_risk`."""
+        """Finds the portfolio maximizing return for a given risk tolerance.
+
+        This method identifies the portfolio on the frontier that has the highest
+        return, subject to its risk being less than or equal to `max_risk`.
+
+        Args:
+            max_risk: The maximum allowable risk.
+
+        Returns:
+            A tuple containing the portfolio weights, return, and risk. Returns
+            NaN values if no portfolio meets the criterion.
+        """
         feasible_indices = np.where(self.risks <= max_risk)[0]
         if feasible_indices.size == 0:
             nan_weights = np.full(self.weights.shape[0], np.nan)
@@ -171,7 +216,17 @@ class PortfolioFrontier:
         return self._to_pandas(w, f"Portfolio (Risk <= {max_risk:.4f})"), ret, risk
 
     def portfolio_at_return_target(self, min_return: float) -> Tuple[pd.Series, float, float]:
-        """Finds the portfolio that minimizes risk for a return level at or above `min_return`."""
+        """Finds the portfolio minimizing risk for a given return target.
+
+        This method identifies the portfolio on the frontier that has the lowest
+        risk, subject to its return being greater than or equal to `min_return`.
+
+        Args:
+            min_return: The minimum required return.
+
+        Returns:
+            A tuple containing the portfolio weights, return, and risk.
+        """
         feasible_indices = np.where(self.returns >= min_return)[0]
         if feasible_indices.size == 0:
             nan_weights = np.full(self.weights.shape[0], np.nan)
@@ -183,25 +238,41 @@ class PortfolioFrontier:
 
 
 class PortfolioWrapper:
-    """
-    A high-level interface for guided portfolio construction and optimization.
+    """A high-level interface for portfolio construction and optimization.
 
-    Workflow:
-    1.  **Initialize**: `PortfolioWrapper(AssetsDistribution(...))`
-    2.  **Set Constraints**: `port.set_constraints(...)`
-    3.  **Compute**: Call a method like `mean_variance_frontier()` or `solve_robust_gamma_portfolio()`.
-    4.  **Analyze**: Use the returned `PortfolioFrontier` object or result tuple.
+    This class serves as the main entry point for performing portfolio
+    optimization. It simplifies the process by managing asset data, constraints,
+    transaction costs, and the underlying optimization models.
+
+    Typical Workflow:
+    1. Initialize: `port = PortfolioWrapper(AssetsDistribution(...))`
+    2. Set Constraints: `port.set_constraints(...)`
+    3. (Optional) Set Costs: `port.set_transaction_costs(...)`
+    4. Compute: `frontier = port.mean_variance_frontier()`
+    5. Analyze: Use the returned `PortfolioFrontier` object.
     """
     def __init__(self, distribution: AssetsDistribution):
+        """Initializes the PortfolioWrapper with asset distribution data.
+
+        Args:
+            distribution: An `AssetsDistribution` object.
+        """
         self.dist = distribution
         self.G: Optional[np.ndarray] = None
         self.h: Optional[np.ndarray] = None
         self.A: Optional[np.ndarray] = None
         self.b: Optional[np.ndarray] = None
+        self.initial_weights: Optional[np.ndarray] = None
+        self.market_impact_costs: Optional[np.ndarray] = None
+        self.proportional_costs: Optional[np.ndarray] = None
         logger.info(f"PortfolioWrapper initialized for {self.dist.N} assets.")
 
     def set_constraints(self, params: Dict[str, Any]):
-        """Builds and sets linear constraints for the portfolio."""
+        """Builds and sets linear constraints for the portfolio.
+
+        Args:
+            params: A dictionary of constraint parameters.
+        """
         logger.info(f"Setting constraints with parameters: {params}")
         try:
             G, h, A, b = build_G_h_A_b(self.dist.N, **params)
@@ -211,19 +282,83 @@ class PortfolioWrapper:
             logger.error(f"Failed to build constraints: {e}", exc_info=True)
             raise RuntimeError(f"Constraint building failed: {e}") from e
 
+    def set_transaction_costs(
+        self,
+        initial_weights: Union[pd.Series, npt.NDArray[np.floating]],
+        market_impact_costs: Optional[Union[pd.Series, npt.NDArray[np.floating]]] = None,
+        proportional_costs: Optional[Union[pd.Series, npt.NDArray[np.floating]]] = None,
+    ):
+        """Sets transaction cost parameters for rebalancing optimizations.
+
+        Assumptions & Design Choices:
+        - If pandas Series are provided, they are aligned to the official asset
+          list of the portfolio. Assets present in the portfolio but missing
+          from the input Series are assumed to have a cost of zero.
+        - `initial_weights` that do not sum to 1.0 imply a starting position
+          that includes cash (if sum < 1) or leverage (if sum > 1).
+
+        Args:
+            initial_weights: A 1D array or Series of current portfolio weights.
+            market_impact_costs: For Mean-Variance, a 1D array/Series of
+              quadratic market impact cost coefficients.
+            proportional_costs: For Mean-CVaR/Robust, a 1D array/Series of
+              linear proportional cost coefficients.
+        """
+        logger.info("Setting transaction cost parameters.")
+        
+        def _process_input(data, name):
+            if isinstance(data, pd.Series):
+                if self.dist.asset_names:
+                    original_assets = set(data.index)
+                    portfolio_assets = set(self.dist.asset_names)
+                    missing_in_input = portfolio_assets - original_assets
+                    if missing_in_input:
+                        logger.info(f"Input for '{name}' was missing {len(missing_in_input)} asset(s). Assuming their cost/weight is 0.")
+                    data = data.reindex(self.dist.asset_names).fillna(0)
+                data = data.values
+            arr = np.asarray(data, dtype=float)
+            if arr.shape != (self.dist.N,):
+                raise ValueError(f"`{name}` must have shape ({self.dist.N},), but got {arr.shape}")
+            return arr
+
+        self.initial_weights = _process_input(initial_weights, 'initial_weights')
+        weight_sum = np.sum(self.initial_weights)
+        if not np.isclose(weight_sum, 1.0):
+            logger.warning(f"Initial weights sum to {weight_sum:.4f}, not 1.0. This implies a starting cash or leverage position.")
+            
+        if market_impact_costs is not None:
+            self.market_impact_costs = _process_input(market_impact_costs, 'market_impact_costs')
+            
+        if proportional_costs is not None:
+            self.proportional_costs = _process_input(proportional_costs, 'proportional_costs')
+
     def _ensure_default_constraints(self):
-        """Sets default long-only, fully invested constraints if none are set."""
+        """Applies default constraints if none were explicitly set."""
         if self.G is None and self.A is None:
-            logger.warning("No constraints set. Applying default: long-only and sum-to-one.")
+            logger.warning("No constraints were set. To ensure a solvable problem, applying default constraints: long-only (weights >= 0) and fully-invested (weights sum to 1.0).")
             self.set_constraints({'long_only': True, 'total_weight': 1.0})
 
     def mean_variance_frontier(self, num_portfolios: int = 20) -> PortfolioFrontier:
-        """Computes the classical Mean-Variance efficient frontier[cite: 6]."""
+        """Computes the classical Mean-Variance efficient frontier.
+
+        Args:
+            num_portfolios: The number of portfolios to compute. Defaults to 20.
+
+        Returns:
+            A `PortfolioFrontier` object.
+        """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Mean-Variance optimization requires `mu` and `cov`.")
         self._ensure_default_constraints()
         
-        optimizer = MeanVariance(self.dist.mu, self.dist.cov, self.G, self.h, self.A, self.b)
+        if self.initial_weights is not None and self.market_impact_costs is not None:
+            logger.info("Computing Mean-Variance frontier with quadratic transaction costs.")
+        
+        optimizer = MeanVariance(
+            self.dist.mu, self.dist.cov, self.G, self.h, self.A, self.b,
+            initial_weights=self.initial_weights,
+            market_impact_costs=self.market_impact_costs
+        )
         weights = optimizer.efficient_frontier(num_portfolios)
         returns = self.dist.mu @ weights
         risks = np.sqrt(np.sum((weights.T @ self.dist.cov) * weights.T, axis=1))
@@ -235,19 +370,40 @@ class PortfolioWrapper:
         )
         
     def mean_cvar_frontier(self, num_portfolios: int = 20, alpha: float = 0.05) -> PortfolioFrontier:
-        """Computes the Mean-CVaR efficient frontier following Rockafellar and Uryasev[cite: 5]."""
+        """Computes the Mean-CVaR efficient frontier.
+
+        Implementation Notes:
+        - This method requires scenarios. If only `mu` and `cov` are provided,
+          it makes a strong modeling assumption to simulate scenarios from a
+          multivariate normal distribution.
+
+        Args:
+            num_portfolios: The number of portfolios to compute. Defaults to 20.
+            alpha: The tail probability for CVaR. Defaults to 0.05.
+
+        Returns:
+            A `PortfolioFrontier` object.
+        """
         scenarios, probs = self.dist.scenarios, self.dist.probabilities
         if scenarios is None:
             if self.dist.mu is None or self.dist.cov is None:
                 raise ValueError("Cannot simulate scenarios for CVaR without `mu` and `cov`.")
-            logger.info("Simulating 5000 scenarios for CVaR assuming a Normal distribution.")
-            scenarios = np.random.multivariate_normal(self.dist.mu, self.dist.cov, 5000)
-            probs = generate_uniform_probabilities(5000)
+            n_sim=5000
+            logger.info(f"No scenarios provided. Making a modeling choice to simulate {n_sim} scenarios from a Multivariate Normal distribution using the provided `mu` and `cov`.")
+            scenarios = np.random.multivariate_normal(self.dist.mu, self.dist.cov, n_sim)
+            probs = generate_uniform_probabilities(n_sim)
 
         mu_for_frontier = self.dist.mu if self.dist.mu is not None else np.mean(scenarios, axis=0)
 
         self._ensure_default_constraints()
-        optimizer = MeanCVaR(R=scenarios, p=probs, alpha=alpha, G=self.G, h=self.h, A=self.A, b=self.b)
+        if self.initial_weights is not None and self.proportional_costs is not None:
+            logger.info("Computing Mean-CVaR frontier with proportional transaction costs.")
+            
+        optimizer = MeanCVaR(
+            R=scenarios, p=probs, alpha=alpha, G=self.G, h=self.h, A=self.A, b=self.b,
+            initial_weights=self.initial_weights,
+            proportional_costs=self.proportional_costs
+        )
         weights = optimizer.efficient_frontier(num_portfolios)
         returns = mu_for_frontier @ weights
         risks = abs(np.array([portfolio_cvar(w, scenarios, probs, alpha) for w in weights.T]))
@@ -259,19 +415,36 @@ class PortfolioWrapper:
         )
 
     def robust_lambda_frontier(self, num_portfolios: int = 20, max_lambda: float = 2.0) -> PortfolioFrontier:
-        """Computes the robust frontier using the λ-variant from Meucci's framework[cite: 8]."""
+        """Computes a robust frontier based on uncertainty in expected returns.
+
+        Assumptions & Design Choices:
+        - This method follows Meucci's robust framework. It assumes that the `mu`
+          and `cov` from `AssetsDistribution` represent the posterior mean
+          and the posterior scale matrix (for uncertainty), respectively.
+
+        Args:
+            num_portfolios: The number of portfolios to compute. Defaults to 20.
+            max_lambda: The maximum value for the risk aversion parameter lambda,
+              which controls the trade-off between nominal return and robustness.
+
+        Returns:
+            A `PortfolioFrontier` object.
+        """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Robust optimization requires `mu` (μ₁) and `cov` (Σ₁).")
         logger.info(
-            "Computing robust λ-frontier. Assuming `dist.mu` is posterior mean (μ₁) "
-            "and `dist.cov` is posterior scale matrix (Σ₁), used as uncertainty covariance (Σ')."
+            "Computing robust λ-frontier. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
         )
         self._ensure_default_constraints()
+        if self.initial_weights is not None and self.proportional_costs is not None:
+            logger.info("Including proportional transaction costs in robust optimization.")
         
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
             uncertainty_covariance=self.dist.cov,
-            G=self.G, h=self.h, A=self.A, b=self.b
+            G=self.G, h=self.h, A=self.A, b=self.b,
+            initial_weights=self.initial_weights,
+            proportional_costs=self.proportional_costs
         )
         
         lambdas = np.linspace(0, max_lambda, num_portfolios)
@@ -284,19 +457,30 @@ class PortfolioWrapper:
         )
 
     def solve_robust_gamma_portfolio(self, gamma_mu: float, gamma_sigma_sq: float) -> Tuple[pd.Series, float, float]:
-        """Solves the γ-variant robust problem from Meucci's framework[cite: 8]."""
+        """Solves for a single robust portfolio with explicit uncertainty constraints.
+
+        Args:
+            gamma_mu: The penalty for estimation error in the mean.
+            gamma_sigma_sq: The squared upper bound for the total portfolio risk.
+
+        Returns:
+            A tuple containing the portfolio weights, return, and risk.
+        """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Robust optimization requires `mu` (μ₁) and `cov` (Σ₁).")
         logger.info(
-            "Solving robust γ-portfolio. Assuming `dist.mu` is posterior mean (μ₁) "
-            "and `dist.cov` is posterior scale matrix (Σ₁), used as uncertainty covariance (Σ')."
+            "Solving robust γ-portfolio. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
         )
         self._ensure_default_constraints()
+        if self.initial_weights is not None and self.proportional_costs is not None:
+            logger.info("Including proportional transaction costs in robust γ-portfolio optimization.")
 
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
             uncertainty_covariance=self.dist.cov,
-            G=self.G, h=self.h, A=self.A, b=self.b
+            G=self.G, h=self.h, A=self.A, b=self.b,
+            initial_weights=self.initial_weights,
+            proportional_costs=self.proportional_costs
         )
 
         result = optimizer.solve_gamma_variant(gamma_mu, gamma_sigma_sq)
