@@ -1,12 +1,13 @@
 import numpy as np
 import pandas as pd
+from typing import Union
 
 
 def project_mean_covariance(
-    mu: np.ndarray | pd.Series,
-    cov: np.ndarray | pd.DataFrame,
+    mu: Union[np.ndarray, pd.Series],
+    cov: Union[np.ndarray, pd.DataFrame],
     annualization_factor: float,
-) -> tuple[np.ndarray | pd.Series, np.ndarray | pd.DataFrame]:
+) -> tuple[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.DataFrame]]:
     """Scale mean and covariance by ``annualization_factor``."""
 
     return mu * annualization_factor, cov * annualization_factor

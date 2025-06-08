@@ -1,4 +1,5 @@
 import logging
+from typing import Union
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -39,9 +40,9 @@ def silverman_bandwidth(x: np.ndarray) -> float:
 
 def generate_gaussian_kernel_probabilities(
     x: np.ndarray,
-    v: np.ndarray | None = None,
-    h: float | None = None,
-    x_T: float | None = None,
+    v: Union[np.ndarray, None] = None,
+    h: Union[float, None] = None,
+    x_T: Union[float, None] = None,
 ) -> np.ndarray:
     """Generate kernel-based probabilities for ``v`` centred on ``x_T``."""
 

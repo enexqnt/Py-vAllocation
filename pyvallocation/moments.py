@@ -1,3 +1,16 @@
+"""
+This module provides functions for estimating and shrinking statistical moments
+(mean and covariance matrix) of asset returns.
+
+It includes:
+-   `estimate_sample_moments`: For computing weighted sample mean and covariance.
+-   `shrink_mean_jorion`: Implements the Bayes-Stein shrinkage estimator for the mean vector.
+-   `shrink_covariance_ledoit_wolf`: Implements the Ledoit-Wolf shrinkage estimator for the covariance matrix.
+
+These tools are essential for robust asset allocation, especially when dealing
+with limited historical data or high-dimensional portfolios.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -37,7 +50,35 @@ def _wrap(x: np.ndarray, labels: Optional[Sequence[str]], vector: bool) -> Array
 
 
 def estimate_sample_moments(R: ArrayLike, p: ArrayLike) -> Tuple[ArrayLike, ArrayLike]:
-    """Return the weighted mean and covariance of scenarios."""
+    """
+    Estimates the weighted mean vector and covariance matrix from scenarios.
+
+    This function computes the first two statistical moments (mean and covariance)
+    of asset returns, given a set of scenarios and their associated probabilities.
+    The scenarios `R` represent different possible outcomes for asset returns,
+    and `p` represents the probability of each scenario.
+
+    Args:
+        R (ArrayLike): A 2D array-like object (e.g., :class:`numpy.ndarray`,
+            :class:`pandas.DataFrame`) of shape (T, N), where T is the number of
+            scenarios/observations and N is the number of assets. Each row
+            represents a scenario of asset returns.
+        p (ArrayLike): A 1D array-like object (e.g., :class:`numpy.ndarray`,
+            :class:`pandas.Series`) of shape (T,), representing the probabilities
+            associated with each scenario in `R`. These probabilities must be
+            non-negative and sum to one.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: A tuple containing:
+            -   **mu** (ArrayLike): The weighted mean vector of asset returns.
+                If `R` or `p` were pandas objects, `mu` will be a :class:`pandas.Series`.
+            -   **S** (ArrayLike): The weighted covariance matrix of asset returns.
+                If `R` or `p` were pandas objects, `S` will be a :class:`pandas.DataFrame`.
+
+    Raises:
+        ValueError: If `p` has a length mismatch with `R`, or if `p` contains
+            negative values or does not sum to one.
+    """
     R_arr, p_arr = np.asarray(R), np.asarray(p)
     T, N = R_arr.shape
 
@@ -63,7 +104,34 @@ def estimate_sample_moments(R: ArrayLike, p: ArrayLike) -> Tuple[ArrayLike, Arra
 
 
 def shrink_mean_jorion(mu: ArrayLike, S: ArrayLike, T: int) -> ArrayLike:
-    """Bayes–Stein shrinkage of the mean vector as in Jorion[cite: 5]."""
+    """
+    Applies Bayes–Stein shrinkage to the mean vector as in Jorion :cite:p:`jorion1986bayes`.
+
+    This shrinkage estimator aims to improve the out-of-sample performance of
+    mean estimates, especially when the number of assets (N) is large relative
+    to the number of observations (T). It shrinks the sample mean towards a
+    common mean (e.g., the global minimum variance portfolio mean).
+
+    Args:
+        mu (ArrayLike): The sample mean vector (1D array-like, length N).
+            Can be a :class:`numpy.ndarray` or :class:`pandas.Series`.
+        S (ArrayLike): The sample covariance matrix (2D array-like, N×N).
+            Can be a :class:`numpy.ndarray` or :class:`pandas.DataFrame`.
+        T (int): The number of observations (scenarios) used to estimate `mu` and `S`.
+
+    Returns:
+        ArrayLike: The Bayes-Stein shrunk mean vector. If `mu` was a
+        :class:`pandas.Series`, the output will also be a :class:`pandas.Series`.
+
+    Raises:
+        ValueError: If input dimensions are invalid (e.g., T <= 0, N <= 2,
+            or `S` shape mismatch), or if the covariance matrix `S` is singular.
+
+    Notes:
+        A small jitter (1e-8 * identity matrix) is added to `S` before inversion
+        to handle potential singularity issues. The shrinkage intensity `v` is
+        clipped between 0 and 1 to ensure a valid shrinkage factor.
+    """
     mu_arr, S_arr = np.asarray(mu), np.asarray(S)
     N = mu_arr.size
     if T <= 0 or N <= 2 or S_arr.shape != (N, N):
@@ -98,7 +166,46 @@ def shrink_covariance_ledoit_wolf(
     S_hat: ArrayLike,
     target: str = "identity",
 ) -> ArrayLike:
-    """Ledoit–Wolf shrinkage estimator for the covariance matrix[cite: 4]."""
+    """
+    Applies the Ledoit–Wolf shrinkage estimator for the covariance matrix :cite:p:`Ledoit2004`.
+
+    This estimator provides a well-conditioned covariance matrix, especially useful
+    when the number of observations is small relative to the number of assets,
+    or when the sample covariance matrix is ill-conditioned. It shrinks the
+    sample covariance matrix towards a structured target matrix.
+
+    Args:
+        R (ArrayLike): A 2D array-like object (e.g., :class:`numpy.ndarray`,
+            :class:`pandas.DataFrame`) of shape (T, N), where T is the number of
+            observations and N is the number of assets. These are the returns data.
+        S_hat (ArrayLike): The sample covariance matrix (2D array-like, N×N).
+            Can be a :class:`numpy.ndarray` or :class:`pandas.DataFrame`.
+        target (str, optional): The shrinkage target.
+            -   ``"identity"``: Shrinks towards a scaled identity matrix.
+            -   ``"constant_correlation"``: Shrinks towards a constant correlation matrix.
+            Defaults to ``"identity"``.
+
+    Returns:
+        ArrayLike: The shrunk covariance matrix. If `R` or `S_hat` were pandas
+        objects, the output will be a :class:`pandas.DataFrame`.
+
+    Raises:
+        ValueError: If input dimensions are invalid (e.g., T = 0, or `S_hat`
+            shape mismatch), or if an unsupported `target` is specified.
+
+    Notes:
+        The function calculates various components of the Ledoit-Wolf formula:
+        -   `F`: The target matrix.
+        -   `pi_mat`, `pi_hat`, `diag_pi`, `off_pi`, `rho_hat`: Components related
+            to the estimation of the optimal shrinkage intensity.
+        -   `gamma_hat`: The squared Frobenius norm of the difference between
+            the sample covariance and the target matrix.
+        -   `kappa`: Intermediate value for shrinkage intensity.
+        -   `delta`: The optimal shrinkage intensity, clipped between 0 and 1.
+
+        The final shrunk covariance matrix is ensured to be positive semi-definite
+        using `ensure_psd_matrix`.
+    """
     R_arr, S_arr = np.asarray(R), np.asarray(S_hat)
     T, N = R_arr.shape
     if T == 0 or S_arr.shape != (N, N):

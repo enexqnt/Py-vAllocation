@@ -26,7 +26,12 @@ extensions = [
     'sphinx.ext.todo',
     'sphinx.ext.napoleon',
     'sphinx_rtd_theme',
+    'sphinxcontrib.bibtex',
 ]
+
+bibtex_bibfiles = ['references.bib']
+bibtex_reference_style = 'author_year' # or 'label' or 'numeric'
+bibtex_cite_key_template = '{key}'
 
 # Mock heavy dependencies so autodoc works even if they are not installed.
 autodoc_mock_imports = [

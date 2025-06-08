@@ -26,6 +26,3 @@ Module contents
 ---------------
 
 .. automodule:: pyvallocation
-   :members:
-   :show-inheritance:
-   :undoc-members:

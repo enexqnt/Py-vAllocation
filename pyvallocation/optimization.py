@@ -1,3 +1,20 @@
+"""
+This module provides classes for solving various portfolio optimization problems,
+including Mean-Variance, Mean-CVaR, and Robust Optimization.
+
+It leverages `cvxopt` for solving quadratic programming (QP) and conic
+programming (SOCP) problems, and integrates with Bayesian methods for robust
+estimation.
+
+Classes:
+-   `OptimizationResult`: A dataclass to hold the results of an optimization.
+-   `Optimization`: A base class providing common optimization utilities.
+-   `MeanVariance`: Implements classical Mean-Variance portfolio optimization.
+-   `MeanCVaR`: Implements Mean-Conditional Value-at-Risk portfolio optimization.
+-   `RobustOptimizer`: Implements robust portfolio optimization based on
+    uncertainty sets for mean and covariance.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -11,20 +28,45 @@ from cvxopt import matrix, solvers
 
 from .bayesian import _cholesky_pd
 
-solvers.options["glpk"] = {"msg_lev": "GLP_MSG_OFF"}
-solvers.options["show_progress"] = False
+solvers.options.update({"glpk": {"msg_lev": "GLP_MSG_OFF"}, "show_progress": False})
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True, frozen=True)
 class OptimizationResult:
+    """
+    A dataclass to store the results of a portfolio optimization.
+
+    Attributes:
+        weights (npt.NDArray[np.floating]): The optimal portfolio weights as a NumPy array.
+        nominal_return (float): The nominal expected return of the optimized portfolio.
+        risk (float): The calculated risk measure of the optimized portfolio
+                      (e.g., standard deviation for Mean-Variance, CVaR for Mean-CVaR,
+                      or the uncertainty budget for Robust Optimization).
+    """
     weights: npt.NDArray[np.floating]
     nominal_return: float
     risk: float
 
 
 class Optimization:
+    """
+    Base class for portfolio optimization problems.
+
+    Provides common attributes and a utility method for calculating the maximum
+    expected return under given constraints.
+
+    Attributes:
+        _I (int): The number of assets in the portfolio.
+        _mean (np.ndarray): The expected return vector of assets.
+        _G (cvxopt.matrix): Matrix for inequality constraints (G * x <= h).
+        _h (cvxopt.matrix): Vector for inequality constraints (G * x <= h).
+        _A (cvxopt.matrix): Matrix for equality constraints (A * x = b).
+        _b (cvxopt.matrix): Vector for equality constraints (A * x = b).
+        _expected_return_row (cvxopt.matrix): Row vector representing the
+            negative of the expected returns, used for objective function.
+    """
     _I: int
     _mean: np.ndarray
     _G: matrix
@@ -34,6 +76,20 @@ class Optimization:
     _expected_return_row: matrix
 
     def _calculate_max_expected_return(self) -> float:
+        """
+        Calculates the maximum possible expected return given the current constraints.
+
+        This is solved as a linear programming problem where the objective is
+        to maximize the portfolio's expected return subject to the defined
+        linear equality and inequality constraints.
+
+        Returns:
+            float: The maximum expected return achievable.
+
+        Raises:
+            ValueError: If the LP solver fails to find an optimal solution,
+                        indicating infeasible or unbounded constraints.
+        """
         c = self._expected_return_row.T
         sol = solvers.lp(c, self._G, self._h, self._A, self._b, solver="glpk")
         if sol["status"] != "optimal":
@@ -45,6 +101,25 @@ class Optimization:
 
 
 class MeanVariance(Optimization):
+    """
+    Implements classical Mean-Variance portfolio optimization.
+
+    This class solves the quadratic programming problem to find portfolio
+    weights that minimize risk for a given level of expected return, or
+    maximize return for a given level of risk. It supports linear equality
+    and inequality constraints, as well as transaction costs.
+
+    The optimization problem is formulated as:
+
+    Minimize: :math:`w^T \\Sigma w - w^T \\mu` (or similar, depending on formulation)
+    Subject to:
+        - Linear inequality constraints: :math:`G w \\le h`
+        - Linear equality constraints: :math:`A w = b`
+        - Optional: Target return constraint
+        - Optional: Transaction costs
+
+    Uses `cvxopt.solvers.qp` for solving the quadratic program.
+    """
     def __init__(
         self,
         mean: np.ndarray,
@@ -56,6 +131,29 @@ class MeanVariance(Optimization):
         initial_weights: Optional[npt.NDArray[np.floating]] = None,
         market_impact_costs: Optional[npt.NDArray[np.floating]] = None,
     ):
+        """
+        Initializes the MeanVariance optimizer.
+
+        Args:
+            mean (np.ndarray): Expected return vector of assets (N,).
+            covariance_matrix (np.ndarray): Covariance matrix of asset returns (N, N).
+            G (Optional[np.ndarray]): Matrix for linear inequality constraints (M, N).
+                Defaults to None.
+            h (Optional[np.ndarray]): Vector for linear inequality constraints (M,).
+                Defaults to None.
+            A (Optional[np.ndarray]): Matrix for linear equality constraints (P, N).
+                Defaults to None.
+            b (Optional[np.ndarray]): Vector for linear equality constraints (P,).
+                Defaults to None.
+            initial_weights (Optional[npt.NDArray[np.floating]]): Current portfolio weights (N,).
+                Required if `market_impact_costs` are provided. Defaults to None.
+            market_impact_costs (Optional[npt.NDArray[np.floating]]): Proportional transaction
+                costs for each asset (N,). Applied as a quadratic cost.
+                Required if `initial_weights` are provided. Defaults to None.
+
+        Raises:
+            ValueError: If dimensions of transaction cost parameters do not match.
+        """
         self._I = len(mean)
         self._mean = mean
         self._cov = covariance_matrix
@@ -83,6 +181,19 @@ class MeanVariance(Optimization):
         self._expected_return_row = -matrix(self._mean).T
 
     def efficient_portfolio(self, return_target: Optional[float] = None) -> np.ndarray:
+        """
+        Solves for the efficient portfolio weights.
+
+        Args:
+            return_target (Optional[float]): The target expected return for the portfolio.
+                If None, the minimum variance portfolio is returned. Defaults to None.
+
+        Returns:
+            np.ndarray: A 1D NumPy array of optimal portfolio weights.
+
+        Raises:
+            RuntimeError: If the QP solver fails to find an optimal solution.
+        """
         G, h = self._G, self._h
         if return_target is not None:
             if G is None:
@@ -100,6 +211,23 @@ class MeanVariance(Optimization):
         return np.array(sol["x"]).flatten()
 
     def efficient_frontier(self, num_portfolios: int) -> np.ndarray:
+        """
+        Computes a series of efficient portfolios to construct the efficient frontier.
+
+        The frontier spans from the minimum variance portfolio up to the maximum
+        expected return portfolio achievable under the given constraints.
+
+        Args:
+            num_portfolios (int): The number of portfolios to compute along the frontier.
+
+        Returns:
+            np.ndarray: A 2D NumPy array of shape (N, num_portfolios), where N is
+            the number of assets. Each column represents the weights of an
+            efficient portfolio.
+
+        Raises:
+            RuntimeError: If the solver fails for any target return along the frontier.
+        """
         w_min_vol = self.efficient_portfolio()
         min_ret = self._mean @ w_min_vol
         max_ret = self._calculate_max_expected_return()
@@ -131,6 +259,25 @@ class MeanVariance(Optimization):
 
 
 class MeanCVaR(Optimization):
+    """
+    Implements Mean-Conditional Value-at-Risk (CVaR) portfolio optimization.
+
+    This class solves a linear programming problem to find portfolio weights
+    that minimize CVaR for a given expected return, or maximize expected return
+    for a given CVaR. It supports linear equality and inequality constraints,
+    and proportional transaction costs.
+
+    The optimization problem is formulated as:
+
+    Minimize: :math:`CVaR_{\\alpha}(R_p)`
+    Subject to:
+        - Expected return constraint: :math:`E[R_p] \\ge R_{target}`
+        - Linear inequality constraints: :math:`G w \\le h`
+        - Linear equality constraints: :math:`A w = b`
+        - Optional: Transaction costs
+
+    Uses `cvxopt.solvers.lp` for solving the linear program.
+    """
     def __init__(
         self,
         R: np.ndarray,
@@ -143,6 +290,33 @@ class MeanCVaR(Optimization):
         initial_weights: Optional[npt.NDArray[np.floating]] = None,
         proportional_costs: Optional[npt.NDArray[np.floating]] = None,
     ):
+        """
+        Initializes the MeanCVaR optimizer.
+
+        Args:
+            R (np.ndarray): Scenarios of asset returns (T, N), where T is the number
+                of scenarios and N is the number of assets.
+            p (np.ndarray): Probabilities of each scenario (T,). Must be non-negative
+                and sum to one.
+            alpha (float): The confidence level for CVaR calculation (e.g., 0.05 for 5% CVaR).
+                Must be between 0 and 1 (exclusive).
+            G (Optional[np.ndarray]): Matrix for linear inequality constraints (M, N).
+                Defaults to None.
+            h (Optional[np.ndarray]): Vector for linear inequality constraints (M,).
+                Defaults to None.
+            A (Optional[np.ndarray]): Matrix for linear equality constraints (P, N).
+                Defaults to None.
+            b (Optional[np.ndarray]): Vector for linear equality constraints (P,).
+                Defaults to None.
+            initial_weights (Optional[npt.NDArray[np.floating]]): Current portfolio weights (N,).
+                Required if `proportional_costs` are provided. Defaults to None.
+            proportional_costs (Optional[npt.NDArray[np.floating]]): Proportional transaction
+                costs for each asset (N,). Required if `initial_weights` are provided.
+                Defaults to None.
+
+        Raises:
+            ValueError: If dimensions of transaction cost parameters do not match.
+        """
         T, N = R.shape
         self._I = N
         self._mean = p @ R
@@ -210,6 +384,19 @@ class MeanCVaR(Optimization):
 
 
     def efficient_portfolio(self, return_target: Optional[float] = None) -> np.ndarray:
+        """
+        Solves for the efficient portfolio weights for Mean-CVaR optimization.
+
+        Args:
+            return_target (Optional[float]): The target expected return for the portfolio.
+                If None, the minimum CVaR portfolio is returned. Defaults to None.
+
+        Returns:
+            np.ndarray: A 1D NumPy array of optimal portfolio weights.
+
+        Raises:
+            RuntimeError: If the LP solver fails to find an optimal solution.
+        """
         G, h = self._G, self._h
         if return_target is not None:
             if G is None:
@@ -227,6 +414,25 @@ class MeanCVaR(Optimization):
         return np.array(sol["x"]).flatten()[: self._I]
 
     def efficient_frontier(self, num_portfolios: int) -> np.ndarray:
+        """
+        Computes a series of efficient portfolios to construct the Mean-CVaR efficient frontier.
+
+        The frontier spans from the minimum CVaR portfolio up to the maximum
+        expected return portfolio achievable under the given constraints.
+
+        Args:
+            num_portfolios (int): The number of portfolios to compute along the frontier.
+
+        Returns:
+            np.ndarray: A 2D NumPy array of shape (N, num_portfolios), where N is
+            the number of assets. Each column represents the weights of an
+            efficient portfolio.
+
+        Raises:
+            RuntimeError: If the solver fails for any target return along the frontier.
+            ValueError: If the minimum and maximum returns are too close, indicating
+                        a single-point frontier.
+        """
         w_min_cvar = self.efficient_portfolio()
         min_ret = self._mean @ w_min_cvar
         max_ret = self._calculate_max_expected_return()
@@ -258,6 +464,32 @@ class MeanCVaR(Optimization):
 
 
 class RobustOptimizer:
+    """
+    Implements robust portfolio optimization based on uncertainty sets for
+    expected return and covariance matrix.
+
+    This class solves a Second-Order Cone Program (SOCP) to find portfolio
+    weights that are robust to estimation errors in the input parameters.
+    It supports two main variants:
+    -   **Lambda (λ) variant**: Controls the trade-off between nominal return
+        and robustness, similar to a risk-aversion parameter.
+    -   **Gamma (γ) variant**: Explicitly defines the size of the uncertainty
+        ellipsoids for the mean and covariance, allowing for direct control
+        over the level of robustness.
+
+    The optimization problem is formulated as:
+
+    Maximize: :math:`w^T \\mu - \\lambda \\sqrt{w^T \\Sigma' w}` (Lambda variant)
+    Minimize: :math:`t`
+    Subject to:
+        - :math:`w^T \\mu - t \\ge R_{target}` (Gamma variant)
+        - :math:`\\|\\Sigma'^{1/2} w\\|_2 \\le t`
+        - Linear inequality constraints: :math:`G w \\le h`
+        - Linear equality constraints: :math:`A w = b`
+        - Optional: Transaction costs
+
+    Uses `cvxopt.solvers.conelp` for solving the second-order cone program.
+    """
     def __init__(
         self,
         expected_return: npt.NDArray[np.floating],
@@ -269,6 +501,34 @@ class RobustOptimizer:
         initial_weights: Optional[npt.NDArray[np.floating]] = None,
         proportional_costs: Optional[npt.NDArray[np.floating]] = None,
     ):
+        """
+        Initializes the RobustOptimizer.
+
+        Args:
+            expected_return (npt.NDArray[np.floating]): The nominal expected return
+                vector of assets (N,). This is typically the posterior mean from
+                a Bayesian update.
+            uncertainty_covariance (npt.NDArray[np.floating]): The uncertainty
+                covariance matrix (N, N). This is typically related to the
+                posterior covariance of the mean estimate (e.g., :math:`S_{\\mu}`
+                from :class:`~pyvallocation.bayesian.NIWPosterior`).
+            G (Optional[npt.NDArray[np.floating]]): Matrix for linear inequality
+                constraints (M, N). Defaults to None.
+            h (Optional[npt.NDArray[np.floating]]): Vector for linear inequality
+                constraints (M,). Defaults to None.
+            A (Optional[npt.NDArray[np.floating]]): Matrix for linear equality
+                constraints (P, N). Defaults to None.
+            b (Optional[npt.NDArray[np.floating]]): Vector for linear equality
+                constraints (P,). Defaults to None.
+            initial_weights (Optional[npt.NDArray[np.floating]]): Current portfolio weights (N,).
+                Required if `proportional_costs` are provided. Defaults to None.
+            proportional_costs (Optional[npt.NDArray[np.floating]]): Proportional transaction
+                costs for each asset (N,). Required if `initial_weights` are provided.
+                Defaults to None.
+
+        Raises:
+            ValueError: If dimensions of transaction cost parameters do not match.
+        """
         self.mu = np.asarray(expected_return, dtype=float)
         self.sigma_prime = np.asarray(uncertainty_covariance, dtype=float)
         self.N = self.mu.size
@@ -285,6 +545,25 @@ class RobustOptimizer:
             raise ValueError("Dimension mismatch in transaction cost parameters.")
 
     def solve_lambda_variant(self, lam: float) -> OptimizationResult:
+        """
+        Solves the robust optimization problem using the lambda (λ) variant.
+
+        This variant maximizes a utility function that balances expected return
+        against the uncertainty in the return estimate, controlled by `lam`.
+
+        Args:
+            lam (float): The lambda (λ) parameter, a non-negative real number
+                controlling the trade-off between expected return and robustness.
+                Higher values imply more emphasis on robustness.
+
+        Returns:
+            OptimizationResult: An object containing the optimal weights,
+            nominal return, and the risk (uncertainty budget `t`).
+
+        Raises:
+            ValueError: If `lam` is negative.
+            RuntimeError: If the SOCP solver fails to find an optimal solution.
+        """
         if not isinstance(lam, numbers.Real) or lam < 0:
             raise ValueError("Lambda (λ) must be a non-negative real number.")
         return self._solve_socp(lam=lam)
@@ -292,6 +571,28 @@ class RobustOptimizer:
     def solve_gamma_variant(
         self, gamma_mu: float, gamma_sigma_sq: float
     ) -> OptimizationResult:
+        """
+        Solves the robust optimization problem using the gamma (γ) variant.
+
+        This variant minimizes the uncertainty budget `t` subject to a minimum
+        expected return and explicit bounds on the uncertainty of mean and
+        covariance estimates.
+
+        Args:
+            gamma_mu (float): The gamma mu (γ_μ) parameter, a non-negative real
+                number defining the radius of the uncertainty ellipsoid for the mean.
+            gamma_sigma_sq (float): The gamma sigma squared (γ_σ) parameter, a
+                non-negative real number defining the radius of the uncertainty
+                ellipsoid for the covariance.
+
+        Returns:
+            OptimizationResult: An object containing the optimal weights,
+            nominal return, and the risk (uncertainty budget `t`).
+
+        Raises:
+            ValueError: If `gamma_mu` or `gamma_sigma_sq` are negative.
+            RuntimeError: If the SOCP solver fails to find an optimal solution.
+        """
         if not isinstance(gamma_mu, numbers.Real) or gamma_mu < 0:
             raise ValueError("Gamma mu (γ_μ) must be a non-negative real number.")
         if not isinstance(gamma_sigma_sq, numbers.Real) or gamma_sigma_sq < 0:
@@ -303,6 +604,27 @@ class RobustOptimizer:
     def efficient_frontier(
         self, lambdas: Sequence[float]
     ) -> Tuple[list[float], list[float], npt.NDArray[np.floating]]:
+        """
+        Computes a series of robust efficient portfolios for different lambda values.
+
+        This method generates the robust efficient frontier by solving the
+        lambda variant of the robust optimization problem for a range of
+        lambda values.
+
+        Args:
+            lambdas (Sequence[float]): A sequence of non-negative lambda values
+                for which to compute efficient portfolios.
+
+        Returns:
+            Tuple[list[float], list[float], npt.NDArray[np.floating]]: A tuple containing:
+                -   **returns** (list[float]): A list of nominal expected returns for
+                    each portfolio on the frontier.
+                -   **risks** (list[float]): A list of risk measures (uncertainty budget `t`)
+                    for each portfolio on the frontier.
+                -   **weights** (npt.NDArray[np.floating]): A 2D NumPy array of shape
+                    (N, len(lambdas)), where each column represents the weights of
+                    an efficient portfolio.
+        """
         results = [self.solve_lambda_variant(l) for l in lambdas]
         returns = [res.nominal_return for res in results]
         risks = [res.risk for res in results]
@@ -310,6 +632,26 @@ class RobustOptimizer:
         return returns, risks, weights
 
     def _solve_socp(self, **kwargs) -> OptimizationResult:
+        """
+        Internal method to solve the Second-Order Cone Program (SOCP).
+
+        This method constructs and solves the SOCP based on the provided
+        parameters, handling both lambda and gamma variants, and incorporating
+        transaction costs if specified.
+
+        Args:
+            **kwargs: Keyword arguments for the optimization variant:
+                -   `lam` (float): For the lambda variant, the penalty parameter.
+                -   `gamma_mu` (float): For the gamma variant, the mean uncertainty radius.
+                -   `gamma_sigma_sq` (float): For the gamma variant, the covariance uncertainty radius.
+
+        Returns:
+            OptimizationResult: An object containing the optimal weights,
+            nominal return, and the risk (uncertainty budget `t`).
+
+        Raises:
+            RuntimeError: If the SOCP solver fails to find an optimal solution.
+        """
         penalty = kwargs.get("lam", kwargs.get("gamma_mu"))
         
         if not self.has_costs:
@@ -362,7 +704,7 @@ class RobustOptimizer:
             A_trade = np.hstack([np.eye(self.N), np.zeros((self.N, 1)), -np.eye(self.N), np.eye(self.N)])
             b_trade = self.initial_weights
 
-            A_eq, b_eq = matrix(A_trade), matrix(b_trade)
+            A_lp, b_lp = matrix(A_trade), matrix(b_trade)
             if self.A is not None:
                 A_user = np.hstack([self.A, np.zeros((self.A.shape[0], 1 + 2*self.N))])
                 A_eq = matrix(np.vstack([A_user, A_trade]))

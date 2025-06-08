@@ -21,36 +21,43 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True, frozen=True)
 class AssetsDistribution:
-    """An immutable container for asset return distributions.
+    """
+    An immutable container for asset return distributions.
 
     This class validates and stores the statistical properties of assets, which can
     be represented either parametrically (mean and covariance) or non-parametrically
-    (scenarios and their probabilities). It automatically handles both numpy arrays
+    (scenarios and their probabilities). It automatically handles both NumPy arrays
     and pandas Series/DataFrames, ensuring data consistency.
 
     Attributes:
-        mu: A 1D array of expected returns for each asset.
-        cov: A 2D covariance matrix of asset returns.
-        scenarios: A 2D array (T, N) where each row is a market scenario.
-        probabilities: A 1D array of probabilities corresponding to each scenario.
-        asset_names: A list of names for the assets.
-        N: The number of assets, inferred from the input data.
-        T: The number of scenarios, inferred from the input data.
+        mu (Optional[Union[npt.NDArray[np.floating], pd.Series]]): A 1D array or
+            :class:`pandas.Series` of expected returns for each asset (N,).
+        cov (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): A 2D covariance
+            matrix of asset returns (N, N).
+        scenarios (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): A 2D array or
+            :class:`pandas.DataFrame` of shape (T, N) where each row is a market scenario.
+        probabilities (Optional[Union[npt.NDArray[np.floating], pd.Series]]): A 1D array or
+            :class:`pandas.Series` of probabilities corresponding to each scenario (T,).
+        asset_names (Optional[List[str]]): A list of names for the assets. If not provided,
+            inferred from pandas inputs.
+        N (int): The number of assets, inferred from the input data.
+        T (Optional[int]): The number of scenarios, inferred from the input data. None if
+            parametric distribution is used.
 
     Assumptions & Design Choices:
-        - If `scenarios` are provided without `probabilities`, probabilities are
+        - If ``scenarios`` are provided without ``probabilities``, probabilities are
           assumed to be uniform across all scenarios.
-        - If provided `probabilities` do not sum to 1.0, they are automatically
+        - If provided ``probabilities`` do not sum to 1.0, they are automatically
           normalized with a warning. This choice ensures downstream solvers
           receive valid probability distributions.
         - If pandas objects are used for inputs, asset names are inferred from
           their indices or columns. It is assumed that the order and names are
           consistent across all provided pandas objects.
     """
-    mu: Optional[Union[npt.NDArray[np.floating], pd.Series]] = None
-    cov: Optional[Union[npt.NDArray[np.floating], pd.DataFrame]] = None
-    scenarios: Optional[Union[npt.NDArray[np.floating], pd.DataFrame]] = None
-    probabilities: Optional[Union[npt.NDArray[np.floating], pd.Series]] = None
+    mu: Optional[Union[npt.NDArray[np.floating], "pd.Series"]] = None
+    cov: Optional[Union[npt.NDArray[np.floating], "pd.DataFrame"]] = None
+    scenarios: Optional[Union[npt.NDArray[np.floating], "pd.DataFrame"]] = None
+    probabilities: Optional[Union[npt.NDArray[np.floating], "pd.Series"]] = None
     asset_names: Optional[List[str]] = None
     
     N: int = field(init=False, repr=False)
@@ -58,7 +65,19 @@ class AssetsDistribution:
 
 
     def __post_init__(self):
-        """Validates inputs and initializes calculated fields."""
+        """
+        Validates inputs and initializes calculated fields after dataclass initialization.
+
+        This method performs checks on the consistency of provided `mu`, `cov`,
+        `scenarios`, and `probabilities`. It infers the number of assets (N)
+        and scenarios (T), and handles the conversion of pandas inputs to
+        NumPy arrays internally while preserving asset names. Probabilities
+        are normalized if they do not sum to one.
+
+        Raises:
+            ValueError: If input parameters have inconsistent shapes, invalid values,
+                        or if neither (mu, cov) nor (scenarios) are provided.
+        """
         # Use object.__setattr__ as the dataclass is frozen
         mu, cov, scenarios, probs = self.mu, self.cov, self.scenarios, self.probabilities
         asset_names = self.asset_names
@@ -125,19 +144,28 @@ class AssetsDistribution:
 
 @dataclass(frozen=True)
 class PortfolioFrontier:
-    """Represents an efficient frontier of optimal portfolios.
+    """
+    Represents an efficient frontier of optimal portfolios.
 
     This immutable container holds the results of an optimization run that
     generates a series of efficient portfolios. It provides methods to easily
     query and analyze specific portfolios on the frontier.
 
     Attributes:
-        weights: A 2D array (N, M) of portfolio weights, where N is the
-          number of assets and M is the number of portfolios on the frontier.
-        returns: A 1D array (M,) of the expected returns for each portfolio.
-        risks: A 1D array (M,) of the risk values for each portfolio.
-        risk_measure: A string describing the risk measure used.
-        asset_names: An optional list of names for the assets.
+        weights (npt.NDArray[np.floating]): A 2D NumPy array of shape (N, M), where N is the
+            number of assets and M is the number of portfolios on the frontier.
+            Each column represents the weights of an optimal portfolio.
+        returns (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing
+            the expected returns for each portfolio on the frontier.
+        risks (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing
+            the risk values for each portfolio on the frontier. The specific
+            risk measure (e.g., volatility, CVaR, uncertainty budget) is
+            indicated by `risk_measure`.
+        risk_measure (str): A string describing the risk measure used to construct
+            this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)',
+            'Estimation Risk (‖Σ\'¹/²w‖₂)').
+        asset_names (Optional[List[str]]): An optional list of names for the assets.
+            If provided, enables pandas Series/DataFrame output for portfolio weights.
     """
     weights: npt.NDArray[np.floating]
     returns: npt.NDArray[np.floating]
@@ -146,14 +174,27 @@ class PortfolioFrontier:
     asset_names: Optional[List[str]] = None
 
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
-        """Converts a numpy weights array to a named pandas Series."""
+        """
+        Converts a NumPy weights array to a named pandas Series, using asset names if available.
+
+        Args:
+            w (np.ndarray): A 1D NumPy array of portfolio weights.
+            name (str): The name to assign to the resulting pandas Series.
+
+        Returns:
+            pd.Series: A pandas Series representing the portfolio weights, with asset names as index.
+        """
         return pd.Series(w, index=self.asset_names, name=name)
 
     def get_min_risk_portfolio(self) -> Tuple[pd.Series, float, float]:
-        """Finds the portfolio with the minimum risk on the frontier.
+        """
+        Finds the portfolio with the minimum risk on the efficient frontier.
 
         Returns:
-            A tuple containing the portfolio weights, return, and risk.
+            Tuple[pd.Series, float, float]: A tuple containing:
+                -   **weights** (:class:`pandas.Series`): The weights of the minimum risk portfolio.
+                -   **returns** (float): The expected return of the minimum risk portfolio.
+                -   **risk** (float): The risk of the minimum risk portfolio.
         """
         min_risk_idx = np.argmin(self.risks)
         w = self.weights[:, min_risk_idx]
@@ -161,10 +202,14 @@ class PortfolioFrontier:
         return self._to_pandas(w, "Min Risk Portfolio"), ret, risk
 
     def get_max_return_portfolio(self) -> Tuple[pd.Series, float, float]:
-        """Finds the portfolio with the maximum return on the frontier.
+        """
+        Finds the portfolio with the maximum expected return on the efficient frontier.
 
         Returns:
-            A tuple containing the portfolio weights, return, and risk.
+            Tuple[pd.Series, float, float]: A tuple containing:
+                -   **weights** (:class:`pandas.Series`): The weights of the maximum return portfolio.
+                -   **returns** (float): The expected return of the maximum return portfolio.
+                -   **risk** (float): The risk of the maximum return portfolio.
         """
         max_ret_idx = np.argmax(self.returns)
         w = self.weights[:, max_ret_idx]
@@ -172,13 +217,20 @@ class PortfolioFrontier:
         return self._to_pandas(w, "Max Return Portfolio"), ret, risk
 
     def get_tangency_portfolio(self, risk_free_rate: float) -> Tuple[pd.Series, float, float]:
-        """Calculates the tangency portfolio (maximum Sharpe ratio).
+        """
+        Calculates the tangency portfolio, which represents the portfolio with the maximum Sharpe ratio.
+
+        The Sharpe ratio is defined as (portfolio_return - risk_free_rate) / portfolio_risk.
 
         Args:
-            risk_free_rate: The risk-free rate of return.
+            risk_free_rate (float): The risk-free rate of return.
 
         Returns:
-            A tuple containing the portfolio weights, return, and risk.
+            Tuple[pd.Series, float, float]: A tuple containing:
+                -   **weights** (:class:`pandas.Series`): The weights of the tangency portfolio.
+                -   **returns** (float): The expected return of the tangency portfolio.
+                -   **risk** (float): The risk of the tangency portfolio.
+                Returns NaN values if all portfolios have zero risk (Sharpe ratio undefined).
         """
         if np.all(np.isclose(self.risks, 0)):
              logger.warning("All portfolios on the frontier have zero risk. Sharpe ratio is undefined.")
@@ -194,17 +246,21 @@ class PortfolioFrontier:
         return self._to_pandas(w, f"Tangency Portfolio (rf={risk_free_rate:.2%})"), ret, risk
 
     def portfolio_at_risk_target(self, max_risk: float) -> Tuple[pd.Series, float, float]:
-        """Finds the portfolio maximizing return for a given risk tolerance.
+        """
+        Finds the portfolio that maximizes return for a given risk tolerance.
 
         This method identifies the portfolio on the frontier that has the highest
         return, subject to its risk being less than or equal to `max_risk`.
 
         Args:
-            max_risk: The maximum allowable risk.
+            max_risk (float): The maximum allowable risk.
 
         Returns:
-            A tuple containing the portfolio weights, return, and risk. Returns
-            NaN values if no portfolio meets the criterion.
+            Tuple[pd.Series, float, float]: A tuple containing:
+                -   **weights** (:class:`pandas.Series`): The weights of the portfolio.
+                -   **returns** (float): The expected return of the portfolio.
+                -   **risk** (float): The risk of the portfolio.
+                Returns NaN values if no portfolio on the frontier meets the risk criterion.
         """
         feasible_indices = np.where(self.risks <= max_risk)[0]
         if feasible_indices.size == 0:
@@ -216,16 +272,21 @@ class PortfolioFrontier:
         return self._to_pandas(w, f"Portfolio (Risk <= {max_risk:.4f})"), ret, risk
 
     def portfolio_at_return_target(self, min_return: float) -> Tuple[pd.Series, float, float]:
-        """Finds the portfolio minimizing risk for a given return target.
+        """
+        Finds the portfolio that minimizes risk for a given expected return target.
 
         This method identifies the portfolio on the frontier that has the lowest
         risk, subject to its return being greater than or equal to `min_return`.
 
         Args:
-            min_return: The minimum required return.
+            min_return (float): The minimum required expected return.
 
         Returns:
-            A tuple containing the portfolio weights, return, and risk.
+            Tuple[pd.Series, float, float]: A tuple containing:
+                -   **weights** (:class:`pandas.Series`): The weights of the portfolio.
+                -   **returns** (float): The expected return of the portfolio.
+                -   **risk** (float): The risk of the portfolio.
+                Returns NaN values if no portfolio on the frontier meets the return criterion.
         """
         feasible_indices = np.where(self.returns >= min_return)[0]
         if feasible_indices.size == 0:
@@ -238,24 +299,39 @@ class PortfolioFrontier:
 
 
 class PortfolioWrapper:
-    """A high-level interface for portfolio construction and optimization.
+    """
+    A high-level interface for portfolio construction and optimization.
 
     This class serves as the main entry point for performing portfolio
     optimization. It simplifies the process by managing asset data, constraints,
     transaction costs, and the underlying optimization models.
 
     Typical Workflow:
-    1. Initialize: `port = PortfolioWrapper(AssetsDistribution(...))`
-    2. Set Constraints: `port.set_constraints(...)`
-    3. (Optional) Set Costs: `port.set_transaction_costs(...)`
-    4. Compute: `frontier = port.mean_variance_frontier()`
-    5. Analyze: Use the returned `PortfolioFrontier` object.
+
+    1.  Initialize: ``port = PortfolioWrapper(AssetsDistribution(...))``
+    2.  Set Constraints: ``port.set_constraints(...)``
+    3.  (Optional) Set Costs: ``port.set_transaction_costs(...)``
+    4.  Compute: ``frontier = port.mean_variance_frontier()``
+    5.  Analyze: Use the returned :class:`PortfolioFrontier` object.
     """
     def __init__(self, distribution: AssetsDistribution):
-        """Initializes the PortfolioWrapper with asset distribution data.
+        """
+        Initializes the PortfolioWrapper with asset distribution data.
 
         Args:
-            distribution: An `AssetsDistribution` object.
+            distribution (AssetsDistribution): An :class:`AssetsDistribution` object
+                containing the statistical properties of the assets.
+
+        Attributes:
+            dist (AssetsDistribution): The stored asset distribution.
+            G (Optional[np.ndarray]): Matrix for linear inequality constraints (G * w <= h).
+            h (Optional[np.ndarray]): Vector for linear inequality constraints (G * w <= h).
+            A (Optional[np.ndarray]): Matrix for linear equality constraints (A * w = b).
+            b (Optional[np.ndarray]): Vector for linear equality constraints (A * w = b).
+            initial_weights (Optional[np.ndarray]): Current portfolio weights, used for
+                transaction cost calculations.
+            market_impact_costs (Optional[np.ndarray]): Quadratic market impact cost coefficients.
+            proportional_costs (Optional[np.ndarray]): Linear proportional transaction cost coefficients.
         """
         self.dist = distribution
         self.G: Optional[np.ndarray] = None
@@ -268,10 +344,26 @@ class PortfolioWrapper:
         logger.info(f"PortfolioWrapper initialized for {self.dist.N} assets.")
 
     def set_constraints(self, params: Dict[str, Any]):
-        """Builds and sets linear constraints for the portfolio.
+        """
+        Builds and sets linear constraints for the portfolio.
+
+        This method uses the `build_G_h_A_b` utility to construct the constraint
+        matrices and vectors based on a dictionary of parameters. These constraints
+        are then stored internally and applied during optimization.
 
         Args:
-            params: A dictionary of constraint parameters.
+            params (Dict[str, Any]): A dictionary of constraint parameters.
+                Expected keys and their types/meanings include:
+                -   ``"long_only"`` (bool): If True, enforces non-negative weights (w >= 0).
+                -   ``"total_weight"`` (float): Sets the sum of weights (sum(w) = value).
+                -   ``"box_constraints"`` (Tuple[np.ndarray, np.ndarray]): A tuple (lower_bounds, upper_bounds)
+                    for individual asset weights.
+                -   ``"group_constraints"`` (List[Dict[str, Any]]): A list of dictionaries,
+                    each defining a group constraint (e.g., min/max weight for a subset of assets).
+                -   Any other parameters supported by `pyvallocation.utils.constraints.build_G_h_A_b`.
+
+        Raises:
+            RuntimeError: If constraint building fails due to invalid parameters or other issues.
         """
         logger.info(f"Setting constraints with parameters: {params}")
         try:
@@ -284,29 +376,44 @@ class PortfolioWrapper:
 
     def set_transaction_costs(
         self,
-        initial_weights: Union[pd.Series, npt.NDArray[np.floating]],
-        market_impact_costs: Optional[Union[pd.Series, npt.NDArray[np.floating]]] = None,
-        proportional_costs: Optional[Union[pd.Series, npt.NDArray[np.floating]]] = None,
+        initial_weights: Union["pd.Series", npt.NDArray[np.floating]],
+        market_impact_costs: Optional[Union["pd.Series", npt.NDArray[np.floating]]] = None,
+        proportional_costs: Optional[Union["pd.Series", npt.NDArray[np.floating]]] = None,
     ):
-        """Sets transaction cost parameters for rebalancing optimizations.
+        """
+        Sets transaction cost parameters for rebalancing optimizations.
+
+        This method allows specifying initial portfolio weights and associated
+        transaction costs (either quadratic market impact or linear proportional costs).
+        These costs are incorporated into the optimization problem when applicable.
 
         Assumptions & Design Choices:
-        - If pandas Series are provided, they are aligned to the official asset
-          list of the portfolio. Assets present in the portfolio but missing
-          from the input Series are assumed to have a cost of zero.
-        - `initial_weights` that do not sum to 1.0 imply a starting position
-          that includes cash (if sum < 1) or leverage (if sum > 1).
+            - If :class:`pandas.Series` are provided for cost parameters, they are
+              aligned to the official asset list of the portfolio (`self.dist.asset_names`).
+              Assets present in the portfolio but missing from the input Series are
+              assumed to have a cost of zero.
+            - ``initial_weights`` that do not sum to 1.0 imply a starting position
+              that includes cash (if sum < 1) or leverage (if sum > 1).
 
         Args:
-            initial_weights: A 1D array or Series of current portfolio weights.
-            market_impact_costs: For Mean-Variance, a 1D array/Series of
-              quadratic market impact cost coefficients.
-            proportional_costs: For Mean-CVaR/Robust, a 1D array/Series of
-              linear proportional cost coefficients.
+            initial_weights (Union[pd.Series, npt.NDArray[np.floating]]): A 1D array or
+                :class:`pandas.Series` of current portfolio weights. This is required
+                if any transaction costs are to be applied.
+            market_impact_costs (Optional[Union[pd.Series, npt.NDArray[np.floating]]]):
+                For Mean-Variance optimization, a 1D array or :class:`pandas.Series` of
+                quadratic market impact cost coefficients. Defaults to None.
+            proportional_costs (Optional[Union[pd.Series, npt.NDArray[np.floating]]]):
+                For Mean-CVaR and Robust optimization, a 1D array or :class:`pandas.Series` of
+                linear proportional cost coefficients. Defaults to None.
+
+        Raises:
+            ValueError: If the shape of any provided cost parameter array does not match
+                        the number of assets (N).
         """
         logger.info("Setting transaction cost parameters.")
         
         def _process_input(data, name):
+            """Helper to convert pandas Series to aligned numpy array."""
             if isinstance(data, pd.Series):
                 if self.dist.asset_names:
                     original_assets = set(data.index)
@@ -370,19 +477,19 @@ class PortfolioWrapper:
         )
         
     def mean_cvar_frontier(self, num_portfolios: int = 20, alpha: float = 0.05) -> PortfolioFrontier:
-        """Computes the Mean-CVaR efficient frontier.
+        r"""Computes the Mean-CVaR efficient frontier.
 
         Implementation Notes:
-        - This method requires scenarios. If only `mu` and `cov` are provided,
-          it makes a strong modeling assumption to simulate scenarios from a
-          multivariate normal distribution.
+            - This method requires scenarios. If only ``mu`` and ``cov`` are provided,
+              it makes a strong modeling assumption to simulate scenarios from a
+              multivariate normal distribution.
 
         Args:
             num_portfolios: The number of portfolios to compute. Defaults to 20.
             alpha: The tail probability for CVaR. Defaults to 0.05.
 
         Returns:
-            A `PortfolioFrontier` object.
+            A :class:`PortfolioFrontier` object.
         """
         scenarios, probs = self.dist.scenarios, self.dist.probabilities
         if scenarios is None:
@@ -415,12 +522,12 @@ class PortfolioWrapper:
         )
 
     def robust_lambda_frontier(self, num_portfolios: int = 20, max_lambda: float = 2.0) -> PortfolioFrontier:
-        """Computes a robust frontier based on uncertainty in expected returns.
+        r"""Computes a robust frontier based on uncertainty in expected returns.
 
         Assumptions & Design Choices:
-        - This method follows Meucci's robust framework. It assumes that the `mu`
-          and `cov` from `AssetsDistribution` represent the posterior mean
-          and the posterior scale matrix (for uncertainty), respectively.
+            - This method follows Meucci's robust framework. It assumes that the ``mu``
+              and ``cov`` from :class:`AssetsDistribution` represent the posterior mean
+              and the posterior scale matrix (for uncertainty), respectively.
 
         Args:
             num_portfolios: The number of portfolios to compute. Defaults to 20.
@@ -428,7 +535,7 @@ class PortfolioWrapper:
               which controls the trade-off between nominal return and robustness.
 
         Returns:
-            A `PortfolioFrontier` object.
+            A :class:`PortfolioFrontier` object.
         """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Robust optimization requires `mu` (μ₁) and `cov` (Σ₁).")

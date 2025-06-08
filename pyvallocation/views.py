@@ -49,7 +49,7 @@ def entropy_pooling(
     h: Optional[np.ndarray] = None,
     method: Optional[str] = None,
 ) -> np.ndarray:
-    """Update probabilities via entropy pooling[cite: 2]."""
+    """Update probabilities via entropy pooling :cite:p:`meucci2008flexible`."""
 
     opt_method = method or "TNC"
     if opt_method not in ("TNC", "L-BFGS-B"):
@@ -100,30 +100,30 @@ def entropy_pooling(
 
 
 class FlexibleViewsProcessor:
-    """
+    r"""
     Generic entropy-pooling engine supporting views on means, vols, skews and
     correlations – all at once (simultaneous EP) or block-wise (iterated EP).
-    Implements Meucci's Fully Flexible Views approach[cite: 1].
+    Implements Meucci's Fully Flexible Views approach :cite:p:`meucci2008flexible`.
 
     Parameters
     ----------
-    prior_returns : (S × N) ndarray or *DataFrame*, optional
-        Historical/simulated return cube.  If omitted you must provide
-        `prior_mean` **and** `prior_cov`.
-    prior_probabilities : (S,) vector or *Series*, optional
+    prior_returns : (S × N) :class:`numpy.ndarray` or :class:`pandas.DataFrame`, optional
+        Historical/simulated return cube. If omitted you must provide
+        ``prior_mean`` **and** ``prior_cov``.
+    prior_probabilities : (S,) :class:`numpy.ndarray` or :class:`pandas.Series`, optional
         Scenario probabilities (defaults to uniform).
-    prior_mean, prior_cov : vector / matrix (or *Series* / *DataFrame*), optional
-        First two moments used to synthesise scenarios when `prior_returns`
+    prior_mean, prior_cov : :class:`numpy.ndarray` / :class:`numpy.ndarray` (or :class:`pandas.Series` / :class:`pandas.DataFrame`), optional
+        First two moments used to synthesise scenarios when ``prior_returns``
         isn’t supplied.
     distribution_fn : callable, optional
         Custom sampler ``f(mu, cov, n[, random_state]) -> (n, N) array``.
         Used only when generating synthetic scenarios.
     num_scenarios : int, default 10000
-        Number of synthetic draws if `prior_returns` is *not* given.
-    random_state : int or numpy.random.Generator, optional
-        Passed to NumPy’s RNG (and to `distribution_fn` if it accepts it).
+        Number of synthetic draws if ``prior_returns`` is *not* given.
+    random_state : int or :class:`numpy.random.Generator`, optional
+        Passed to NumPy’s RNG (and to ``distribution_fn`` if it accepts it).
     mean_views, vol_views, corr_views, skew_views : dict or array-like, optional
-        View payloads.  A value can be either ``x`` (equality) or a tuple
+        View payloads. A value can be either ``x`` (equality) or a tuple
         ``('>=', x)``, ``('<', x)`` etc.
         *Keys* are asset names / indices (or pairs thereof for correlations).
     sequential : bool, default *False*
@@ -132,11 +132,11 @@ class FlexibleViewsProcessor:
 
     def __init__(
         self,
-        prior_returns: Optional[Union[np.ndarray, pd.DataFrame]] = None,
-        prior_probabilities: Optional[Union[np.ndarray, pd.Series]] = None,
+        prior_returns: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
+        prior_probabilities: Optional[Union[np.ndarray, "pd.Series"]] = None,
         *,
-        prior_mean: Optional[Union[np.ndarray, pd.Series]] = None,
-        prior_cov: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+        prior_mean: Optional[Union[np.ndarray, "pd.Series"]] = None,
+        prior_cov: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
         distribution_fn: Optional[
             Callable[[np.ndarray, np.ndarray, int, Any], np.ndarray]
         ] = None,
@@ -434,46 +434,46 @@ class FlexibleViewsProcessor:
 
 
 class BlackLittermanProcessor:
-    """
+    r"""
     Black–Litterman engine supporting **equality mean views** (absolute or
-    relative) as in Black and Litterman[cite: 3]. Idzorek-style
-    confidence weights are also supported[cite: 8]. Inequality views (>,
+    relative) as in Black and Litterman :cite:p:`black1992global`. Idzorek-style
+    confidence weights are also supported :cite:p:`meucci2005robust`. Inequality views (>,
     >=, <, <=) are *not* handled.
 
     Parameters
     ----------
-    prior_cov : (N, N) array-like
-        Prior (sample- or market-implied) covariance Σ.
+    prior_cov : (N, N) :class:`numpy.ndarray` or :class:`pandas.DataFrame`
+        Prior (sample- or market-implied) covariance :math:`\Sigma`.
     prior_mean, market_weights, pi
-        Mutually exclusive ways to provide the prior mean π.  Exactly one
+        Mutually exclusive ways to provide the prior mean :math:`\pi`. Exactly one
         of them must be supplied (see Notes below).
     risk_aversion : float, default 1.0
-        δ in π = δ Σ w when *market_weights* is supplied.
+        :math:`\delta` in :math:`\pi = \delta \Sigma w` when ``market_weights`` is supplied.
         **Must be positive.**
     tau : float, default 0.05
-        Prior shrinkage parameter τ.
+        Prior shrinkage parameter :math:`\tau`.
     idzorek_use_tau : bool, default True
-        When constructing Ω from Idzorek confidences, decide whether to use
-        τ Σ (True — original He & Litterman convention) or Σ (False — the
+        When constructing :math:`\Omega` from Idzorek confidences, decide whether to use
+        :math:`\tau \Sigma` (True — original He & Litterman convention) or :math:`\Sigma` (False — the
         alternative sometimes found in practice).
     mean_views : dict or array-like, optional
-        Equality mean views in *FlexibleViewsProcessor* grammar:
+        Equality mean views in :class:`FlexibleViewsProcessor` grammar:
         ``{"Asset": 0.02, ("A", "B"): 0.00}`` or a length-N vector
         with absolute views per asset.
-    view_confidences : float | list | dict, optional
-        Confidence c ∈ (0, 1] per view (used only if Ω = "idzorek").
-    omega : {"idzorek"} | array-like, optional
-        View-covariance matrix Ω.  If omitted, Ω = τ·diag(P Σ Pᵀ).
+    view_confidences : float or list or dict, optional
+        Confidence :math:`c \in (0, 1]` per view (used only if :math:`\Omega` = "idzorek").
+    omega : {"idzorek"} or array-like, optional
+        View-covariance matrix :math:`\Omega`. If omitted, :math:`\Omega = \tau \cdot \text{diag}(P \Sigma P^T)`.
     verbose : bool, default False
         Print processing steps.
 
     Notes
     -----
-    The prior mean π can be supplied in three mutually exclusive ways:
+    The prior mean :math:`\pi` can be supplied in three mutually exclusive ways:
 
-    1. **pi**              – direct numeric vector.
-    2. **market_weights**  – CAPM equilibrium π = δ Σ w.
-    3. **prior_mean**      – treat the sample mean as π.
+    1.  **pi** – direct numeric vector.
+    2.  **market_weights** – CAPM equilibrium :math:`\pi = \delta \Sigma w`.
+    3.  **prior_mean** – treat the sample mean as :math:`\pi`.
 
     Methods
     -------
@@ -482,28 +482,21 @@ class BlackLittermanProcessor:
         matching the type of the inputs.
     """
 
-    # ------------------------------------------------------------------ #
-    # public helper
-    # ------------------------------------------------------------------ #
     def get_posterior(
         self,
-    ) -> Tuple[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.DataFrame]]:
-        """Return *(posterior_mean, posterior_covariance)*."""
+    ) -> Tuple[Union[np.ndarray, "pd.Series"], Union[np.ndarray, "pd.DataFrame"]]:
         return self._posterior_mean, self._posterior_cov
 
-    # ------------------------------------------------------------------ #
-    # constructor
-    # ------------------------------------------------------------------ #
     def __init__(
         self,
         *,
-        prior_cov: Union[np.ndarray, pd.DataFrame],
-        prior_mean: Optional[Union[np.ndarray, pd.Series]] = None,
-        market_weights: Optional[Union[np.ndarray, pd.Series]] = None,
+        prior_cov: Union[np.ndarray, "pd.DataFrame"],
+        prior_mean: Optional[Union[np.ndarray, "pd.Series"]] = None,
+        market_weights: Optional[Union[np.ndarray, "pd.Series"]] = None,
         risk_aversion: float = 1.0,
         tau: float = 0.05,
         idzorek_use_tau: bool = True,
-        pi: Optional[Union[np.ndarray, pd.Series]] = None,
+        pi: Optional[Union[np.ndarray, "pd.Series"]] = None,
         mean_views: Any = None,
         view_confidences: Any = None,
         omega: Any = None,
