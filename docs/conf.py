@@ -28,6 +28,18 @@ extensions = [
     'sphinx_rtd_theme',
 ]
 
+# Map common type aliases so cross references resolve properly.
+napoleon_type_aliases = {
+    'ndarray': 'numpy.ndarray',
+    'np.ndarray': 'numpy.ndarray',
+    'npt.NDArray': 'numpy.ndarray',
+    'np.floating': 'numpy.floating',
+    'Series': 'pandas.Series',
+    'DataFrame': 'pandas.DataFrame',
+    'pd.Series': 'pandas.Series',
+    'pd.DataFrame': 'pandas.DataFrame',
+}
+
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 

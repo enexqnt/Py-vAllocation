@@ -42,6 +42,7 @@ See [examples here](examples/)
 - numpy >= 1.20.0
 - cvxopt >= 1.2.0
 - pandas
+- scipy >= 1.10.0
 
 ## Development Status
 
