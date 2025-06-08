@@ -36,8 +36,4 @@ htmlcov/
 docs/_build/
 
 # Sphinx-generated files
-docs/source/modules.rst
-docs/source/*.rst
-docs/*.bat
-docs/Makefile
 *.swp

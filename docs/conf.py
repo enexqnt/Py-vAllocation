@@ -28,6 +28,14 @@ extensions = [
     'sphinx_rtd_theme',
 ]
 
+# Mock heavy dependencies so autodoc works even if they are not installed.
+autodoc_mock_imports = [
+    'numpy',
+    'pandas',
+    'scipy',
+    'cvxopt',
+]
+
 # Map common type aliases so cross references resolve properly.
 napoleon_type_aliases = {
     'ndarray': 'numpy.ndarray',
