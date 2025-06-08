@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py-vallocation"
+version = "0.1.0"
+description = "Python package for asset allocation with a primary focus on integrating investor views."
+readme = "readme.md"
+requires-python = ">=3.8"
+license = { text = "GNU General Public License v3.0" }
+keywords = ["asset allocation", "portfolio optimization", "entropy pooling", "Black-Litterman", "robust optimization"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)"
+]
+dependencies = [
+    "numpy>=1.20.0",
+    "cvxopt>=1.2.0",
+    "pandas>=1.0.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/enexqnt/py-vallocation"
+"Repository" = "https://github.com/enexqnt/py-vallocation"

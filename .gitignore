@@ -1,0 +1,43 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.dll
+*.dylib
+
+# Virtual environments
+.env/
+.venv/
+venv/
+env/
+
+# Packaging
+*.egg-info/
+build/
+dist/
+
+# Testing and coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Documentation builds
+docs/_build/
+
+# Sphinx-generated files
+docs/source/modules.rst
+docs/source/*.rst
+docs/*.bat
+docs/Makefile
+*.swp
