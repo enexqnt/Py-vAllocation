@@ -8,7 +8,6 @@ from scipy.optimize import Bounds, minimize
 
 import pandas as pd
 
-
 def _entropy_pooling_dual_objective(
     lagrange_multipliers: np.ndarray,
     log_p_col: np.ndarray,
@@ -26,20 +25,6 @@ def _entropy_pooling_dual_objective(
     gradient_vector = rhs_vec - (lhs @ x).squeeze()
 
     return 1000.0 * objective_value, 1000.0 * gradient_vector
-
-
-# Backwards compatible alias expected by older tests
-def _dual_objective(
-    lagrange_multipliers: np.ndarray,
-    log_p_col: np.ndarray,
-    lhs: np.ndarray,
-    rhs_squeezed: np.ndarray,
-) -> Tuple[float, np.ndarray]:
-    """Alias for :func:`_entropy_pooling_dual_objective`."""
-    return _entropy_pooling_dual_objective(
-        lagrange_multipliers, log_p_col, lhs, rhs_squeezed
-    )
-
 
 def entropy_pooling(
     p: np.ndarray,
