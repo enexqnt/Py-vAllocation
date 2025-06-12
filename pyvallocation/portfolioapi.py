@@ -30,18 +30,18 @@ class AssetsDistribution:
     and pandas Series/DataFrames, ensuring data consistency.
 
     Attributes:
-        mu (Optional[Union[npt.NDArray[np.floating], pd.Series]]): A 1D array or
+        mu (Optional[Union[npt.NDArray[np.floating], pd.Series]]): :no-index: A 1D array or
             :class:`pandas.Series` of expected returns for each asset (N,).
-        cov (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): A 2D covariance
+        cov (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): :no-index: A 2D covariance
             matrix of asset returns (N, N).
-        scenarios (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): A 2D array or
+        scenarios (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): :no-index: A 2D array or
             :class:`pandas.DataFrame` of shape (T, N) where each row is a market scenario.
-        probabilities (Optional[Union[npt.NDArray[np.floating], pd.Series]]): A 1D array or
+        probabilities (Optional[Union[npt.NDArray[np.floating], pd.Series]]): :no-index: A 1D array or
             :class:`pandas.Series` of probabilities corresponding to each scenario (T,).
-        asset_names (Optional[List[str]]): A list of names for the assets. If not provided,
+        asset_names (Optional[List[str]]): :no-index: A list of names for the assets. If not provided,
             inferred from pandas inputs.
-        N (int): The number of assets, inferred from the input data.
-        T (Optional[int]): The number of scenarios, inferred from the input data. None if
+        N (int): :no-index: The number of assets, inferred from the input data.
+        T (Optional[int]): :no-index: The number of scenarios, inferred from the input data. None if
             parametric distribution is used.
 
     Assumptions & Design Choices:
@@ -55,13 +55,20 @@ class AssetsDistribution:
           consistent across all provided pandas objects.
     """
     mu: Optional[Union[npt.NDArray[np.floating], "pd.Series"]] = None
+    """:no-index:"""
     cov: Optional[Union[npt.NDArray[np.floating], "pd.DataFrame"]] = None
+    """:no-index:"""
     scenarios: Optional[Union[npt.NDArray[np.floating], "pd.DataFrame"]] = None
+    """:no-index:"""
     probabilities: Optional[Union[npt.NDArray[np.floating], "pd.Series"]] = None
+    """:no-index:"""
     asset_names: Optional[List[str]] = None
+    """:no-index:"""
     
     N: int = field(init=False, repr=False)
+    """:no-index:"""
     T: Optional[int] = field(init=False, repr=False)
+    """:no-index:"""
 
 
     def __post_init__(self):
@@ -152,26 +159,32 @@ class PortfolioFrontier:
     query and analyze specific portfolios on the frontier.
 
     Attributes:
-        weights (npt.NDArray[np.floating]): A 2D NumPy array of shape (N, M), where N is the
+        weights (npt.NDArray[np.floating]): :no-index: A 2D NumPy array of shape (N, M), where N is the
             number of assets and M is the number of portfolios on the frontier.
             Each column represents the weights of an optimal portfolio.
-        returns (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing
+        returns (npt.NDArray[np.floating]): :no-index: A 1D NumPy array of shape (M,) containing
             the expected returns for each portfolio on the frontier.
-        risks (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing
+        risks (npt.NDArray[np.floating]): :no-index: A 1D NumPy array of shape (M,) containing
             the risk values for each portfolio on the frontier. The specific
             risk measure (e.g., volatility, CVaR, uncertainty budget) is
             indicated by `risk_measure`.
-        risk_measure (str): A string describing the risk measure used to construct
+        risk_measure (str): :no-index: A string describing the risk measure used to construct
             this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)',
             'Estimation Risk (‖Σ\'¹/²w‖₂)').
-        asset_names (Optional[List[str]]): An optional list of names for the assets.
+        asset_names (Optional[List[str]]): :no-index: An optional list of names for the assets.
             If provided, enables pandas Series/DataFrame output for portfolio weights.
+
     """
     weights: npt.NDArray[np.floating]
+    """:no-index:"""
     returns: npt.NDArray[np.floating]
+    """:no-index:"""
     risks: npt.NDArray[np.floating]
+    """:no-index:"""
     risk_measure: str
+    """:no-index:"""
     asset_names: Optional[List[str]] = None
+    """:no-index:"""
 
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
         """
@@ -230,7 +243,6 @@ class PortfolioFrontier:
                 -   **weights** (:class:`pandas.Series`): The weights of the tangency portfolio.
                 -   **returns** (float): The expected return of the tangency portfolio.
                 -   **risk** (float): The risk of the tangency portfolio.
-                Returns NaN values if all portfolios have zero risk (Sharpe ratio undefined).
         """
         if np.all(np.isclose(self.risks, 0)):
              logger.warning("All portfolios on the frontier have zero risk. Sharpe ratio is undefined.")
@@ -260,7 +272,6 @@ class PortfolioFrontier:
                 -   **weights** (:class:`pandas.Series`): The weights of the portfolio.
                 -   **returns** (float): The expected return of the portfolio.
                 -   **risk** (float): The risk of the portfolio.
-                Returns NaN values if no portfolio on the frontier meets the risk criterion.
         """
         feasible_indices = np.where(self.risks <= max_risk)[0]
         if feasible_indices.size == 0:
@@ -286,7 +297,6 @@ class PortfolioFrontier:
                 -   **weights** (:class:`pandas.Series`): The weights of the portfolio.
                 -   **returns** (float): The expected return of the portfolio.
                 -   **risk** (float): The risk of the portfolio.
-                Returns NaN values if no portfolio on the frontier meets the return criterion.
         """
         feasible_indices = np.where(self.returns >= min_return)[0]
         if feasible_indices.size == 0:
@@ -354,13 +364,14 @@ class PortfolioWrapper:
         Args:
             params (Dict[str, Any]): A dictionary of constraint parameters.
                 Expected keys and their types/meanings include:
-                -   ``"long_only"`` (bool): If True, enforces non-negative weights (w >= 0).
-                -   ``"total_weight"`` (float): Sets the sum of weights (sum(w) = value).
-                -   ``"box_constraints"`` (Tuple[np.ndarray, np.ndarray]): A tuple (lower_bounds, upper_bounds)
+
+                *   ``"long_only"`` (bool): If True, enforces non-negative weights (w >= 0).
+                *   ``"total_weight"`` (float): Sets the sum of weights (sum(w) = value).
+                *   ``"box_constraints"`` (Tuple[np.ndarray, np.ndarray]): A tuple (lower_bounds, upper_bounds)
                     for individual asset weights.
-                -   ``"group_constraints"`` (List[Dict[str, Any]]): A list of dictionaries,
+                *   ``"group_constraints"`` (List[Dict[str, Any]]): A list of dictionaries,
                     each defining a group constraint (e.g., min/max weight for a subset of assets).
-                -   Any other parameters supported by `pyvallocation.utils.constraints.build_G_h_A_b`.
+                *   Any other parameters supported by `pyvallocation.utils.constraints.build_G_h_A_b`.
 
         Raises:
             RuntimeError: If constraint building fails due to invalid parameters or other issues.

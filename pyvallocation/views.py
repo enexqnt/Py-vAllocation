@@ -470,6 +470,7 @@ class BlackLittermanProcessor:
     def get_posterior(
         self,
     ) -> Tuple[Union[np.ndarray, "pd.Series"], Union[np.ndarray, "pd.DataFrame"]]:
+        """:no-index:"""
         return self._posterior_mean, self._posterior_cov
 
     def __init__(

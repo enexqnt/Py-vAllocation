@@ -167,7 +167,7 @@ def shrink_covariance_ledoit_wolf(
     target: str = "identity",
 ) -> ArrayLike:
     """
-    Applies the Ledoit–Wolf shrinkage estimator for the covariance matrix :cite:p:`Ledoit2004`.
+    Applies the Ledoit–Wolf shrinkage estimator for the covariance matrix :cite:p:`ledoit2004well`.
 
     This estimator provides a well-conditioned covariance matrix, especially useful
     when the number of observations is small relative to the number of assets,
@@ -195,13 +195,14 @@ def shrink_covariance_ledoit_wolf(
 
     Notes:
         The function calculates various components of the Ledoit-Wolf formula:
-        -   `F`: The target matrix.
-        -   `pi_mat`, `pi_hat`, `diag_pi`, `off_pi`, `rho_hat`: Components related
+
+        *   `F`: The target matrix.
+        *   `pi_mat`, `pi_hat`, `diag_pi`, `off_pi`, `rho_hat`: Components related
             to the estimation of the optimal shrinkage intensity.
-        -   `gamma_hat`: The squared Frobenius norm of the difference between
+        *   `gamma_hat`: The squared Frobenius norm of the difference between
             the sample covariance and the target matrix.
-        -   `kappa`: Intermediate value for shrinkage intensity.
-        -   `delta`: The optimal shrinkage intensity, clipped between 0 and 1.
+        *   `kappa`: Intermediate value for shrinkage intensity.
+        *   `delta`: The optimal shrinkage intensity, clipped between 0 and 1.
 
         The final shrunk covariance matrix is ensured to be positive semi-definite
         using `ensure_psd_matrix`.

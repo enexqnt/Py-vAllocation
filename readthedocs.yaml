@@ -8,7 +8,7 @@ build:
   tools:
     python: "3.9"
   commands:
-    - pip install sphinx sphinx_rtd_theme sphinxcontrib-bibtex
+    - pip install sphinx sphinx_rtd_theme sphinxcontrib-bibtex nbsphinx
     - sphinx-build -b html docs/ ${READTHEDOCS_OUTPUT:-docs/_build/html}
     
 sphinx:

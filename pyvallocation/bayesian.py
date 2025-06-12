@@ -12,25 +12,32 @@ import pandas as pd
 
 
 def _cholesky_pd(mat: npt.NDArray[np.floating], jitter: float = 1e-12) -> npt.NDArray[np.floating]:
-    """
-    Robust Cholesky decomposition.
+    r"""Computes a Cholesky decomposition that is robust to numerical errors.
 
-    If `mat` is not positive-definite, this function attempts to add a small
-    multiple of the identity matrix (`jitter * I`) and retries the Cholesky
-    decomposition once. This approach is discussed in Meucci's robust
-    allocation framework :cite:p:`meucci2005robust`, Appendix 7.2.
+    The theoretical framework for robust Bayesian allocation often requires
+    operations like spectral or Cholesky decompositions of covariance matrices,
+    which must be positive-definite (PD). However, matrices estimated
+    from real-world data may fail to be perfectly PD due to floating-point
+    inaccuracies or estimation errors.
+
+    This function attempts to compute the Cholesky decomposition of `mat`. If
+    `mat` is not PD, it adds a small multiple of the identity matrix
+    (`jitter` * I) to the matrix to make it PD and then retries. This is a
+    standard numerical stabilization technique.
 
     Args:
-        mat: The square matrix (N×N) for which to compute the Cholesky decomposition.
-        jitter: The small positive constant to add to the diagonal elements
-            if the matrix is not positive-definite. Defaults to 1e-12.
+        mat: The square matrix (N x N) for which to compute the Cholesky
+            decomposition.
+        jitter: A small positive constant to add to the diagonal elements if
+            the matrix is not positive-definite. Defaults to 1e-12.
 
     Returns:
-        The lower Cholesky factor of `mat` (or `mat` + `jitter` * `I`).
+        The lower Cholesky factor of `mat` (or `mat` + `jitter` * I).
 
     Raises:
         ValueError: If `mat` is not a square matrix.
-        RuntimeError: If the matrix is not positive-definite even after adding jitter.
+        RuntimeError: If the matrix is not positive-definite even after
+            adding jitter.
     """
     if mat.ndim != 2 or mat.shape[0] != mat.shape[1]:
         raise ValueError("Input to _cholesky_pd must be a square matrix.")
@@ -49,22 +56,37 @@ def _cholesky_pd(mat: npt.NDArray[np.floating], jitter: float = 1e-12) -> npt.ND
 
 
 def chi2_quantile(p: float, dof: int, sqrt: bool = False) -> float:
-    """
-    Compute the quantile of the chi-square (χ²) distribution.
+    r"""Computes the quantile of the chi-square (χ²) distribution.
 
-    This function returns the value q such that P(X <= q) = p, where X is a
-    chi-square random variable with `dof` degrees of freedom. This is used, for
-    example, to determine radius factors for credibility ellipsoids as in
-    Meucci's robust allocation methodology (Eqs. 6–7 in :cite:p:`meucci2005robust`).
+    This function is used to determine the size of the uncertainty ellipsoids
+    for the market parameters (mean and covariance). The size is
+    determined by a radius factor, :math:`q`, which is set according to a
+    quantile of the chi-square distribution.
+
+    For the mean vector :math:`\mu`, under the assumption that its posterior
+    distribution is normal, the squared Mahalanobis distance is chi-square
+    distributed. The radius factor squared, :math:`q_\mu^2`, is set using a
+    quantile of the :math:`\chi^2_N` distribution.
+
+    .. math::
+        q_\mu^2 = Q_{\chi_N^2}(p_\mu)
+
+    For the covariance matrix :math:`\Sigma`, a similar approach is used based on a
+    heuristic argument that the Mahalanobis distance behaves like a
+    :math:`\chi^2` distribution with :math:`N(N+1)/2` degrees of freedom
+    .
+
+    .. math::
+        q_\Sigma^2 = Q_{\chi_{N(N+1)/2}^2}(p_\Sigma)
 
     Args:
-        p: The probability level (0 < p < 1).
+        p: The probability level (0 < p < 1) for the quantile.
         dof: The degrees of freedom for the chi-square distribution.
-        sqrt: If True, returns the square root of the quantile.
-            Defaults to False.
+        sqrt: If True, returns the square root of the quantile. Defaults to False.
 
     Returns:
-        The chi-square quantile Q_{χ²}(p) or sqrt(Q_{χ²}(p)) if `sqrt` is True.
+        The chi-square quantile :math:`Q_{\chi²}(p)` or :math:`\sqrt{Q_{\chi²}(p)}`
+        if `sqrt` is True.
 
     Raises:
         ValueError: If `p` is not strictly between 0 and 1.
@@ -77,17 +99,23 @@ def chi2_quantile(p: float, dof: int, sqrt: bool = False) -> float:
 
 @dataclass(slots=True)
 class NIWParams:
-    r"""
-    Container for Normal–Inverse–Wishart (NIW) posterior parameters.
+    r"""A container for the parameters of a Normal-Inverse-Wishart (NIW) posterior distribution.
 
-    These parameters are computed from an NIW prior and sample statistics
-    following the update rules in Meucci's framework :cite:p:`meucci2005robust`, Appendix 7.2.
+    These parameters are the result of a Bayesian update, combining an
+    NIW prior with market data, as detailed in Meucci (2005). The
+    formulas for these posterior parameters are given in Eqs. (11)-(14).
 
     Attributes:
-        T1 (int): Posterior pseudo-count for the mean (:math:`T_1`), representing the updated confidence in the mean estimate :cite:p:`meucci2005robust`.
-        mu1 (Union[npt.NDArray[np.floating], "pd.Series[np.floating]"]): Posterior mean vector (:math:`\mu_1`), representing the updated mean estimate :cite:p:`meucci2005robust`.
-        nu1 (int): Posterior pseudo-count for the covariance (:math:`\nu_1`), representing the updated confidence in the covariance estimate :cite:p:`meucci2005robust`.
-        sigma1 (Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"]): Posterior scale matrix for the covariance (:math:`\Sigma_1`), representing the updated scale of the covariance :cite:p:`meucci2005robust`.
+        T1: The posterior pseudo-observations for the mean (:math:`T_1`),
+            representing the updated confidence in the mean estimate.
+        mu1: The posterior mean vector (:math:`\mu_1`), which is the updated
+            estimate of the expected returns.
+        nu1: The posterior degrees of freedom for the covariance
+            (:math:`\nu_1`), representing the updated confidence in the
+            covariance estimate.
+        sigma1: The posterior scale matrix for the covariance (:math:`\Sigma_1`),
+            which is the updated scale matrix of the Inverse-Wishart
+            distribution.
     """
     T1: int
     mu1: Union[npt.NDArray[np.floating], "pd.Series[np.floating]"]
@@ -96,54 +124,51 @@ class NIWParams:
 
 
 class NIWPosterior:
-    r"""
-    Computes and manages Normal–Inverse–Wishart (NIW) posterior parameters.
+    r"""Computes and manages Normal-Inverse-Wishart (NIW) posterior parameters.
 
     This class implements the Bayesian update rules for an NIW distribution,
-    assuming normally distributed returns and an NIW prior. The updates follow
-    Eqs. 11–14 in Meucci's framework :cite:p:`meucci2005robust`. It also provides methods to
-    calculate classical-equivalent estimators and credibility-related factors
-    used in robust Bayesian asset allocation:cite:p:`meucci2005robust`.
+    which is the conjugate prior for a multivariate normal likelihood with
+    unknown mean and covariance. The methodology follows Section 3
+    of Meucci (2005). It provides methods to calculate posterior
+    parameters, classical-equivalent estimators, and factors used in robust
+    Bayesian asset allocation.
 
-    The NIW distribution is a conjugate prior for a multivariate normal
-    distribution with unknown mean and covariance matrix:cite:p:`meucci2005robust`.
+    The model assumes that asset returns are independently and identically
+    distributed according to a normal distribution. The investor's
+    prior knowledge is modeled as an NIW distribution.
 
     How to Use:
 
     1.  Initialize the :class:`NIWPosterior` object with prior parameters:
 
-        *   ``prior_mu`` (:math:`\\mu_0`): Your initial estimate for the mean vector, can be
-            a NumPy array or :class:`pandas.Series`.
-        *   ``prior_sigma`` (:math:`\\Sigma_0`): Your initial estimate for the scale matrix of
-            the covariance, can be a NumPy array or :class:`pandas.DataFrame`.
-        *   ``t0`` (:math:`T_0`): Your confidence in ``prior_mu``, expressed as a pseudo-count of observations:cite:p:`meucci2005robust`.
-        *   ``nu0`` (:math:`\\nu_0`): Your confidence in ``prior_sigma``, expressed as a pseudo-count of observations:cite:p:`meucci2005robust`.
+        * ``prior_mu`` (:math:`\mu_0`): The prior estimate for the mean vector.
+        * ``prior_sigma`` (:math:`\Sigma_0`): The prior scale matrix for the covariance.
+        * ``t0`` (:math:`T_0`): The confidence in ``prior_mu``, expressed as a
+            pseudo-count of observations.
+        * ``nu0`` (:math:`\nu_0`): The confidence in ``prior_sigma``, expressed as a
+            pseudo-count of observations.
 
-    2.  Call the :meth:`update()` method with sample statistics derived from observed data:
+    2.  Call the :meth:`update` method with sample statistics from observed data:
 
-        *   ``sample_mu`` (:math:`\\hat{\\mu}`): The mean vector calculated from your sample data,
-            can be a NumPy array or :class:`pandas.Series`.
-        *   ``sample_sigma`` (:math:`\\hat{\\Sigma}`): The covariance matrix calculated from your
-            sample data, can be a NumPy array or :class:`pandas.DataFrame`.
-        *   ``n_obs`` (:math:`T`): The number of observations in your sample data:cite:p:`meucci2005robust`.
+        * ``sample_mu`` (:math:`\hat{\mu}`): The mean vector from the data.
+        * ``sample_sigma`` (:math:`\hat{\Sigma}`): The covariance matrix from the data.
+        * ``n_obs`` (:math:`T`): The number of observations in the data sample.
 
-    3.  The :meth:`update()` method returns an :class:`NIWParams` object containing the posterior
-        parameters (:math:`T_1, \\mu_1, \\nu_1, \\Sigma_1`). If inputs were pandas, then
-        :math:`\\mu_1` is a :class:`pandas.Series` and :math:`\\Sigma_1` is a :class:`pandas.DataFrame`.
+    3.  The :meth:`update` method returns an :class:`NIWParams` object with the
+        posterior parameters (:math:`T_1, \mu_1, \nu_1, \Sigma_1`), which are
+        a blend of the prior and the market data.
 
-    4.  Use accessor methods like :meth:`get_posterior()`, :meth:`get_mu_ce()`, :meth:`get_S_mu()`,
-        :meth:`get_sigma_ce()`, :meth:`cred_radius_mu()`, and :meth:`cred_radius_sigma_factor()` to
-        retrieve various posterior quantities. These also respect pandas formats.
+    4.  Use accessor methods like :meth:`get_mu_ce`, :meth:`get_S_mu`, etc., to
+        retrieve various quantities derived from the posterior distribution.
 
     Attributes:
-        prior_mu (:class:`pandas.Series` or :class:`numpy.ndarray`): The prior mean vector (:math:`\\mu_0`) if pandas, with index.
-        prior_sigma (:class:`pandas.DataFrame` or :class:`numpy.ndarray`): The prior scale matrix (:math:`\\Sigma_0`) if pandas,
-            with index and columns.
-        t0 (int): The prior pseudo-count for the mean (:math:`T_0`).
-        nu0 (int): The prior pseudo-count for the covariance (:math:`\\nu_0`).
-        N (int): The number of assets.
-        _asset_index (:class:`pandas.Index` or None): Index of assets if prior_mu was pandas.Series.
-        _posterior (Optional[:class:`NIWParams`]): Stores the computed posterior parameters.
+        prior_mu: The prior mean vector (:math:`\mu_0`).
+        prior_sigma: The prior scale matrix (:math:`\Sigma_0`).
+        t0: The prior pseudo-count for the mean (:math:`T_0`).
+        nu0: The prior pseudo-count for the covariance (:math:`\nu_0`).
+        N: The number of assets.
+        _asset_index: Stores pandas.Index if pandas objects are used.
+        _posterior: Stores the computed posterior parameters.
     """
 
     def __init__(
@@ -153,17 +178,21 @@ class NIWPosterior:
         t0: int,
         nu0: int,
     ) -> None:
-        """
-        Initializes the NIWPosterior object with prior parameters.
+        r"""Initializes the NIWPosterior object with prior parameters.
+
+        The prior parameters :math:`(\mu_0, \Sigma_0)` represent the investor's
+        experience, while :math:`(T_0, \nu_0)` represent their confidence in
+        that experience.
 
         Args:
-            prior_mu: 1D array (length N) of prior means (:math:`\mu_0`), or :class:`pandas.Series`.
-            prior_sigma: 2D array (N×N) of the prior scale matrix (:math:`\Sigma_0`), or :class:`pandas.DataFrame`.
-            t0: Prior pseudo-count for the mean (:math:`T_0`). Must be > 0 :cite:p:`meucci2005robust`.
-            nu0: Prior pseudo-count for the covariance (:math:`\nu_0`). Must be :math:`\ge 0` :cite:p:`meucci2005robust`.
+            prior_mu: 1D array (length N) of prior means (:math:`\mu_0`).
+            prior_sigma: 2D array (N x N) of the prior scale matrix (:math:`\Sigma_0`).
+            t0: Prior pseudo-count for the mean (:math:`T_0`). Must be > 0.
+            nu0: Prior pseudo-count for the covariance (:math:`\nu_0`). Must be >= 0.
 
         Raises:
-            ValueError: If input parameters have inconsistent shapes or invalid values.
+            ValueError: If input parameters have inconsistent shapes or
+                invalid values.
         """
         # Detect pandas inputs
         self._pandas = False
@@ -215,27 +244,38 @@ class NIWPosterior:
         sample_sigma: Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"],
         n_obs: int,
     ) -> NIWParams:
-        r"""
-        Updates the posterior parameters using sample statistics.
+        r"""Updates the posterior parameters using sample statistics.
 
-        This method implements Eqs. 11–14 from Meucci's framework :cite:p:`meucci2005robust`:
+        This method implements the Bayesian update rules for the NIW parameters
+        as given by Eqs. (11)–(14) in Meucci (2005).
 
         .. math::
-            T_1 = T_0 + T \\
-            \mu_1 = (T_0 \mu_0 + T \hat{\mu}) / T_1 \\
-            \nu_1 = \nu_0 + T \\
-            \Sigma_1 = [\nu_0 \Sigma_0 + T \hat{\Sigma} + (\mu_0 - \hat{\mu})(\mu_0 - \hat{\mu})^T / (1/T + 1/T_0)] / \nu_1
+            \begin{align*}
+            T_1 &= T_0 + T \\
+            \mu_1 &= \frac{T_0\mu_0 + T\hat{\mu}}{T_1} \\
+            \nu_1 &= \nu_0 + T \\
+            \Sigma_1 &= \frac{1}{\nu_1} \left[ \nu_0\Sigma_0 + T\hat{\Sigma} + \frac{(\mu_0 - \hat{\mu})(\mu_0 - \hat{\mu})'}{\frac{1}{T} + \frac{1}{T_0}} \right]
+            \end{align*}
+
+        The resulting posterior parameters blend the investor's prior with
+        information from the market, with the balance determined by the
+        relative confidence levels (:math:`T_0, \nu_0`) versus the amount of
+        data (:math:`T`).
 
         Args:
-            sample_mu: 1D array (length N) of sample means (:math:`\hat{\mu}`) or :class:`pandas.Series`.
-            sample_sigma: 2D array (N×N) of sample covariance matrix (:math:`\hat{\Sigma}`) or :class:`pandas.DataFrame`.
-            n_obs: Number of observations in the sample (:math:`T`):cite:p:`meucci2005robust`.
+            sample_mu: 1D array (length N) of sample means (:math:`\hat{\mu}`).
+            sample_sigma: 2D array (N x N) of the sample covariance matrix
+                (:math:`\hat{\Sigma}`).
+            n_obs: The number of observations in the sample (:math:`T`).
 
         Returns:
-            A :class:`NIWParams` instance containing the updated posterior parameters (:math:`T_1, \mu_1, \nu_1, \Sigma_1`).
-            If inputs were pandas, then :math:`\mu_1` is returned as a :class:`pandas.Series` and :math:`\Sigma_1` as a :class:`pandas.DataFrame`.
+            A :class:`NIWParams` instance with the updated posterior parameters.
+            If pandas objects were used in initialization, returns :math:`\mu_1`
+            as a Series and :math:`\Sigma_1` as a DataFrame.
+
         Raises:
-            ValueError: If sample statistics have inconsistent shapes or ``n_obs`` is invalid.
+            ValueError: If sample statistics have inconsistent shapes or ``n_obs``
+                is not a positive integer.
         """
         # Convert pandas inputs if present
         if isinstance(sample_mu, pd.Series):
@@ -260,9 +300,9 @@ class NIWPosterior:
         _ = _cholesky_pd(ssigma)  # Ensure sample_sigma is PD or near-PD
 
         # Compute posterior scalars
-        T1 = self.t0 + n_obs     # Eq. (11) [cite: 8]
-        nu1 = self.nu0 + n_obs   # Eq. (13) [cite: 8]
-        mu1_array = (self.t0 * self.prior_mu + n_obs * smu) / T1  # Eq. (12) [cite: 8]
+        T1 = self.t0 + n_obs
+        nu1 = self.nu0 + n_obs
+        mu1_array = (self.t0 * self.prior_mu + n_obs * smu) / T1
 
         cross_term_weight_denominator = (1.0 / n_obs + 1.0 / self.t0)
         diff_mu = self.prior_mu - smu
@@ -274,7 +314,7 @@ class NIWPosterior:
                             + cross_term_weighted)
         if nu1 <= 0:
             raise ValueError("Posterior degrees of freedom ν₁ must be positive.")
-        sigma1_array = sigma1_numerator / nu1  # Eq. (14) [cite: 8]
+        sigma1_array = sigma1_numerator / nu1
 
         _ = _cholesky_pd(sigma1_array)  # Ensure Σ₁ is PD or near-PD
 
@@ -294,26 +334,32 @@ class NIWPosterior:
         return self._posterior
 
     def get_posterior(self) -> Optional[NIWParams]:
-        """
-        Retrieves the computed posterior parameters.
+        r"""Retrieves the computed posterior parameters.
 
         Returns:
-            A NIWParams instance containing (T₁, μ₁, ν₁, Σ₁), or None if `update()` has not yet been called.
+            A :class:`.NIWParams` instance containing the posterior parameters
+            (:math:`T_1`, :math:`\mu_1`, :math:`\nu_1`, :math:`\Sigma_1`), or ``None``
+            if :meth:`~.NIWPosterior.update` has not been called.
+
         """
         return self._posterior
 
     def get_mu_ce(self) -> Union[npt.NDArray[np.floating], "pd.Series[np.floating]"]:
-        r"""
-        Computes the classical-equivalent estimator for the mean (:math:`\hat{\mu}_{ce}`).
+        r"""Computes the classical-equivalent estimator for the mean, :math:`\hat{\mu}_{ce}`.
 
-        As per Meucci's framework (Eq. 15 in :cite:p:`meucci2005robust`), :math:`\hat{\mu}_{ce} = \mu_1`.
-        Returns as a :class:`pandas.Series` if prior_mu was provided as :class:`pandas.Series`.
+        For the NIW model, this estimator is the posterior mean :math:`\mu_1`,
+        as defined in Eq. (15).
+
+        .. math::
+            \hat{\mu}_{ce} = \mu_1
 
         Returns:
-            The posterior mean vector :math:`\mu_1` as a NumPy array or :class:`pandas.Series`.
+            The posterior mean vector :math:`\mu_1` as a NumPy array or pandas
+            Series.
 
         Raises:
-            RuntimeError: If posterior parameters have not been computed via `update()`.
+            RuntimeError: If posterior parameters have not been computed via
+                :meth:`update`.
         """
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
@@ -324,55 +370,60 @@ class NIWPosterior:
         return mu1
 
     def get_S_mu(self) -> Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"]:
-        r"""
-        Computes the scatter matrix :math:`S_{\mu}` for the marginal posterior distribution of :math:`\mu`.
+        r"""Computes the scatter matrix :math:`S_{\mu}` for the posterior of :math:`\mu`.
 
-        As per Eq. 16 in Meucci's framework :cite:p:`meucci2005robust`:
+        This matrix describes the dispersion of the marginal posterior
+        distribution of :math:`\mu` and is used to define the location-dispersion
+        ellipsoid for robust optimization. It is defined in Eq. (16):
 
         .. math::
-            S_{\mu} = (1 / T_1) * (\nu_1 / (\nu_1 - 2)) * \Sigma_1
+            S_{\mu} = \frac{1}{T_1} \frac{\nu_1}{\nu_1 - 2} \Sigma_1
 
-        This quantity is used in defining the location-dispersion ellipsoid for :math:`\mu` :cite:p:`meucci2005robust`.
-        Requires :math:`\nu_1 > 2`. Returns as a :class:`pandas.DataFrame` if prior_sigma was :class:`pandas.DataFrame`.
+        This computation requires the posterior degrees of freedom :math:`\nu_1 > 2`.
 
         Returns:
-            The scatter matrix :math:`S_{\mu}` as a NumPy array or :class:`pandas.DataFrame`.
+            The scatter matrix :math:`S_{\mu}` as a NumPy array or pandas DataFrame.
 
         Raises:
             RuntimeError: If posterior parameters have not been computed.
-            ValueError: If $\nu_1 \le 2$, as $S_{\mu}$ is undefined or problematic.
+            ValueError: If :math:`\nu_1 \le 2`, as the scatter matrix is not
+                defined.
         """
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
         if self._posterior.nu1 <= 2:
             raise ValueError("Posterior degrees of freedom ν₁ must be greater than 2 to compute S_μ.")
         factor = self._posterior.nu1 / (self._posterior.T1 * (self._posterior.nu1 - 2.0))
-        S_mu_array = (
-            self._posterior.sigma1.values
-            if isinstance(self._posterior.sigma1, pd.DataFrame)
-            else self._posterior.sigma1
-        )
+        # Ensure underlying data is array for multiplication
+        sigma1_array = self._posterior.sigma1
+        if isinstance(sigma1_array, pd.DataFrame):
+            sigma1_array = sigma1_array.values
+
+        S_mu_array = factor * sigma1_array
+
         if self._pandas and self._asset_index is not None:
             return pd.DataFrame(S_mu_array, index=self._asset_index, columns=self._asset_index)
         return S_mu_array
 
-    def get_sigma_ce(self) -> Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"]:
-        r"""
-        Computes the classical-equivalent estimator for the covariance matrix (:math:`\hat{\Sigma}_{ce}`).
 
-        As per Eq. 17 in Meucci's framework :cite:p:`meucci2005robust`:
+    def get_sigma_ce(self) -> Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"]:
+        r"""Computes the classical-equivalent estimator for the covariance, :math:`\hat{\Sigma}_{ce}`.
+
+        This estimator is a shrunk version of the posterior scale matrix
+        :math:`\Sigma_1`, as defined in Eq. (17). It serves as the center of
+        the uncertainty ellipsoid for :math:`\Sigma`.
 
         .. math::
-            \hat{\Sigma}_{ce} = (\nu_1 / (\nu_1 + N + 1)) * \Sigma_1
-
-        Returns as a :class:`pandas.DataFrame` if prior_sigma was provided as :class:`pandas.DataFrame`.
+            \hat{\Sigma}_{ce} = \frac{\nu_1}{\nu_1 + N + 1} \Sigma_1
 
         Returns:
-            The classical-equivalent estimator :math:`\hat{\Sigma}_{ce}` as a NumPy array or :class:`pandas.DataFrame`.
+            The classical-equivalent estimator :math:`\hat{\Sigma}_{ce}` as a NumPy
+            array or pandas DataFrame.
 
         Raises:
             RuntimeError: If posterior parameters have not been computed.
-            ValueError: If $\nu_1 + N + 1 = 0$, though unlikely with valid inputs.
+            ValueError: If :math:`\nu_1 + N + 1 = 0`, which is highly unlikely
+                with valid inputs.
         """
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
@@ -380,36 +431,40 @@ class NIWPosterior:
         if denom == 0:
             raise ValueError("Denominator (ν₁ + N + 1) for Σ_ce is zero.")
         factor = self._posterior.nu1 / denom
-        sigma1_array = (
-            self._posterior.sigma1.values
-            if isinstance(self._posterior.sigma1, pd.DataFrame)
-            else self._posterior.sigma1
-        )
+
+        sigma1_array = self._posterior.sigma1
+        if isinstance(sigma1_array, pd.DataFrame):
+            sigma1_array = sigma1_array.values
+
         sigma_ce_array = factor * sigma1_array
         if self._pandas and self._asset_index is not None:
             return pd.DataFrame(sigma_ce_array, index=self._asset_index, columns=self._asset_index)
         return sigma_ce_array
 
     def cred_radius_mu(self, p_mu: float) -> float:
-        r"""
-        Computes the credibility factor :math:`\gamma_\mu` for the mean's uncertainty ellipsoid.
+        r"""Computes the credibility factor :math:`\gamma_\mu` for the mean's uncertainty.
 
-        As per Eq. 20 in Meucci's framework :cite:p:`meucci2005robust`:
+        This factor, :math:`\gamma_\mu`, appears in the simplified robust
+        mean-variance optimization problem (Eq. 19). It scales the
+        portfolio's posterior standard deviation to penalize for estimation
+        risk in the mean vector. Its formula is given by Eq. (20):
 
         .. math::
-            \gamma_\mu = \sqrt{(q_\mu^2 / T_1) * (\nu_1 / (\nu_1 - 2))}
+            \gamma_\mu = \sqrt{ \frac{q_\mu^2}{T_1} \frac{\nu_1}{\nu_1 - 2} }
 
-        with :math:`q_\mu^2 = Q_{\chi^2_N}(p_{mu})` as in Meucci :cite:p:`meucci2005robust`.
+        where :math:`q_\mu^2 = Q_{\chi^2_N}(p_{mu})` is the squared radius factor
+        from the chi-square distribution.
 
         Args:
-            p_mu: Confidence level for :math:`\mu` (0 < p_mu < 1).
+            p_mu: The confidence level for :math:`\mu` (0 < p_mu < 1), which
+                reflects aversion to estimation risk.
 
         Returns:
-            The credibility factor :math:`\gamma_\mu` as a float.
+            The credibility factor :math:`\gamma_\mu`.
 
         Raises:
             RuntimeError: If posterior parameters have not been computed.
-            ValueError: If ν₁ ≤ 2 or p_mu is not in (0,1).
+            ValueError: If :math:`\nu_1 \le 2` or `p_mu` is not in (0,1).
         """
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
@@ -424,25 +479,31 @@ class NIWPosterior:
         return gamma_mu
 
     def cred_radius_sigma_factor(self, p_sigma: float) -> float:
-        r"""
-        Computes the credibility factor :math:`C_\Sigma` related to :math:`\Sigma` for robust allocation.
+        r"""Computes the scaling factor for the worst-case portfolio variance.
 
-        As per Eq. 47 in Meucci's framework :cite:p:`meucci2005robust`:
+        In the robust framework, the maximum possible variance of a portfolio
+        within the uncertainty ellipsoid for :math:`\Sigma` is not simply
+        :math:`w'\Sigma_1 w`, but a scaled version of it. This method computes
+        that scaling factor, which we can call :math:`C_\Sigma`. The derivation is
+        shown in Appendix 7.2, and the final result is presented in the
+        maximization step in Eq. (47):
 
         .. math::
-            C_\Sigma = [\nu_1 / (\nu_1 + N + 1)] + \sqrt{2 \nu_1^2 q_\Sigma^2 / (\nu_1 + N + 1)^3}
+            \max_{\Sigma \in \Theta_\Sigma} w'\Sigma w = \underbrace{ \left[ \frac{\nu_1}{\nu_1 + N + 1} + \sqrt{\frac{2\nu_1^2 q_\Sigma^2}{(\nu_1 + N + 1)^3}} \right] }_{C_\Sigma} (w'\Sigma_1 w)
 
-        where :math:`q_\Sigma^2 = Q_{\chi^2_{dof}}(p_\Sigma)` with :math:`dof = N(N+1)/2`.
+        where :math:`q_\Sigma^2 = Q_{\chi^2_{dof}}(p_\Sigma)` with
+        :math:`dof = N(N+1)/2`.
 
         Args:
-            p_sigma: Confidence level for :math:`\Sigma` (0 < p_sigma < 1).
+            p_sigma: The confidence level for :math:`\Sigma` (0 < p_sigma < 1),
+                reflecting aversion to estimation risk.
 
         Returns:
-            The credibility factor :math:`C_\Sigma` as a float.
+            The credibility factor :math:`C_\Sigma` for scaling the portfolio variance.
 
         Raises:
             RuntimeError: If posterior parameters have not been computed.
-            ValueError: If p_sigma not in (0,1) or invalid internal state.
+            ValueError: If `p_sigma` is not in (0,1) or internal terms are invalid.
         """
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
@@ -464,8 +525,9 @@ class NIWPosterior:
             raise ValueError("Denominator for sqrt term in C_Σ is zero.")
         term2_arg = numerator_term2 / denominator_term2
         if term2_arg < 0:
+            # This should not happen with valid inputs but good to check
             warnings.warn(
-                f"Argument for sqrt in C_Σ calculation is negative ({term2_arg:?}); result may be NaN.",
+                f"Argument for sqrt in C_Σ calculation is negative ({term2_arg:f}); result may be NaN.",
                 RuntimeWarning
             )
         term2 = np.sqrt(term2_arg)
