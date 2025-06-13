@@ -67,6 +67,7 @@ Lobo *et al.* (2007).
 Credits 
 ------------------
 MeanVariance and MeanCVaR classes are adapted from fortitudo-tech package (https://github.com/fortitudo-tech/fortitudo.tech)
+
 """
 
 from __future__ import annotations
@@ -146,7 +147,7 @@ def _linear_turnover_blocks(
 # ------------------------------------------------------------------ #
 # Result container
 # ------------------------------------------------------------------ #
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class OptimizationResult:
     r"""
     Immutable result object returned by :class:`RobustOptimizer`.

@@ -6,9 +6,6 @@ It includes:
 -   `estimate_sample_moments`: For computing weighted sample mean and covariance.
 -   `shrink_mean_jorion`: Implements the Bayes-Stein shrinkage estimator for the mean vector.
 -   `shrink_covariance_ledoit_wolf`: Implements the Ledoit-Wolf shrinkage estimator for the covariance matrix.
-
-These tools are essential for robust asset allocation, especially when dealing
-with limited historical data or high-dimensional portfolios.
 """
 
 from __future__ import annotations
