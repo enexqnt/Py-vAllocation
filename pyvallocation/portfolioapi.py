@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format='[%(name)s - %(levelname)s] %(mes
 logger = logging.getLogger(__name__)
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class AssetsDistribution:
     """
     An immutable container for asset return distributions.
