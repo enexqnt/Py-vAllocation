@@ -30,46 +30,31 @@ class AssetsDistribution:
     and pandas Series/DataFrames, ensuring data consistency.
 
     Attributes:
-        mu (Optional[Union[npt.NDArray[np.floating], pd.Series]]): :no-index: A 1D array or
-            :class:`pandas.Series` of expected returns for each asset (N,).
-        cov (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): :no-index: A 2D covariance
-            matrix of asset returns (N, N).
-        scenarios (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): :no-index: A 2D array or
-            :class:`pandas.DataFrame` of shape (T, N) where each row is a market scenario.
-        probabilities (Optional[Union[npt.NDArray[np.floating], pd.Series]]): :no-index: A 1D array or
-            :class:`pandas.Series` of probabilities corresponding to each scenario (T,).
-        asset_names (Optional[List[str]]): :no-index: A list of names for the assets. If not provided,
-            inferred from pandas inputs.
-        N (int): :no-index: The number of assets, inferred from the input data.
-        T (Optional[int]): :no-index: The number of scenarios, inferred from the input data. None if
-            parametric distribution is used.
+        mu (Optional[Union[npt.NDArray[np.floating], pd.Series]]): A 1D array or pandas.Series of expected returns for each asset (N,).
+        cov (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): A 2D covariance matrix of asset returns (N, N).
+        scenarios (Optional[Union[npt.NDArray[np.floating], pd.DataFrame]]): A 2D array or pandas.DataFrame of shape (T, N), where each row is a market scenario.
+        probabilities (Optional[Union[npt.NDArray[np.floating], pd.Series]]): A 1D array or pandas.Series of probabilities corresponding to each scenario (T,).
+        asset_names (Optional[List[str]]): A list of names for the assets. If not provided, inferred from pandas inputs.
+        N (int): The number of assets, inferred from the input data.
+        T (Optional[int]): The number of scenarios, inferred from the input data. None if parametric distribution is used.
 
     Assumptions & Design Choices:
-        - If ``scenarios`` are provided without ``probabilities``, probabilities are
+        - If "scenarios" are provided without "probabilities", probabilities are
           assumed to be uniform across all scenarios.
-        - If provided ``probabilities`` do not sum to 1.0, they are automatically
+        - If provided "probabilities" do not sum to 1.0, they are automatically
           normalized with a warning. This choice ensures downstream solvers
           receive valid probability distributions.
         - If pandas objects are used for inputs, asset names are inferred from
           their indices or columns. It is assumed that the order and names are
           consistent across all provided pandas objects.
     """
-    mu: Optional[Union[npt.NDArray[np.floating], "pd.Series"]] = None
-    """:no-index:"""
-    cov: Optional[Union[npt.NDArray[np.floating], "pd.DataFrame"]] = None
-    """:no-index:"""
-    scenarios: Optional[Union[npt.NDArray[np.floating], "pd.DataFrame"]] = None
-    """:no-index:"""
-    probabilities: Optional[Union[npt.NDArray[np.floating], "pd.Series"]] = None
-    """:no-index:"""
+    mu: Optional[Union[npt.NDArray[np.floating], pd.Series]] = None
+    cov: Optional[Union[npt.NDArray[np.floating], pd.DataFrame]] = None
+    scenarios: Optional[Union[npt.NDArray[np.floating], pd.DataFrame]] = None
+    probabilities: Optional[Union[npt.NDArray[np.floating], pd.Series]] = None
     asset_names: Optional[List[str]] = None
-    """:no-index:"""
-    
     N: int = field(init=False, repr=False)
-    """:no-index:"""
     T: Optional[int] = field(init=False, repr=False)
-    """:no-index:"""
-
 
     def __post_init__(self):
         """
@@ -148,7 +133,6 @@ class AssetsDistribution:
         object.__setattr__(self, 'probabilities', probs)
         object.__setattr__(self, 'asset_names', asset_names)
 
-
 @dataclass(frozen=True)
 class PortfolioFrontier:
     """
@@ -159,44 +143,20 @@ class PortfolioFrontier:
     query and analyze specific portfolios on the frontier.
 
     Attributes:
-        weights (npt.NDArray[np.floating]): :no-index: A 2D NumPy array of shape (N, M), where N is the
-            number of assets and M is the number of portfolios on the frontier.
-            Each column represents the weights of an optimal portfolio.
-        returns (npt.NDArray[np.floating]): :no-index: A 1D NumPy array of shape (M,) containing
-            the expected returns for each portfolio on the frontier.
-        risks (npt.NDArray[np.floating]): :no-index: A 1D NumPy array of shape (M,) containing
-            the risk values for each portfolio on the frontier. The specific
-            risk measure (e.g., volatility, CVaR, uncertainty budget) is
-            indicated by `risk_measure`.
-        risk_measure (str): :no-index: A string describing the risk measure used to construct
-            this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)',
-            'Estimation Risk (‖Σ\'¹/²w‖₂)').
-        asset_names (Optional[List[str]]): :no-index: An optional list of names for the assets.
-            If provided, enables pandas Series/DataFrame output for portfolio weights.
-
+        weights (npt.NDArray[np.floating]): A 2D NumPy array of shape (N, M), where N is the
+            number of assets and M is the number of portfolios on the frontier. Each column represents the weights of an optimal portfolio.
+        returns (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the expected returns for each portfolio on the frontier.
+        risks (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the risk values for each portfolio on the frontier. The specific risk measure (e.g., volatility, CVaR, uncertainty budget) is indicated by `risk_measure`.
+        risk_measure (str): A string describing the risk measure used to construct this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)', 'Estimation Risk (‖Σ'¹/²w‖₂)').
+        asset_names (Optional[List[str]]): An optional list of names for the assets. If provided, enables pandas Series/DataFrame output for portfolio weights.
     """
     weights: npt.NDArray[np.floating]
-    """:no-index:"""
     returns: npt.NDArray[np.floating]
-    """:no-index:"""
     risks: npt.NDArray[np.floating]
-    """:no-index:"""
     risk_measure: str
-    """:no-index:"""
     asset_names: Optional[List[str]] = None
-    """:no-index:"""
 
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
-        """
-        Converts a NumPy weights array to a named pandas Series, using asset names if available.
-
-        Args:
-            w (np.ndarray): A 1D NumPy array of portfolio weights.
-            name (str): The name to assign to the resulting pandas Series.
-
-        Returns:
-            pd.Series: A pandas Series representing the portfolio weights, with asset names as index.
-        """
         return pd.Series(w, index=self.asset_names, name=name)
 
     def get_min_risk_portfolio(self) -> Tuple[pd.Series, float, float]:
@@ -559,7 +519,7 @@ class PortfolioWrapper:
         
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
-            uncertainty_covariance=self.dist.cov,
+            uncertainty_cov=self.dist.cov,
             G=self.G, h=self.h, A=self.A, b=self.b,
             initial_weights=self.initial_weights,
             proportional_costs=self.proportional_costs
@@ -595,7 +555,7 @@ class PortfolioWrapper:
 
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
-            uncertainty_covariance=self.dist.cov,
+            uncertainty_cov=self.dist.cov,
             G=self.G, h=self.h, A=self.A, b=self.b,
             initial_weights=self.initial_weights,
             proportional_costs=self.proportional_costs

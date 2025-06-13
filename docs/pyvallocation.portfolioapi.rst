@@ -5,6 +5,7 @@ Portfolio API
    :members:
    :undoc-members:
    :show-inheritance:
+   :noindex:
 
 
 

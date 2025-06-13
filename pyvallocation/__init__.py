@@ -12,7 +12,7 @@ __all__ = [
     "entropy_pooling",
     "FlexibleViewsProcessor",
     "BlackLittermanProcessor",
-    "Optimization",
+    # "Optimization",
     "MeanVariance",
     "MeanCVaR",
     "RobustOptimizer",
@@ -24,7 +24,7 @@ from .moments import (
     shrink_covariance_ledoit_wolf,
     shrink_mean_jorion,
 )
-from .optimization import MeanCVaR, MeanVariance, Optimization, RobustOptimizer
+from .optimization import MeanCVaR, MeanVariance, RobustOptimizer
 from .probabilities import (
     compute_effective_number_scenarios,
     generate_exp_decay_probabilities,
