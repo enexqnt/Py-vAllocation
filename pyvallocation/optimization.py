@@ -63,6 +63,10 @@ Primary references
 ------------------
 Markowitz (1952); Rockafellar & Uryasev (2000); Meucci (2005);
 Lobo *et al.* (2007).
+
+Credits 
+------------------
+MeanVariance and MeanCVaR classes are adapted from fortitudo-tech package (https://github.com/fortitudo-tech/fortitudo.tech)
 """
 
 from __future__ import annotations

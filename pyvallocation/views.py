@@ -540,7 +540,6 @@ class FlexibleViewsProcessor:
         """Return *(posterior mean, posterior covariance)*."""
         return self.posterior_returns, self.posterior_cov
 
-
 class BlackLittermanProcessor:
     r"""
     Bayesian Black–Litterman (BL) updater for *equality* **mean views**.
@@ -592,7 +591,6 @@ class BlackLittermanProcessor:
     entropy-pooling framework in :class:`~FlexibleViewsProcessor` should be
     used for inequalities or higher-order moment constraints.
 
-    ----------
     Prior specification
     -------------------
     Exactly *one* of the following mutually exclusive inputs must be supplied
@@ -605,7 +603,6 @@ class BlackLittermanProcessor:
        **risk-aversion** :math:`\delta>0` :cite:p:`black1992global`.
     3. ``prior_mean`` – treat the sample mean as :math:`\boldsymbol\pi`.
 
-    ----------
     Parameters
     ----------
     prior_cov : (N, N) array_like
@@ -614,13 +611,13 @@ class BlackLittermanProcessor:
         Prior mean vector (exclusive with ``pi`` / ``market_weights``).
     market_weights : (N,) array_like, optional
         Market-cap weights used for CAPM reverse optimisation.
-    risk_aversion : float, default ``1.0``
+    risk_aversion : float, default 1.0
         Risk-aversion coefficient :math:`\delta\;(>0)`.
-    tau : float, default ``0.05``
+    tau : float, default 0.05
         Shrinkage scalar :math:`\tau` controlling the weight on the prior
         covariance; typical values 0.01–0.10
         :cite:p:`he2002intuition`.
-    idzorek_use_tau : bool, default ``True``
+    idzorek_use_tau : bool, default True
         If *True* the Idzorek confidence rule scales by
         :math:`\tau\boldsymbol\Sigma` (original He–Litterman convention);
         if *False* it uses :math:`\boldsymbol\Sigma` instead.
@@ -640,10 +637,9 @@ class BlackLittermanProcessor:
         * ``"idzorek"`` – derive from confidences.
         * vector length *K* – treated as diagonal.
         * full :math:`K\times K` matrix – used verbatim.
-    verbose : bool, default ``False``
+    verbose : bool, default False
         Print intermediate diagnostics.
 
-    ----------
     Attributes
     ----------
     posterior_mean : ndarray or pandas.Series
@@ -651,14 +647,12 @@ class BlackLittermanProcessor:
     posterior_cov : ndarray or pandas.DataFrame
         :math:`\boldsymbol\Sigma^{\star}` from Eq. :eq:`bl_posterior`.
 
-    ----------
     Methods
     -------
     get_posterior() → (posterior_mean, posterior_cov)
         Return the posterior moments in the same *NumPy / Pandas* flavour as
         the inputs.
 
-    ----------
     Examples
     --------
     >>> bl = BlackLittermanProcessor(
@@ -692,7 +686,6 @@ class BlackLittermanProcessor:
         omega: Any = None,
         verbose: bool = False,
     ) -> None:
-        import warnings
 
         # ---------- Σ (prior covariance) --------------------------------
         self._is_pandas: bool = isinstance(prior_cov, pd.DataFrame)
@@ -785,7 +778,7 @@ class BlackLittermanProcessor:
 
         for key, value in mean_views.items():
             # Accept either scalar or single-element tuple/list
-            if isinstance(value, Sequence):
+            if isinstance(value, Sequence) and not isinstance(value, str):
                 if len(value) != 1:
                     raise ValueError(
                         "Inequality views not supported – use scalar value."
