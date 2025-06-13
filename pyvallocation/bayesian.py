@@ -97,7 +97,7 @@ def chi2_quantile(p: float, dof: int, sqrt: bool = False) -> float:
     return float(np.sqrt(q_val)) if sqrt else float(q_val)
 
 
-@dataclass(slots=True)
+@dataclass()
 class NIWParams:
     r"""A container for the parameters of a Normal-Inverse-Wishart (NIW) posterior distribution.
 
