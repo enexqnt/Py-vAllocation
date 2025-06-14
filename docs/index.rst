@@ -42,14 +42,6 @@ Utility Modules
 
    pyvallocation.utils
 
-Advanced Features
------------------
-
-- Bayesian portfolio allocation techniques
-- Flexible views and constraints management
-- Advanced optimization strategies
-- Probabilistic portfolio modeling
-
 
 References
 ----------
