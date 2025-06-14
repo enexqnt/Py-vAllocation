@@ -1,4 +1,4 @@
-# entropy_pooling and _dual_objective functions are adapted from fortituto-tech https://github.com/fortitudo-tech/fortitudo.tech
+# entropy_pooling and _dual_objective functions are adapted from fortitudo-tech https://github.com/fortitudo-tech/fortitudo.tech
 
 from collections.abc import Sequence
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -16,49 +16,86 @@ def _entropy_pooling_dual_objective(
 ) -> Tuple[float, np.ndarray]:
     r"""Return dual objective value and gradient for entropy pooling.
 
-    Let :math:`p^{(0)} \in (0,1)^{S}` be the prior probabilities, and let
-    ``lhs``/``rhs_squeezed`` stack the equality and (non‑negative‑multiplier)
-    inequality constraints resulting from the views.  For a vector of
-    Lagrange multipliers :math:`\lambda \in \mathbb{R}^{K}` we define
+    This function computes the dual objective function and its gradient, which are
+    necessary for the optimization process in Entropy Pooling (EP). The core idea
+    of EP is to find a new probability distribution that incorporates user views
+    while minimizing the Kullback-Leibler (KL) divergence (relative entropy) from
+    a prior distribution. This constrained optimization problem
+    can be efficiently solved by minimizing its dual formulation.
+
+    Let :math:`p^{(0)} \in (0,1)^{S}` be the prior probabilities, where :math:`S`
+    is the number of scenarios. Let the constraints from the views be represented
+    by a matrix :math:`A \in \mathbb{R}^{K \times S}` and a vector
+    :math:`b \in \mathbb{R}^{K}`, where :math:`K` is the total number of
+    constraints (equality and inequality). For a vector of Lagrange multipliers
+    :math:`\lambda \in \mathbb{R}^{K}` (``lagrange_multipliers``), the intermediate
+    variable :math:`x(\lambda)` is defined as:
 
     .. math::
 
        x(\lambda) \;:=\; \exp\bigl(\log p^{(0)} - 1 - A^\top \lambda\bigr),
 
-    where :math:`A \in \mathbb{R}^{K\times S}` is ``lhs`` and
-    :math:`b \in \mathbb{R}^{K}` is ``rhs_squeezed``.  The dual objective
-    (strictly convex) is then
+    where :math:`\log p^{(0)}` corresponds to ``log_p_col`` and :math:`A`
+    corresponds to ``lhs``. This formulation for :math:`x(\lambda)` arises from the
+    first-order optimality conditions of the Lagrangian in the primal entropy
+    minimization problem.
+
+    The dual objective function, denoted :math:`\varphi(\lambda)`, which is
+    strictly convex, is given by:
 
     .. math::
 
        \varphi(\lambda) \;=\; \mathbf 1^\top x(\lambda) + \lambda^\top b.
 
-    Its gradient is
-    :math:`\nabla \varphi(\lambda) = b - A\,x(\lambda)`.
+    Here, :math:`\mathbf{1}` is a vector of ones, and :math:`b` corresponds to
+    ``rhs_squeezed``. The term :math:`\mathbf 1^\top x(\lambda)` represents the sum
+    of the elements of :math:`x(\lambda)`, and :math:`\lambda^\top b` is the dot
+    product of the Lagrange multipliers and the constraint targets.
 
-    We rescale both value and gradient by ``1e3`` purely for numerical
-    stability – this has **no** effect on the minimiser.
+    The gradient of the dual objective function, :math:`\nabla \varphi(\lambda)`, is
+    derived from the dual formulation and used by the optimizer for efficient
+    minimization. It is given by:
+
+    .. math::
+
+       \nabla \varphi(\lambda) = b - A\,x(\lambda).
+
+    A scaling factor of ``1e3`` is applied to both the objective value and the
+    gradient. This is a common numerical practice to improve the stability of the
+    optimization algorithm (e.g., preventing very small numbers from causing
+    precision issues), and it does not affect the location of the minimizer
+    for the dual problem.
 
     Parameters
     ----------
     lagrange_multipliers : (K,) ndarray
-        Current point :math:`\lambda`.
+        The current vector of Lagrange multipliers, :math:`\lambda`, at which the
+        objective and gradient are to be evaluated.
     log_p_col : (S, 1) ndarray
-        ``np.log(p0)`` in column‑vector form.
+        The natural logarithm of the prior probabilities :math:`p^{(0)}`, provided
+        as a column vector.
     lhs : (K, S) ndarray
-        Constraint matrix :math:`A`.
+        The left-hand side matrix :math:`A` representing the coefficients of the
+        linear constraints. This matrix combines both equality and inequality
+        constraints.
     rhs_squeezed : (K,) ndarray
-        Constraint targets :math:`b`.
+        The right-hand side vector :math:`b` representing the target values for the
+        linear constraints. This vector combines targets for both equality and
+        inequality constraints.
 
     Returns
     -------
     value : float
-        ``1e3 * varphi(lambda)``.
+        The scaled value of the dual objective function, i.e., ``1e3 * varphi(lambda)``.
     gradient : (K,) ndarray
-        ``1e3 * nabla varphi(lambda)``.
+        The scaled gradient of the dual objective function, i.e., ``1e3 * nabla varphi(lambda)``.
+
+    Notes
+    -----
+    This function is intended for internal use by the `scipy.optimize.minimize`
+    solver within the `entropy_pooling` function. It is based on the dual problem
+    formulation for entropy minimization as described in.
     """
-
-
     lagrange_multipliers_col = lagrange_multipliers[:, np.newaxis]
 
     x = np.exp(log_p_col - 1.0 - lhs.T @ lagrange_multipliers_col)
@@ -79,34 +116,76 @@ def entropy_pooling(
 ) -> np.ndarray:
     r"""Return posterior probabilities via the entropy‑pooling algorithm.
 
-    This is a thin wrapper around
-    :func:`scipy.optimize.minimize` that solves the dual optimisation problem
-    corresponding to *entropy pooling* (Meucci 2008).  Equality constraints
-    are stacked in ``A``/``b``, while inequality constraints are passed in
-    ``G``/``h`` with **non‑negative** multipliers.
+    This function serves as a wrapper around :func:`scipy.optimize.minimize` to
+    solve the dual optimization problem of *Entropy Pooling* (EP), a method
+    developed by Attilio Meucci. EP aims to find a new probability
+    distribution that is as "close" as possible to a given prior distribution,
+    while satisfying a set of linear constraints (views). The "closeness"
+    is measured by the Kullback-Leibler (KL) divergence, also known as relative entropy.
 
-    Only the quasi‑Newton methods ``'TNC'`` and ``'L‑BFGS‑B'`` are supported
-    because they allow box bounds on the multipliers.
+    The problem is formulated as minimizing the relative entropy
+    :math:`D_{\mathrm{KL}}(q\,\|\,p^{(0)})` subject to linear equality constraints
+    :math:`Eq = b` and inequality constraints :math:`Gq \le h`.
+    This function solves the dual of this problem using numerical optimization.
+
+    Equality constraints are represented by the matrix ``A`` and vector ``b``.
+    Inequality constraints are represented by ``G`` and ``h``. For inequality
+    constraints :math:`Gq \le h`, the corresponding Lagrange multipliers are
+    constrained to be non-negative.
+
+    The optimization is performed using quasi-Newton methods from `scipy.optimize.minimize`.
+    Only ``'TNC'`` (Truncated Newton) and ``'L-BFGS-B'``
+    (Limited-memory Broyden–Fletcher–Goldfarb–Shanno algorithm with box
+    constraints) are supported, as they allow for box bounds on the Lagrange
+    multipliers.
 
     Parameters
     ----------
     p : (S,) or (S, 1) ndarray
-        Prior probability vector.
-    A, b : ndarray
-        Equality constraint matrix / target.
-    G, h : ndarray, optional
-        Inequality constraint matrix / target (defaults to *None* for no
-        inequalities).
+        The prior probability vector, :math:`p^{(0)} \in (0,1)^S`, where :math:`S`
+        is the number of scenarios. This vector is typically uniform
+        but can be any valid probability distribution (i.e., elements sum to 1 and are positive).
+    A : ndarray
+        The matrix :math:`E` for the equality constraints, :math:`Eq = b`. Its
+        shape is :math:`(K_{eq}, S)`, where :math:`K_{eq}` is the number of
+        equality constraints.
+    b : ndarray
+        The target vector :math:`b` for the equality constraints. Its shape is
+        :math:`(K_{eq},)`.
+    G : ndarray, optional
+        The matrix :math:`G` for the inequality constraints, :math:`Gq \le h`.
+        Its shape is :math:`(K_{ineq}, S)`, where :math:`K_{ineq}` is the number
+        of inequality constraints. Defaults to *None* if no inequality constraints
+        are present.
+    h : ndarray, optional
+        The target vector :math:`h` for the inequality constraints. Its shape is
+        :math:`(K_{ineq},)`. Defaults to *None* if no inequality constraints are
+        present.
     method : {'TNC', 'L-BFGS-B'}, optional
-        Optimiser to use.  If *None* the faster of the two for the current
-        SciPy build is chosen ('TNC' at the time of writing).
+        The optimization method to be used by `scipy.optimize.minimize`.
+        Supported options are `'TNC'` and `'L-BFGS-B'`. If *None*, the function
+        defaults to `'TNC'`, which is generally faster for the current SciPy
+        build.
 
     Returns
     -------
     q : (S, 1) ndarray
-        Posterior probability vector *column‑shaped* for convenience.
-    """
+        The posterior probability vector, :math:`q`, in column-vector form,
+        satisfying the given constraints while minimizing relative entropy to `p`.
 
+    Raises
+    ------
+    ValueError
+        If an unsupported `method` is specified.
+
+    Notes
+    -----
+    This function is an adaptation from the `fortitudo.tech` open-source package
+    (https://github.com/fortitudo-tech/fortitudo.tech). The core methodology is
+    described in Meucci (2008). The dual problem is minimized, and the
+    primal solution (posterior probabilities) is recovered from the optimal Lagrange
+    multipliers.
+    """
     opt_method = method or "TNC"
     if opt_method not in ("TNC", "L-BFGS-B"):
         raise ValueError(
@@ -157,86 +236,138 @@ def entropy_pooling(
 class FlexibleViewsProcessor:
     r"""Entropy‑pooling engine with fully flexible moment views.
 
-    FlexibleViewsProcessor adjusts a discrete **prior** distribution of
-    multivariate asset returns so that it satisfies user‑specified *views* on
-    **means**, **variances**, **skewnesses** and **correlations** by minimising
-    relative entropy.  It implements the *Fully Flexible Views* methodology of
-    Meucci [1]_ and supports both *simultaneous* (“one‑shot”) and *iterated*
-    (block‑wise) entropy pooling.
+    The `FlexibleViewsProcessor` class provides a robust framework for adjusting a
+    discrete **prior** distribution of multivariate asset returns to incorporate
+    user-specified *views*. This is achieved by minimizing the relative entropy
+    (Kullback-Leibler divergence) between the prior and the new, "posterior"
+    distribution. The class implements the *Fully Flexible Views*
+    methodology proposed by Attilio Meucci, supporting views on
+    various statistical moments, including **means**, **variances**, **skewnesses**,
+    and **correlations**. It supports both *simultaneous* (“one‑shot”) and
+    *iterated* (block‑wise) entropy pooling.
 
     Mathematical background
     -----------------------
-    Let :math:`R \in \mathbb{R}^{S\times N}` be a scenario matrix with prior
-    probabilities :math:`p^{(0)} \in (0,1)^S`.  Entropy pooling solves
+    Let :math:`R \in \mathbb{R}^{S\times N}` be a scenario matrix representing :math:`S`
+    scenarios for :math:`N` asset returns, with associated prior probabilities
+    :math:`p^{(0)} \in (0,1)^S`. The entropy pooling problem is formally stated as:
 
     .. math::
 
        \min_{q \in \Delta_S} &\; D_{\mathrm{KL}}(q\,\|\,p^{(0)}) \\
-       \text{s.t.} &\; Eq = b, \; Gq \le h,
+       \text{s.t.} &\; Eq = b, \\
+                   &\; Gq \le h,
 
-    where :math:`\Delta_S` is the simplex, and *(E, b)* and *(G, h)* encode the
-    views as linear constraints on *q*.  The dual is minimised in the helper
-    :py:func:`_entropy_pooling_dual_objective`.
+    where :math:`\Delta_S` denotes the probability simplex (i.e., :math:`q_s > 0` for
+    all :math:`s` and :math:`\sum_{s=1}^S q_s = 1`). The matrices :math:`E` and :math:`G`,
+    along with vectors :math:`b` and :math:`h`, encode the user's views as linear
+    constraints on the posterior probabilities :math:`q`. The minimization of this
+    problem is efficiently performed by minimizing its dual formulation, handled by
+    the internal helper function :py:func:`_entropy_pooling_dual_objective`.
 
     For practitioners
     ~~~~~~~~~~~~~~~~~
-    * **Plug‑and‑play:** pass historical returns *or* (mean, cov) plus
-      ``num_scenarios`` and receive posterior moments and probabilities.
-    * **Sequential updating:** set ``sequential=True`` to apply view blocks in
-      the order *mean → vol → skew → corr* when feasibility is an issue.
-    * **Inequality views:** prepend an operator string ``'>=', '<=', '>'`` or
-      ``'<'`` to any view value.  Equality is the default.
+    * **Plug‑and‑play Scenario Handling:** Users can either provide historical
+        returns directly or specify prior mean and covariance, allowing the
+        processor to synthesize scenarios. The output includes posterior moments
+        (mean, covariance) and the adjusted probabilities.
+    * **Sequential Updating (Iterated EP):** By setting `sequential=True`, the
+        class applies view blocks (e.g., mean views, then volatility views) in a
+        predefined order (*mean → vol → skew → corr*). This iterated approach,
+        also known as Sequential Entropy Pooling (SeqEP), can lead to
+        significantly better solutions and ensure logical consistency, especially
+        when views on higher-order moments (like variance or skewness) implicitly
+        depend on lower-order moments (like the mean).
+        The original EP approach might introduce strong implicit views by fixing
+        parameters to their prior values.
+    * **Flexible Inequality Views:** Views can be specified not only as equalities
+        but also as inequalities (e.g., '>=', '<=', '>', '<'). For instance,
+        `vol_views={'Equity US': ('<=', 0.20)}` sets an upper bound on the
+        volatility. Equality is the default if no operator is specified.
 
     Parameters
     ----------
     prior_returns : (S, N) ndarray or DataFrame, optional
-        Scenario cube.  If omitted, **both** ``prior_mean`` and ``prior_cov``
-        are required.
+        A matrix or DataFrame of historical or simulated prior scenarios. `S` is the
+        number of scenarios, and `N` is the number of assets/risk factors. If
+        provided, `prior_mean` and `prior_cov` are ignored.
     prior_probabilities : (S,) array_like, optional
-        Prior scenario weights.  Defaults to the uniform vector.
+        A vector of prior scenario weights. If not provided, a uniform distribution
+        (i.e., `1/S` for each scenario) is assumed.
     prior_mean : (N,) array_like, optional
-        Mean vector used when synthesising scenarios.
+        The mean vector used for synthesizing scenarios when `prior_returns` is not supplied.
     prior_cov : (N, N) array_like, optional
-        Covariance matrix used when synthesising scenarios.
+        The covariance matrix used for synthesizing scenarios when `prior_returns` is not supplied.
     distribution_fn : callable, optional
-        Custom sampler ``f(mu, cov, n[, rng]) → (n, N)``.  Falls back to
-        :py:func:`numpy.random.Generator.multivariate_normal`.
+        A custom function for generating synthetic scenarios when `prior_returns`
+        is not supplied. The function signature should be
+        `f(mu: np.ndarray, cov: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray`
+        returning an `(n, N)` array. If omitted,
+        :py:func:`numpy.random.Generator.multivariate_normal` is used.
     num_scenarios : int, default ``10000``
-        Number of synthetic draws when ``prior_returns`` is *not* supplied.
+        The number of synthetic scenarios to generate if `prior_returns` is not
+        provided. Defaults to 10,000.
     random_state : int or numpy.random.Generator, optional
-        Seed or generator instance forwarded to NumPy and ``distribution_fn``.
+        A seed or a `numpy.random.Generator` instance to ensure reproducibility
+        when generating synthetic scenarios via `distribution_fn` or
+        `numpy.random.multivariate_normal`.
     mean_views, vol_views, corr_views, skew_views : mapping or array_like, optional
-        View payloads.  Keys are asset labels (or pairs for correlations);
+        View payloads. Keys are asset labels (or pairs for correlations);
         values are either a scalar *x* (equality) or a 2‑tuple such as
         ``('>=', x)``.
     sequential : bool, default ``False``
-        If ``True`` apply view blocks sequentially (iterated EP); otherwise use
-        simultaneous EP.
+        If ``True``, views are applied sequentially (iterated EP). The views are
+        processed in the order *mean → vol → skew → corr*. If ``False``,
+        all views are processed simultaneously in a single EP optimization.
 
     Attributes
     ----------
     posterior_probabilities : (S, 1) ndarray
-        Optimal probability vector :math:`q`.
+        The optimal probability vector :math:`q`.
     posterior_returns : ndarray or Series
-        Posterior mean.
+        The posterior mean.
     posterior_cov : ndarray or DataFrame
-        Posterior covariance.
+        The posterior covariance.
 
     Examples
     --------
-    >>> fp = FlexibleViewsProcessor(
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> from scipy.stats import multivariate_normal
+    >>>
+    >>> # Example with historical returns
+    >>> np.random.seed(42)
+    >>> returns_data = np.random.randn(100, 3) # S=100 scenarios, N=3 assets
+    >>> return_df = pd.DataFrame(returns_data, columns=['Asset A', 'Asset B', 'Asset C'])
+    >>>
+    >>> # Initialize with historical returns and views
+    >>> fp_hist = FlexibleViewsProcessor(
     ...     prior_returns=return_df,
-    ...     mean_views={'Equity US': 0.03},
-    ...     vol_views={'Equity US': ('<=', 0.20)},
-    ...     sequential=True,
+    ...     mean_views={'Asset A': 0.05, 'Asset B': ('>=', 0.01)},
+    ...     vol_views={'Asset A': ('<=', 0.15)},
+    ...     sequential=True, # Apply views sequentially
     ... )
-    >>> q = fp.get_posterior_probabilities()
-    >>> mu_post, cov_post = fp.get_posterior()
-
-    References
-    ----------
-    .. [1] A. Meucci (2008).  *Fully Flexible Views: Theory and Practice.*
-       SSRN 3936392.
+    >>> q_hist = fp_hist.get_posterior_probabilities()
+    >>> mu_post_hist, cov_post_hist = fp_hist.get_posterior()
+    >>> print("Posterior Mean (Historical):", mu_post_hist)
+    >>> print("Posterior Covariance (Historical):\n", cov_post_hist)
+    >>>
+    >>> # Example with synthesized scenarios
+    >>> prior_mu = np.array([0.01, 0.02])
+    >>> prior_sigma = np.array([[0.01, 0.005], [0.005, 0.015]])
+    >>>
+    >>> # Initialize with mean and covariance, synthesizing 5000 scenarios
+    >>> fp_synth = FlexibleViewsProcessor(
+    ...     prior_mean=prior_mu,
+    ...     prior_cov=prior_sigma,
+    ...     num_scenarios=5000,
+    ...     random_state=123,
+    ...     corr_views={('0', '1'): 0.8}, # View on correlation between asset 0 and 1
+    ... )
+    >>> q_synth = fp_synth.get_posterior_probabilities()
+    >>> mu_post_synth, cov_post_synth = fp_synth.get_posterior()
+    >>> print("\nPosterior Mean (Synthesized):", mu_post_synth)
+    >>> print("Posterior Covariance (Synthesized):\n", cov_post_synth)
     """
     def __init__(
         self,
@@ -258,31 +389,30 @@ class FlexibleViewsProcessor:
     ):
         if prior_returns is not None:
             if isinstance(prior_returns, pd.DataFrame):
-                R = prior_returns.values
+                self.R = prior_returns.values
                 self.assets = list(prior_returns.columns)
                 self._use_pandas = True
             else:
-                R = np.atleast_2d(np.asarray(prior_returns, float))
-                self.assets = list(range(R.shape[1]))
+                self.R = np.atleast_2d(np.asarray(prior_returns, float))
+                self.assets = [str(i) for i in range(self.R.shape[1])]
                 self._use_pandas = False
 
-            S, N = R.shape
+            S, N = self.R.shape
 
             if prior_probabilities is None:
-                p0 = np.full((S, 1), 1.0 / S)
+                self.p0 = np.full((S, 1), 1.0 / S)
             else:
-                p = np.asarray(prior_probabilities, float).ravel()
-                if p.size != S:
+                p_array = np.asarray(prior_probabilities, float).ravel()
+                if p_array.size != S:
                     raise ValueError(
                         "`prior_probabilities` must match the number of scenarios."
                     )
-                p0 = p.reshape(-1, 1)
+                self.p0 = p_array.reshape(-1, 1)
 
         else:
             if prior_mean is None or prior_cov is None:
                 raise ValueError(
-                    "Provide either `prior_returns` or both `prior_mean` and "
-                    "`prior_cov`."
+                    "Provide either `prior_returns` or both `prior_mean` and `prior_cov`."
                 )
 
             if isinstance(prior_mean, pd.Series):
@@ -291,7 +421,7 @@ class FlexibleViewsProcessor:
                 self._use_pandas = True
             else:
                 mu = np.asarray(prior_mean, float).ravel()
-                self.assets = list(range(mu.size))
+                self.assets = [str(i) for i in range(mu.size)]
                 self._use_pandas = False
 
             if isinstance(prior_cov, pd.DataFrame):
@@ -309,41 +439,35 @@ class FlexibleViewsProcessor:
             rng = np.random.default_rng(random_state)
 
             if distribution_fn is None:
-                R = rng.multivariate_normal(mu, cov, size=num_scenarios)
+                self.R = rng.multivariate_normal(mu, cov, size=num_scenarios)
             else:
                 try:
-                    R = distribution_fn(mu, cov, num_scenarios, rng)
+                    self.R = distribution_fn(mu, cov, num_scenarios, rng)
                 except TypeError:
-                    R = distribution_fn(mu, cov, num_scenarios)
+                    self.R = distribution_fn(mu, cov, num_scenarios)
 
-            R = np.atleast_2d(np.asarray(R, float))
-            if R.shape != (num_scenarios, N):
+            self.R = np.atleast_2d(np.asarray(self.R, float))
+            if self.R.shape != (num_scenarios, N):
                 raise ValueError(
                     "`distribution_fn` must return shape "
-                    f"({num_scenarios}, {N}), got {R.shape}."
+                    f"({num_scenarios}, {N}), got {self.R.shape}."
                 )
 
             S = num_scenarios
-            p0 = np.full((S, 1), 1.0 / S)
+            self.p0 = np.full((S, 1), 1.0 / S)
 
-        self.R = R
-        self.p0 = p0
-
-        mu0 = (R.T @ p0).flatten()
-        cov0 = np.cov(R.T, aweights=p0.flatten())
-        var0 = np.diag(cov0)
-
-        self.mu0, self.var0 = mu0, var0
+        self.mu0 = (self.R.T @ self.p0).flatten()
+        self.cov0 = np.cov(self.R.T, aweights=self.p0.flatten())
+        self.var0 = np.diag(self.cov0)
 
         def _vec_to_dict(vec_like, name):
             if vec_like is None:
                 return {}
             if isinstance(vec_like, dict):
                 return vec_like
-
             vec = np.asarray(vec_like, float).ravel()
             if vec.size != len(self.assets):
-                raise ValueError(f"`{name}` must have length {len(self.assets)}.")
+                raise ValueError(f"`{name}` must have length {len(self.assets)} matching the number of assets.")
             return {a: vec[i] for i, a in enumerate(self.assets)}
 
         self.mean_views = _vec_to_dict(mean_views, "mean_views")
@@ -355,8 +479,8 @@ class FlexibleViewsProcessor:
         self.posterior_probabilities = self._compute_posterior_probabilities()
 
         q = self.posterior_probabilities
-        mu_post = (R.T @ q).flatten()
-        cov_post = np.cov(R.T, aweights=q.flatten(), bias=True)
+        mu_post = (self.R.T @ q).flatten()
+        cov_post = np.cov(self.R.T, aweights=q.flatten(), bias=True)
 
         if self._use_pandas:
             self.posterior_returns = pd.Series(mu_post, index=self.assets)
@@ -370,17 +494,32 @@ class FlexibleViewsProcessor:
     @staticmethod
     def _parse_view(v: Any) -> Tuple[str, float]:
         r"""
-        Convert a view value into *(operator, target)* form.
+        Converts a raw view value into a standardized (operator, target) tuple.
 
-        Accepted syntaxes
+        This static method provides flexibility in how views are specified. A view
+        can be a simple scalar (implying an equality constraint) or a tuple
+        containing an operator string and a scalar target.
+
+        Accepted syntaxes:
         -----------------
-        * ``x``              → ('==', x)
-        * ``('>=', x)``      → ('>=', x)         (same for ``<=``, ``>``, ``<``)
+        * ``x`` (e.g., `0.03`)   → `('==', x)`: Implies an equality view.
+        * ``('>=', x)`` (e.g., `('>=', 0.05)`) → `('>=', x)`: Implies a greater-than-or-equal-to inequality view.
+        * Similar for `'<=', '>', '<'`.
 
-        For **relative mean views** the target *x* is interpreted as the
-        difference μ₁ − μ₂ compared with *x*.  Example::
+        For **relative mean views** (e.g., `mean_views={('Asset A', 'Asset B'): ('>=', 0.0)}`),
+        the target `x` is interpreted as the desired difference between the means
+        (e.g., :math:`\mu_1 - \mu_2 \ge x`).
 
-            mean_views = {('Asset A', 'Asset B'): ('>=', 0.0)}
+        Parameters
+        ----------
+        v : Any
+            The raw view value, which can be a scalar or a tuple.
+
+        Returns
+        -------
+        Tuple[str, float]
+            A tuple containing the operator string ('==', '>=', '<=', '>', '<')
+            and the numerical target value.
         """
         if (
             isinstance(v, (list, tuple))
@@ -392,12 +531,32 @@ class FlexibleViewsProcessor:
 
     def _asset_idx(self, key) -> int:
         """
-        Return the position of *key* in ``self.assets``, accepting either
-        the exact label or a numeric string that can be cast to int.
+        Returns the integer index (position) of an asset given its label or numeric string.
+
+        This internal helper method handles the mapping from user-friendly asset
+        labels (strings or integers from pandas) to the zero-based integer indices
+        used in NumPy arrays.
+
+        Parameters
+        ----------
+        key : Any
+            The asset label. This can be the exact label used during initialization
+            (e.g., column name for a DataFrame, or an integer if `range` was used),
+            or a numeric string that can be cast to an integer (e.g., "0", "1").
+
+        Returns
+        -------
+        int
+            The zero-based integer index of the asset within the scenario matrix.
+
+        Raises
+        ------
+        ValueError
+            If the asset label `key` is not recognized or found in the list of assets.
         """
         if key in self.assets:
             return self.assets.index(key)
-        if isinstance(key, str) and key.isdigit():  # "0", "1", …
+        if isinstance(key, str) and key.isdigit():
             k_int = int(key)
             if k_int in self.assets:
                 return self.assets.index(k_int)
@@ -411,8 +570,73 @@ class FlexibleViewsProcessor:
         var: np.ndarray,
     ) -> Tuple[List[np.ndarray], List[float], List[np.ndarray], List[float]]:
         """
-        Translate *view_dict* → (A_eq, b_eq, G_ineq, h_ineq) lists
-        suitable for an entropy-pooling call.
+        Translates a dictionary of views for a specific moment type into lists of
+        equality and inequality constraints suitable for the `entropy_pooling` function.
+
+        This method is crucial for converting high-level user views (e.g., "mean of
+        Asset A is 5%") into the low-level linear constraints on probabilities
+        (:math:`Eq=b`, :math:`Gq \le h`) required by the entropy pooling solver.
+        The conversion leverages properties of expected values and higher moments
+        (e.g., :math:`\mathbb{E}[R^2] = \text{Var}[R] + (\mathbb{E}[R])^2`).
+
+        Parameters
+        ----------
+        view_dict : Dict
+            A dictionary containing views for a specific moment type (e.g.,
+            `self.mean_views`, `self.vol_views`). Keys are asset labels (or tuples
+            for combined assets), and values are the view specifications.
+        moment_type : str
+            A string indicating the type of moment view to process.
+            Accepted values are "mean", "vol" (volatility), "skew" (skewness),
+            and "corr" (correlation).
+        mu : (N,) ndarray
+            The current mean vector of the asset returns. In sequential EP, this is
+            the posterior mean from previous steps; in simultaneous EP, it's the prior mean.
+            Used to linearize constraints for higher-order moments.
+        var : (N,) ndarray
+            The current variance vector of the asset returns. In sequential EP, this is
+            the posterior variance from previous steps; in simultaneous EP, it's the prior variance.
+            Used to linearize constraints for higher-order moments.
+
+        Returns
+        -------
+        Tuple[List[np.ndarray], List[float], List[np.ndarray], List[float]]
+            A tuple containing four lists:
+            * `A_eq`: List of NumPy arrays, where each array is a row for the
+                equality constraint matrix :math:`E`.
+            * `b_eq`: List of floats, where each float is a target value for
+                the equality constraints :math:`b`.
+            * `G_ineq`: List of NumPy arrays, where each array is a row for the
+                inequality constraint matrix :math:`G`.
+            * `h_ineq`: List of floats, where each float is a target value for
+                the inequality constraints :math:`h`.
+
+        Raises
+        ------
+        ValueError
+            If an unknown `moment_type` is provided.
+
+        Notes
+        -----
+        For higher-order moments (volatility, skewness, correlation), the views
+        are inherently non-linear in probabilities. To convert them
+        into linear constraints, this method fixes lower-order moments (e.g.,
+        mean and variance for skewness views) to their *current* values (`mu`, `var`).
+        In the original EP, these would be fixed to prior values. In
+        Sequential EP, these values are updated iteratively.
+
+        * **Mean views**: `E[R_i] = target` directly translates to `sum(p_j * R_j_i) = target`.
+            Relative mean views `E[R_i - R_j] = target` translate to `sum(p_j * (R_j_i - R_j_j)) = target`.
+        * **Volatility views**: `StdDev[R_i] = target` implies `Var[R_i] = target^2`.
+            Since `Var[R_i] = E[R_i^2] - (E[R_i])^2`, the constraint becomes
+            `E[R_i^2] = target^2 + (E[R_i])^2`. This is linear in probabilities if `E[R_i]`
+            is fixed (using the `mu` parameter).
+        * **Skewness views**: `Skew[R_i] = target` implies a constraint on `E[R_i^3]`.
+            `E[R_i^3] = Skew[R_i] * StdDev[R_i]^3 + 3*E[R_i]*Var[R_i] + E[R_i]^3`.
+            This is linear in probabilities if `E[R_i]` and `Var[R_i]` are fixed.
+        * **Correlation views**: `Corr[R_i, R_j] = target` implies a constraint on `E[R_i R_j]`.
+            `E[R_i R_j] = Corr[R_i, R_j] * StdDev[R_i] * StdDev[R_j] + E[R_i] * E[R_j]`.
+            This is linear in probabilities if `E[R_i]`, `E[R_j]`, `StdDev[R_i]`, `StdDev[R_j]` are fixed.
         """
         A_eq, b_eq, G_ineq, h_ineq = [], [], [], []
         R = self.R
@@ -435,7 +659,7 @@ class FlexibleViewsProcessor:
                 if isinstance(key, tuple) and len(key) == 2:
                     a1, a2 = key
                     i, j = self._asset_idx(a1), self._asset_idx(a2)
-                    row = R[:, i] - R[:, j]  # (S,)
+                    row = R[:, i] - R[:, j]
                     add(op, row, tgt)
                 else:
                     idx = self._asset_idx(key)
@@ -472,38 +696,52 @@ class FlexibleViewsProcessor:
 
     def _compute_posterior_probabilities(self) -> np.ndarray:
         """
-        EP core: handles “simultaneous” vs “iterated” processing without
-        confidence blending (full confidence in views).
+        The core Entropy Pooling (EP) logic. This method orchestrates the application
+        of views, supporting both simultaneous ("one-shot") and sequential
+        ("iterated") processing. It does not handle confidence blending, assuming
+        full confidence in the provided views for this step.
+
+        The general EP problem aims to find a new probability vector `q` that
+        minimizes relative entropy to the prior `p0` subject to linear constraints
+        derived from the views.
+
+        Returns
+        -------
+        np.ndarray
+            The (S x 1) posterior probability vector `q`.
         """
         R, p0 = self.R, self.p0
         mu_cur, var_cur = self.mu0.copy(), self.var0.copy()
 
-        def do_ep(prior, A_eq, b_eq, G_ineq, h_ineq):
+        def do_ep(prior_probs, A_eq_list, b_eq_list, G_ineq_list, h_ineq_list):
             S = R.shape[0]
-            A_eq.append(np.ones(S))
-            b_eq.append(1.0)
-            A = np.vstack(A_eq) if A_eq else np.zeros((0, S))
-            b = np.array(b_eq, float).reshape(-1, 1) if b_eq else np.zeros((0, 1))
+            A_eq_list.append(np.ones(S))
+            b_eq_list.append(1.0)
 
-            if G_ineq:
-                G = np.vstack(G_ineq)
-                h = np.array(h_ineq, float).reshape(-1, 1)
+            A = np.vstack(A_eq_list) if A_eq_list else np.zeros((0, S))
+            b = np.array(b_eq_list, float).reshape(-1, 1) if b_eq_list else np.zeros((0, 1))
+
+            if G_ineq_list:
+                G = np.vstack(G_ineq_list)
+                h = np.array(h_ineq_list, float).reshape(-1, 1)
             else:
                 G, h = None, None
 
-            return entropy_pooling(prior, A, b, G, h)  # (S × 1)
+            return entropy_pooling(prior_probs, A, b, G, h)
 
         if not any((self.mean_views, self.vol_views, self.skew_views, self.corr_views)):
             return p0
 
         if self.sequential:
             q_last = p0
-            for mtype, vd in [
+            view_blocks = [
                 ("mean", self.mean_views),
                 ("vol", self.vol_views),
                 ("skew", self.skew_views),
                 ("corr", self.corr_views),
-            ]:
+            ]
+
+            for mtype, vd in view_blocks:
                 if vd:
                     Aeq, beq, G, h = self._build_constraints(vd, mtype, mu_cur, var_cur)
                     q_last = do_ep(q_last, Aeq, beq, G, h)
@@ -514,32 +752,60 @@ class FlexibleViewsProcessor:
 
             return q_last
 
-        A_all, b_all, G_all, h_all = [], [], [], []
-        for mtype, vd in [
-            ("mean", self.mean_views),
-            ("vol", self.vol_views),
-            ("skew", self.skew_views),
-            ("corr", self.corr_views),
-        ]:
-            if vd:
-                Aeq, beq, G, h = self._build_constraints(vd, mtype, mu_cur, var_cur)
-                A_all.extend(Aeq)
-                b_all.extend(beq)
-                G_all.extend(G)
-                h_all.extend(h)
+        else:
+            A_all, b_all, G_all, h_all = [], [], [], []
+            view_blocks = [
+                ("mean", self.mean_views),
+                ("vol", self.vol_views),
+                ("skew", self.skew_views),
+                ("corr", self.corr_views),
+            ]
+            for mtype, vd in view_blocks:
+                if vd:
+                    Aeq, beq, G, h = self._build_constraints(vd, mtype, mu_cur, var_cur)
+                    A_all.extend(Aeq)
+                    b_all.extend(beq)
+                    G_all.extend(G)
+                    h_all.extend(h)
 
-        return do_ep(p0, A_all, b_all, G_all, h_all)
+            return do_ep(p0, A_all, b_all, G_all, h_all)
 
     def get_posterior_probabilities(self) -> np.ndarray:
-        """Return the (S × 1) posterior probability vector."""
+        """Return the (S × 1) posterior probability vector.
+
+        This method provides access to the final probability distribution `q`
+        computed by the entropy pooling process, which incorporates all specified
+        views while remaining as close as possible to the original prior
+        distribution.
+
+        Returns
+        -------
+        np.ndarray
+            The optimal posterior probability vector, `q`, in column-vector form.
+        """
         return self.posterior_probabilities
 
     def get_posterior(
         self,
     ) -> Tuple[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.DataFrame]]:
-        """Return *(posterior mean, posterior covariance)*."""
-        return self.posterior_returns, self.posterior_cov
+        """Return *(posterior mean, posterior covariance)*.
 
+        This method provides the key outputs of the entropy pooling process:
+        the mean vector and covariance matrix of asset returns under the new,
+        posterior probability distribution. These moments reflect the impact
+        of the incorporated views.
+
+        Returns
+        -------
+        Tuple[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.DataFrame]]
+            A tuple containing:
+            * The posterior mean vector (as `np.ndarray` or `pd.Series`).
+            * The posterior covariance matrix (as `np.ndarray` or `pd.DataFrame`).
+            The type of return object (NumPy or Pandas) depends on the input
+            type provided during the initialization of the `FlexibleViewsProcessor`.
+        """
+        return self.posterior_returns, self.posterior_cov
+    
 class BlackLittermanProcessor:
     r"""
     Bayesian Black–Litterman (BL) updater for *equality* **mean views**.

@@ -21,6 +21,7 @@ It's yet another portfolio optimization library, but unlike many others, **Py-vA
 - Markowitz, H. (1952). Portfolio Selection. https://doi.org/10.2307/2975974
 - Idzorek, T. (2005). A Step-by-Step Guide to the Black-Litterman Model. https://people.duke.edu/~charvey/Teaching/BA453_2006/Idzorek_onBL.pdf
 - Meucci, A. (2005). Robust Bayesian Allocation, https://dx.doi.org/10.2139/ssrn.681553
+- Vorobets, A. (2021). Sequential Entropy Pooling Heuristics, http://dx.doi.org/10.2139/ssrn.3936392
 
 ## Installation
 

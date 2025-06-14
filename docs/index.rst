@@ -1,7 +1,6 @@
 Welcome to Py-vAllocation
 ==========================
 
-Py-vAllocation is a Python library for advanced portfolio allocation and optimization, providing sophisticated tools for quantitative financial analysis.
 
 .. toctree::
    :maxdepth: 2
