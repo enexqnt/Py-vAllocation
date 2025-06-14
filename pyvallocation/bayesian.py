@@ -99,29 +99,29 @@ def chi2_quantile(p: float, dof: int, sqrt: bool = False) -> float:
 
 @dataclass()
 class NIWParams:
-    r"""A container for the parameters of a Normal-Inverse-Wishart (NIW) posterior distribution.
+    r"""A container for the parameters of a Normal-Inverse-Wishart (NIW) posterior distribution. :no-inheritance:
 
     These parameters are the result of a Bayesian update, combining an
     NIW prior with market data, as detailed in Meucci (2005). The
     formulas for these posterior parameters are given in Eqs. (11)-(14).
-
-    Attributes:
-        T1: The posterior pseudo-observations for the mean (:math:`T_1`),
-            representing the updated confidence in the mean estimate.
-        mu1: The posterior mean vector (:math:`\mu_1`), which is the updated
-            estimate of the expected returns.
-        nu1: The posterior degrees of freedom for the covariance
-            (:math:`\nu_1`), representing the updated confidence in the
-            covariance estimate.
-        sigma1: The posterior scale matrix for the covariance (:math:`\Sigma_1`),
-            which is the updated scale matrix of the Inverse-Wishart
-            distribution.
     """
     T1: int
+    #: The posterior pseudo-observations for the mean (:math:`T_1`),
+    #: representing the updated confidence in the mean estimate.
+    
     mu1: Union[npt.NDArray[np.floating], "pd.Series[np.floating]"]
+    #: The posterior mean vector (:math:`\mu_1`), which is the updated
+    #: estimate of the expected returns.
+    
     nu1: int
+    #: The posterior degrees of freedom for the covariance
+    #: (:math:`\nu_1`), representing the updated confidence in the
+    #: covariance estimate.
+    
     sigma1: Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"]
-
+    #: The posterior scale matrix for the covariance (:math:`\Sigma_1`),
+    #: which is the updated scale matrix of the Inverse-Wishart
+    #: distribution.
 
 class NIWPosterior:
     r"""Computes and manages Normal-Inverse-Wishart (NIW) posterior parameters.
@@ -281,7 +281,7 @@ class NIWPosterior:
         if isinstance(sample_mu, pd.Series):
             smu = sample_mu.values.astype(float)
         else:
-            smu = np.asarray(sample_mu, dtype=float)
+            smu = np.asarray(smu, dtype=float)
 
         if smu.ndim != 1 or smu.shape[0] != self.N:
             raise ValueError(f"`sample_mu` must be a 1D array or pandas.Series of length {self.N}.")
