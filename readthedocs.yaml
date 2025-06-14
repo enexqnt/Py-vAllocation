@@ -7,15 +7,15 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.9"
-  commands:
-    - pip install sphinx sphinx_rtd_theme sphinxcontrib-bibtex nbsphinx
-    - sphinx-build -b html docs/ ${READTHEDOCS_OUTPUT:-docs/_build/html}
-    
+
+# Let Read the Docs handle the Sphinx build automatically
 sphinx:
   configuration: docs/conf.py
 
+# Install project and documentation dependencies
 python:
   install:
-    - requirements: requirements.txt
+    - requirements: requirements.txt          # Your main project dependencies
+    - requirements: docs/requirements.txt     # Your new docs dependencies
     - method: pip
       path: .
