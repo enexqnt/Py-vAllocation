@@ -25,12 +25,10 @@ It's yet another portfolio optimization library, but unlike many others, **Py-vA
 
 ## Installation
 
-Py-vAllocation is under active development, so install from source:
+You can install Py-vAllocation from PyPI using:
 
 ```bash
-git clone https://github.com/enexqnt/py-vallocation.git
-cd py-vallocation
-pip install .
+pip install py-vallocation
 ```
 
 ## Quick Start
