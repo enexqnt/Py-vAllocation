@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-vallocation"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Python package for asset allocation with a primary focus on integrating investor views."
 readme = "readme.md"
 requires-python = ">=3.8"
 license = { text = "GNU General Public License v3.0" }
-keywords = ["asset allocation", "portfolio optimization", "entropy pooling", "Black-Litterman", "robust optimization"]
+keywords = ["asset-allocation", "portfolio-optimization", "entropy-pooling", "Black-Litterman", "robust-optimization", "quantitative-finance", "bayesian-inference"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
