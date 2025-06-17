@@ -6,8 +6,8 @@ project = 'Py-vAllocation'
 copyright = '2025, enexqnt'
 author = 'enexqnt'
 
-version = '0.1.0a3'
-release = '0.1.0a3'
+version = '0.1.0a4'
+release = '0.1.0a4'
 
 extensions = [
     'sphinx.ext.autodoc',

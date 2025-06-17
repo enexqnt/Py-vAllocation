@@ -9,6 +9,7 @@ import numpy.typing as npt
 import pandas as pd
 
 # --- Assumed to be available from other modules ---
+from .moments import estimate_sample_moments
 from .optimization import MeanCVaR, MeanVariance, RobustOptimizer
 from .probabilities import generate_uniform_probabilities
 from .utils.constraints import build_G_h_A_b
@@ -41,6 +42,8 @@ class AssetsDistribution:
     Assumptions & Design Choices:
         - If "scenarios" are provided without "probabilities", probabilities are
           assumed to be uniform across all scenarios.
+        - If `scenarios` are provided but `mu` and `cov` are not, the mean and covariance
+          will be estimated from the scenarios, accompanied by a warning.
         - If provided "probabilities" do not sum to 1.0, they are automatically
           normalized with a warning. This choice ensures downstream solvers
           receive valid probability distributions.
@@ -67,16 +70,17 @@ class AssetsDistribution:
         are normalized if they do not sum to one.
 
         Raises:
-            ValueError: If input parameters have inconsistent shapes, invalid values,
-                        or if neither (mu, cov) nor (scenarios) are provided.
+            ValueError: If input parameters have inconsistent shapes or if insufficient
+                        data is provided (i.e., neither (mu, cov) nor scenarios).
         """
         # Use object.__setattr__ as the dataclass is frozen
         mu, cov, scenarios, probs = self.mu, self.cov, self.scenarios, self.probabilities
         asset_names = self.asset_names
         
-        # Infer asset names and convert pandas objects to numpy arrays
+        # Infer asset names from pandas objects if not explicitly provided
         if isinstance(mu, pd.Series):
-            asset_names = mu.index.tolist()
+            if asset_names is None:
+                asset_names = mu.index.tolist()
             mu = mu.values
         if isinstance(cov, pd.DataFrame):
             if asset_names is None:
@@ -93,40 +97,62 @@ class AssetsDistribution:
         if isinstance(probs, pd.Series):
             probs = probs.values
 
-        # --- Validation and final attribute setting ---
+        # Initialize N and T
+        N, T = None, None
+
+        # Process scenarios and estimate moments if needed
+        if scenarios is not None:
+            scenarios = np.asarray(scenarios, dtype=float)
+            if scenarios.ndim != 2: raise ValueError("`scenarios` must be a 2D array (T, N).")
+            T, N = scenarios.shape
+            
+            if probs is None:
+                logger.info("No probabilities provided for scenarios. Assuming a uniform distribution.")
+                probs = generate_uniform_probabilities(T)
+            else:
+                probs = np.asarray(probs, dtype=float)
+                if probs.shape != (T,): raise ValueError(f"Probabilities shape mismatch: expected ({T},), got {probs.shape}.")
+                prob_sum = np.sum(probs)
+                if not np.isclose(prob_sum, 1.0):
+                    logger.warning(f"Probabilities sum to {prob_sum:.4f}, not 1.0. Normalizing to enforce valid distribution.")
+                    probs /= prob_sum
+            
+            if mu is None or cov is None:
+                logger.warning(
+                    "`mu` and/or `cov` were not provided. Estimating from scenarios. "
+                )
+                estimated_mu, estimated_cov = estimate_sample_moments(scenarios, probs)
+                if mu is None:
+                    mu = estimated_mu
+                if cov is None:
+                    cov = estimated_cov
+        
+        # Process and validate parametric inputs (mu, cov)
         if mu is not None and cov is not None:
             mu, cov = np.asarray(mu, dtype=float), np.asarray(cov, dtype=float)
             if mu.ndim != 1: raise ValueError("`mu` must be a 1D array.")
             if cov.ndim != 2: raise ValueError("`cov` must be a 2D array.")
             if mu.shape[0] != cov.shape[0] or cov.shape[0] != cov.shape[1]:
-                raise ValueError("Inconsistent shapes for mu and cov.")
-            object.__setattr__(self, 'N', mu.shape[0])
-            object.__setattr__(self, 'T', None)
-        elif scenarios is not None:
-            scenarios = np.asarray(scenarios, dtype=float)
-            if scenarios.ndim != 2: raise ValueError("`scenarios` must be a 2D array (T, N).")
-            T_val, N_val = scenarios.shape
-            if probs is None:
-                logger.info("No probabilities provided for scenarios. Assuming a uniform distribution.")
-                probs = generate_uniform_probabilities(T_val)
-            else:
-                probs = np.asarray(probs, dtype=float)
-                if probs.shape != (T_val,): raise ValueError("Probabilities must match the number of scenarios.")
-                prob_sum = np.sum(probs)
-                if not np.isclose(prob_sum, 1.0):
-                    logger.warning(f"Probabilities sum to {prob_sum:.4f}, not 1.0. Normalizing to enforce valid distribution.")
-                    probs /= prob_sum
-            object.__setattr__(self, 'N', N_val)
-            object.__setattr__(self, 'T', T_val)
-        else:
-            raise ValueError("Provide either (mu, cov) or (scenarios).")
+                raise ValueError(f"Inconsistent shapes for mu {mu.shape} and cov {cov.shape}.")
+            
+            current_N = mu.shape[0]
+            if N is not None and N != current_N:
+                raise ValueError(f"Shape mismatch: N from scenarios is {N}, but from mu/cov is {current_N}.")
+            N = current_N
+        
+        # Final validation
+        if N is None:
+            raise ValueError("Insufficient data. Provide either (mu, cov) or (scenarios).")
 
-        if self.N == 0:
+        if N == 0:
             raise ValueError("Number of assets (N) cannot be zero.")
             
-        if asset_names is not None and len(asset_names) != self.N:
-            raise ValueError("`asset_names` must have the same length as the number of assets (N).")
+        if asset_names is not None and len(asset_names) != N:
+            raise ValueError(f"`asset_names` must have length {N}, but has length {len(asset_names)}.")
         
+        # Set final attributes
+        object.__setattr__(self, 'N', N)
+        object.__setattr__(self, 'T', T)
         object.__setattr__(self, 'mu', mu)
         object.__setattr__(self, 'cov', cov)
         object.__setattr__(self, 'scenarios', scenarios)
@@ -281,8 +307,8 @@ class PortfolioWrapper:
     1.  Initialize: ``port = PortfolioWrapper(AssetsDistribution(...))``
     2.  Set Constraints: ``port.set_constraints(...)``
     3.  (Optional) Set Costs: ``port.set_transaction_costs(...)``
-    4.  Compute: ``frontier = port.mean_variance_frontier()``
-    5.  Analyze: Use the returned :class:`PortfolioFrontier` object.
+    4.  Compute: ``frontier = port.mean_variance_frontier()`` or ``portfolio = port.mean_variance_portfolio_at_return(0.10)``
+    5.  Analyze: Use the returned :class:`PortfolioFrontier` or portfolio objects.
     """
     def __init__(self, distribution: AssetsDistribution):
         """
@@ -325,13 +351,13 @@ class PortfolioWrapper:
             params (Dict[str, Any]): A dictionary of constraint parameters.
                 Expected keys and their types/meanings include:
 
-                *   ``"long_only"`` (bool): If True, enforces non-negative weights (w >= 0).
-                *   ``"total_weight"`` (float): Sets the sum of weights (sum(w) = value).
-                *   ``"box_constraints"`` (Tuple[np.ndarray, np.ndarray]): A tuple (lower_bounds, upper_bounds)
+                * ``"long_only"`` (bool): If True, enforces non-negative weights (w >= 0).
+                * ``"total_weight"`` (float): Sets the sum of weights (sum(w) = value).
+                * ``"box_constraints"`` (Tuple[np.ndarray, np.ndarray]): A tuple (lower_bounds, upper_bounds)
                     for individual asset weights.
-                *   ``"group_constraints"`` (List[Dict[str, Any]]): A list of dictionaries,
+                * ``"group_constraints"`` (List[Dict[str, Any]]): A list of dictionaries,
                     each defining a group constraint (e.g., min/max weight for a subset of assets).
-                *   Any other parameters supported by `pyvallocation.utils.constraints.build_G_h_A_b`.
+                * Any other parameters supported by `pyvallocation.utils.constraints.build_G_h_A_b`.
 
         Raises:
             RuntimeError: If constraint building fails due to invalid parameters or other issues.
@@ -534,6 +560,117 @@ class PortfolioWrapper:
             risk_measure="Estimation Risk (‖Σ'¹/²w‖₂)", asset_names=self.dist.asset_names
         )
 
+    def mean_variance_portfolio_at_return(self, return_target: float) -> Tuple[pd.Series, float, float]:
+        """
+        Solves for the minimum variance portfolio that achieves a given expected return.
+
+        This method directly solves the optimization problem for a specific target
+        return, rather than interpolating from a pre-computed frontier. This is more
+        accurate and efficient if only a single portfolio is of interest.
+
+        Args:
+            return_target (float): The desired minimum expected return.
+
+        Returns:
+            Tuple[pd.Series, float, float]: A tuple containing:
+                - **weights** (:class:`pandas.Series`): The weights of the optimal portfolio.
+                - **return** (float): The expected return of the portfolio.
+                - **risk** (float): The volatility (standard deviation) of the portfolio.
+        
+        Raises:
+            ValueError: If `mu` and `cov` are not available in the distribution.
+        """
+        if self.dist.mu is None or self.dist.cov is None:
+            raise ValueError("Mean-Variance optimization requires `mu` and `cov`.")
+        self._ensure_default_constraints()
+
+        logger.info(f"Solving for minimum variance portfolio with target return >= {return_target:.4f}")
+        
+        optimizer = MeanVariance(
+            self.dist.mu, self.dist.cov, self.G, self.h, self.A, self.b,
+            initial_weights=self.initial_weights,
+            market_impact_costs=self.market_impact_costs
+        )
+        
+        try:
+            # The efficient_portfolio method in the optimizer is an alias for _solve_target
+            weights = optimizer.efficient_portfolio(return_target)
+        except RuntimeError as e:
+            logger.error(f"Optimization failed for target return {return_target}. This may be because the target is infeasible (e.g., too high). Details: {e}", exc_info=True)
+            nan_weights = np.full(self.dist.N, np.nan)
+            return pd.Series(nan_weights, index=self.dist.asset_names, name="Infeasible"), np.nan, np.nan
+
+        actual_return = self.dist.mu @ weights
+        risk = np.sqrt(weights.T @ self.dist.cov @ weights)
+
+        w_series = pd.Series(weights, index=self.dist.asset_names, name=f"MV Portfolio (Return >= {return_target:.4f})")
+
+        logger.info(
+            f"Successfully solved for MV portfolio. "
+            f"Target Return: {return_target:.4f}, Actual Return: {actual_return:.4f}, Risk: {risk:.4f}"
+        )
+        return w_series, actual_return, risk
+
+    def mean_cvar_portfolio_at_return(self, return_target: float, alpha: float = 0.05) -> Tuple[pd.Series, float, float]:
+        """
+        Solves for the minimum CVaR portfolio that achieves a given expected return.
+
+        This method directly solves the optimization problem for a specific target
+        return, rather than interpolating from a pre-computed frontier.
+
+        Args:
+            return_target (float): The desired minimum expected return.
+            alpha (float): The tail probability for CVaR. Defaults to 0.05.
+
+        Returns:
+            Tuple[pd.Series, float, float]: A tuple containing:
+                - **weights** (:class:`pandas.Series`): The weights of the optimal portfolio.
+                - **return** (float): The expected return of the portfolio.
+                - **risk** (float): The CVaR of the portfolio.
+                
+        Raises:
+            ValueError: If scenarios cannot be used or generated.
+        """
+        scenarios, probs = self.dist.scenarios, self.dist.probabilities
+        if scenarios is None:
+            if self.dist.mu is None or self.dist.cov is None:
+                raise ValueError("Cannot simulate scenarios for CVaR without `mu` and `cov`.")
+            n_sim = 5000
+            logger.info(f"No scenarios provided. Simulating {n_sim} scenarios from a Multivariate Normal distribution.")
+            scenarios = np.random.multivariate_normal(self.dist.mu, self.dist.cov, n_sim)
+            probs = generate_uniform_probabilities(n_sim)
+        
+        mu_for_cvar = self.dist.mu if self.dist.mu is not None else np.mean(scenarios, axis=0)
+        
+        self._ensure_default_constraints()
+        
+        logger.info(f"Solving for minimum CVaR portfolio with target return >= {return_target:.4f} and alpha = {alpha:.2f}")
+        
+        optimizer = MeanCVaR(
+            R=scenarios, p=probs, alpha=alpha, G=self.G, h=self.h, A=self.A, b=self.b,
+            initial_weights=self.initial_weights,
+            proportional_costs=self.proportional_costs
+        )
+        
+        try:
+            # The efficient_portfolio method in the optimizer is an alias for _solve_target
+            weights = optimizer.efficient_portfolio(return_target)
+        except RuntimeError as e:
+            logger.error(f"Optimization failed for target return {return_target}. This may be because the target is infeasible. Details: {e}", exc_info=True)
+            nan_weights = np.full(self.dist.N, np.nan)
+            return pd.Series(nan_weights, index=self.dist.asset_names, name="Infeasible"), np.nan, np.nan
+
+        actual_return = mu_for_cvar @ weights
+        risk = abs(portfolio_cvar(weights, scenarios, probs, alpha))
+        
+        w_series = pd.Series(weights, index=self.dist.asset_names, name=f"CVaR Portfolio (Return >= {return_target:.4f})")
+
+        logger.info(
+            f"Successfully solved for CVaR portfolio. "
+            f"Target Return: {return_target:.4f}, Actual Return: {actual_return:.4f}, Risk (CVaR): {risk:.4f}"
+        )
+        return w_series, actual_return, risk
+
     def solve_robust_gamma_portfolio(self, gamma_mu: float, gamma_sigma_sq: float) -> Tuple[pd.Series, float, float]:
         """Solves for a single robust portfolio with explicit uncertainty constraints.
 
@@ -566,7 +703,7 @@ class PortfolioWrapper:
         w_series = pd.Series(result.weights, index=self.dist.asset_names, name="Robust Gamma Portfolio")
             
         logger.info(
-            f"Successfully solved robust γ-portfolio. "
+            f"Successfully solved for robust γ-portfolio. "
             f"Nominal Return: {result.nominal_return:.4f}, Estimation Risk: {result.risk:.4f}"
         )
         return w_series, result.nominal_return, result.risk
