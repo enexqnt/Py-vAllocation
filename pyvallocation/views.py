@@ -101,7 +101,7 @@ def _entropy_pooling_dual_objective(
     x = np.exp(log_p_col - 1.0 - lhs.T @ lagrange_multipliers_col)
 
     rhs_vec = np.atleast_1d(rhs_squeezed)
-    objective_value = np.sum(x) + lagrange_multipliers @ rhs_vec
+    objective_value = -(-np.sum(x) - lagrange_multipliers @ rhs_vec)
     gradient_vector = rhs_vec - (lhs @ x).squeeze()
 
     return 1000.0 * objective_value, 1000.0 * gradient_vector

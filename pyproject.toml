@@ -6,7 +6,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-vallocation"
-version = "0.1.0a4"
+version = "0.1.1"
+
 description = "Python package for asset allocation with a primary focus on integrating investor views."
 
 readme = "README.md"
