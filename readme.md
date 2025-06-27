@@ -42,7 +42,7 @@ See [examples here](examples/)
 - Python 3.8+
 - numpy >= 1.20.0
 - cvxopt >= 1.2.0
-- pandas
+- pandas >=1.0.0
 - scipy >= 1.10.0
 
 ## Development Status

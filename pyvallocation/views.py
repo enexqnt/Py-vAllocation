@@ -88,7 +88,7 @@ def _entropy_pooling_dual_objective(
     # The objective function to be minimized is the negative of the dual Lagrangian
     objective_value = -(-np.sum(x) - lagrange_multipliers @ rhs_vec)
     # The gradient is computed for the minimization objective
-    gradient_vector = (lhs @ x).squeeze() - rhs_vec
+    gradient_vector = rhs_vec - (lhs @ x).squeeze()
 
     return 1000.0 * objective_value, 1000.0 * gradient_vector
 

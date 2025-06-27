@@ -416,7 +416,7 @@ class PortfolioWrapper:
             logger.warning("No constraints were set. To ensure a solvable problem, applying default constraints: long-only (weights >= 0) and fully-invested (weights sum to 1.0).")
             self.set_constraints({'long_only': True, 'total_weight': 1.0})
 
-    def mean_variance_frontier(self, num_portfolios: int = 20) -> PortfolioFrontier:
+    def mean_variance_frontier(self, num_portfolios: int = 10) -> PortfolioFrontier:
         """Computes the classical Mean-Variance efficient frontier.
 
         Args:
@@ -447,7 +447,7 @@ class PortfolioWrapper:
             risk_measure='Volatility', asset_names=self.dist.asset_names
         )
         
-    def mean_cvar_frontier(self, num_portfolios: int = 20, alpha: float = 0.05) -> PortfolioFrontier:
+    def mean_cvar_frontier(self, num_portfolios: int = 10, alpha: float = 0.05) -> PortfolioFrontier:
         r"""Computes the Mean-CVaR efficient frontier.
 
         Implementation Notes:
@@ -492,7 +492,7 @@ class PortfolioWrapper:
             risk_measure=f'CVaR (alpha={alpha:.2f})', asset_names=self.dist.asset_names
         )
 
-    def robust_lambda_frontier(self, num_portfolios: int = 20, max_lambda: float = 2.0) -> PortfolioFrontier:
+    def robust_lambda_frontier(self, num_portfolios: int = 10, max_lambda: float = 2.0) -> PortfolioFrontier:
         r"""Computes a robust frontier based on uncertainty in expected returns.
 
         Assumptions & Design Choices:
