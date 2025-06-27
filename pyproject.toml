@@ -1,21 +1,46 @@
+# pyproject.toml
+
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-vallocation"
 version = "0.1.1"
+
 description = "Python package for asset allocation with a primary focus on integrating investor views."
-readme = "readme.md"
+
+readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "GNU General Public License v3.0" }
-keywords = ["asset allocation", "portfolio optimization", "entropy pooling", "Black-Litterman", "robust optimization"]
+
+# This is the modern way to specify a license.
+# It uses a standard SPDX identifier. "GPL-3.0-or-later" is the correct
+# expression for the GNU General Public License v3.0 or any later version.
+license = { text = "GPL-3.0-or-later" }
+
+keywords = [
+    "asset-allocation",
+    "portfolio-optimization",
+    "entropy-pooling",
+    "Black-Litterman",
+    "robust-optimization",
+    "quantitative-finance",
+    "bayesian-inference"
+]
+
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)"
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Office/Business :: Financial :: Investment"
 ]
+
 dependencies = [
     "numpy>=1.20.0",
     "cvxopt>=1.2.0",
@@ -26,3 +51,4 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/enexqnt/py-vallocation"
 "Repository" = "https://github.com/enexqnt/py-vallocation"
+"Bug Tracker" = "https://github.com/enexqnt/py-vallocation/issues"

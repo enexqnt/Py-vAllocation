@@ -281,7 +281,7 @@ class NIWPosterior:
         if isinstance(sample_mu, pd.Series):
             smu = sample_mu.values.astype(float)
         else:
-            smu = np.asarray(smu, dtype=float)
+            smu = np.asarray(sample_mu, dtype=float)
 
         if smu.ndim != 1 or smu.shape[0] != self.N:
             raise ValueError(f"`sample_mu` must be a 1D array or pandas.Series of length {self.N}.")
@@ -292,7 +292,7 @@ class NIWPosterior:
         if isinstance(sample_sigma, pd.DataFrame):
             ssigma = sample_sigma.values.astype(float)
         else:
-            ssigma = np.asarray(ssigma, dtype=float)
+            ssigma = np.asarray(sample_sigma, dtype=float)
 
         if ssigma.ndim != 2 or ssigma.shape != (self.N, self.N):
             raise ValueError(f"`sample_sigma` must be a square matrix of shape ({self.N}, {self.N}), or pandas.DataFrame with matching index/columns.")
