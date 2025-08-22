@@ -11,18 +11,6 @@ It's yet another portfolio optimization library, but unlike many others, **Py-vA
 - Support **shrinkage** and other **Bayesian estimation** methods  
 - Support **variance-based**, **scenario-based CVaR**, and **robust optimization models**
 
-## Underlying literature
-
-- Meucci, A. (2008). Fully Flexible Views: Theory and Practice. https://ssrn.com/abstract=1213325
-- Black, F., & Litterman, R. (1992). Global Portfolio Optimization. https://doi.org/10.2469/faj.v48.n5.28
-- Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices. https://doi.org/10.1016/S0047-259X(03)00096-4
-- Jorion, P. (1986). Bayes-Stein Estimation for Portfolio Analysis. https://doi.org/10.2307/2331042
-- Rockafellar, R. T., & Uryasev, S. (2000). Optimization of Conditional Value-at-Risk. 10.21314/JOR.2000.038
-- Markowitz, H. (1952). Portfolio Selection. https://doi.org/10.2307/2975974
-- Idzorek, T. (2005). A Step-by-Step Guide to the Black-Litterman Model. https://people.duke.edu/~charvey/Teaching/BA453_2006/Idzorek_onBL.pdf
-- Meucci, A. (2005). Robust Bayesian Allocation, https://dx.doi.org/10.2139/ssrn.681553
-- Vorobets, A. (2021). Sequential Entropy Pooling Heuristics, http://dx.doi.org/10.2139/ssrn.3936392
-
 ## Installation
 
 You can install Py-vAllocation from PyPI using:
@@ -47,6 +35,18 @@ See [examples here](examples/)
 
 **Alpha release**: Under active development. Many features are not yet implemented or fully tested. Breaking changes may occur without notice. Use at your own risk.
 
+## Underlying literature
+
+- Meucci, A. (2008). Fully Flexible Views: Theory and Practice. https://ssrn.com/abstract=1213325
+- Black, F., & Litterman, R. (1992). Global Portfolio Optimization. https://doi.org/10.2469/faj.v48.n5.28
+- Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices. https://doi.org/10.1016/S0047-259X(03)00096-4
+- Jorion, P. (1986). Bayes-Stein Estimation for Portfolio Analysis. https://doi.org/10.2307/2331042
+- Rockafellar, R. T., & Uryasev, S. (2000). Optimization of Conditional Value-at-Risk. 10.21314/JOR.2000.038
+- Markowitz, H. (1952). Portfolio Selection. https://doi.org/10.2307/2975974
+- Idzorek, T. (2005). A Step-by-Step Guide to the Black-Litterman Model. https://people.duke.edu/~charvey/Teaching/BA453_2006/Idzorek_onBL.pdf
+- Meucci, A. (2005). Robust Bayesian Allocation, https://dx.doi.org/10.2139/ssrn.681553
+- Vorobets, A. (2021). Sequential Entropy Pooling Heuristics, http://dx.doi.org/10.2139/ssrn.3936392
+
 ## Contributing
 
 Contributions and feedback are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
@@ -58,3 +58,7 @@ This project is licensed under the GNU General Public License v3.0 License. See 
 ## Credits
 
 Some code, where explicitly stated, is adapted from [fortitudo-tech](https://github.com/fortitudo-tech/fortitudo.tech)
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=enexqnt/Py-vAllocation&type=Date)](https://www.star-history.com/#enexqnt/Py-vAllocation&Date)
