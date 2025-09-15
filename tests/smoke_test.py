@@ -63,6 +63,11 @@ class TestSmoke(unittest.TestCase):
         self.assertIsInstance(mu_np, np.ndarray)
         self.assertIsInstance(cov_np, np.ndarray)
 
+        p_column = p_uniform.reshape(-1, 1)
+        mu_col, cov_col = moments.estimate_sample_moments(self.returns_array, p_column)
+        self.assertTrue(np.allclose(mu_col, mu_np))
+        self.assertTrue(np.allclose(cov_col, cov_np))
+
 
     def test_shrink_mean_jorion(self):
         p_uniform = probabilities.generate_uniform_probabilities(self.T)
@@ -446,4 +451,3 @@ class TestSmoke(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

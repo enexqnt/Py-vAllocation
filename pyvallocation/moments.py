@@ -76,7 +76,8 @@ def estimate_sample_moments(R: ArrayLike, p: ArrayLike) -> Tuple[ArrayLike, Arra
         ValueError: If `p` has a length mismatch with `R`, or if `p` contains
             negative values or does not sum to one.
     """
-    R_arr, p_arr = np.asarray(R), np.asarray(p)
+    R_arr = np.asarray(R, dtype=float)
+    p_arr = np.asarray(p, dtype=float).reshape(-1)
     T, N = R_arr.shape
 
     if p_arr.shape[0] != T:
