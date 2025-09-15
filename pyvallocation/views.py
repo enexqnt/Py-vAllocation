@@ -225,11 +225,28 @@ def entropy_pooling(
         options={"maxiter": 1000, "maxfun": 10000},
     )
 
+    if not solution.success:
+        status = getattr(solution, "status", None)
+        message = getattr(solution, "message", "")
+        raise RuntimeError(
+            "Entropy pooling optimisation failed "
+            f"(status={status}): {message}"
+        )
+
     optimal_lagrange_multipliers_col = solution.x[:, np.newaxis]
 
     q_posterior = np.exp(
         log_p_col - 1.0 - current_lhs.T @ optimal_lagrange_multipliers_col
     )
+
+    if not np.all(np.isfinite(q_posterior)):
+        raise RuntimeError("Entropy pooling produced non-finite posterior probabilities.")
+
+    q_posterior = np.clip(q_posterior, 0.0, None)
+    total_prob = float(np.sum(q_posterior))
+    if not np.isfinite(total_prob) or total_prob <= 0.0:
+        raise RuntimeError("Entropy pooling posterior probabilities could not be normalised.")
+    q_posterior /= total_prob
 
     return q_posterior
 
