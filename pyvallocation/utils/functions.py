@@ -38,7 +38,8 @@ def portfolio_cvar(
     if demean:
         R_arr -= p.T @ R_arr
 
-    pf_pnl = R_arr @ w
+    with np.errstate(over='ignore', under='ignore', invalid='ignore', divide='ignore'):
+        pf_pnl = R_arr @ w
     if pf_pnl.ndim == 1:
         pf_pnl = pf_pnl.reshape(-1, 1)
 
@@ -92,7 +93,8 @@ def portfolio_var(
     if demean:
         R_arr -= p.T @ R_arr
 
-    pf_pnl = R_arr @ w
+    with np.errstate(over='ignore', under='ignore', invalid='ignore', divide='ignore'):
+        pf_pnl = R_arr @ w
     if pf_pnl.ndim == 1:
         pf_pnl = pf_pnl.reshape(-1, 1)
 

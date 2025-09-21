@@ -93,7 +93,7 @@ def estimate_sample_moments(R: ArrayLike, p: ArrayLike) -> Tuple[ArrayLike, Arra
 
     mu = R_arr.T @ p_arr
     X = R_arr - mu
-    S = (X.T * p_arr) @ X
+    S = np.einsum('ti,tj,t->ij', X, X, p_arr, optimize=True)
     S = (S + S.T) / 2
 
     labels = _labels(R, p)
