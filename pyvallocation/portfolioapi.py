@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
 # --- Assumed to be available from other modules ---
+from .discrete_allocation import DiscreteAllocationResult, discretize_weights
 from .moments import estimate_sample_moments
 from .optimization import MeanCVaR, MeanVariance, RobustOptimizer
 from .probabilities import generate_uniform_probabilities
@@ -292,6 +293,40 @@ class PortfolioFrontier:
         optimal_idx = feasible_indices[np.argmin(self.risks[feasible_indices])]
         w, ret, risk = self.weights[:, optimal_idx], self.returns[optimal_idx], self.risks[optimal_idx]
         return self._to_pandas(w, f"Portfolio (Return >= {min_return:.4f})"), ret, risk
+
+
+    def as_discrete_allocation(
+        self,
+        column: int,
+        latest_prices: Union[pd.Series, Mapping[str, float]],
+        total_value: float,
+        *,
+        method: str = "greedy",
+        lot_sizes: Optional[Union[pd.Series, Mapping[str, int]]] = None,
+        **kwargs,
+    ) -> DiscreteAllocationResult:
+        """Converts a selected frontier portfolio into a discrete allocation."""
+
+        if column < 0 or column >= self.weights.shape[1]:
+            raise IndexError(
+                f"Column index {column} is out of bounds for {self.weights.shape[1]} portfolios."
+            )
+
+        weights = self.weights[:, column]
+        if self.asset_names is not None:
+            weight_series = pd.Series(weights, index=self.asset_names)
+        else:
+            asset_labels = [f"Asset_{i}" for i in range(weights.shape[0])]
+            weight_series = pd.Series(weights, index=asset_labels)
+
+        return discretize_weights(
+            weights=weight_series,
+            latest_prices=latest_prices,
+            total_value=total_value,
+            method=method,
+            lot_sizes=lot_sizes,
+            **kwargs,
+        )
 
 
 class PortfolioWrapper:

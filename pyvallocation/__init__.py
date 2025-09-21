@@ -17,6 +17,11 @@ __all__ = [
     "MeanCVaR",
     "RobustOptimizer",
     "build_G_h_A_b",
+    "discretize_weights",
+    "allocate_greedy",
+    "allocate_mip",
+    "DiscreteAllocationInput",
+    "DiscreteAllocationResult",
 ]
 
 from .moments import (
@@ -33,3 +38,10 @@ from .probabilities import (
     silverman_bandwidth,
 )
 from .views import BlackLittermanProcessor, FlexibleViewsProcessor, entropy_pooling
+from .discrete_allocation import (
+    DiscreteAllocationInput,
+    DiscreteAllocationResult,
+    allocate_greedy,
+    allocate_mip,
+    discretize_weights,
+)
