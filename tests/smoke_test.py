@@ -35,6 +35,15 @@ class TestSmoke(unittest.TestCase):
         self.assertAlmostEqual(np.sum(p_gk), 1.0)
         self.assertTrue(np.all(p_gk >= 0))
 
+    def test_generate_gaussian_kernel_probabilities_requires_positive_bandwidth(self):
+        with self.assertRaises(ValueError):
+            probabilities.generate_gaussian_kernel_probabilities(self.spy_vol_series, h=0.0)
+
+    def test_generate_gaussian_kernel_probabilities_detects_zero_weights(self):
+        x = np.array([0.0, 1.0])
+        with self.assertRaises(ValueError):
+            probabilities.generate_gaussian_kernel_probabilities(x, v=np.array([10.0, 20.0]), h=1e-6, x_T=0.0)
+
     def test_compute_effective_number_scenarios(self):
         p_uniform = probabilities.generate_uniform_probabilities(self.T)
         ens_uniform = probabilities.compute_effective_number_scenarios(p_uniform)

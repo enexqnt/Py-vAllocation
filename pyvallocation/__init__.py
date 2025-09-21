@@ -1,6 +1,9 @@
 """Convenience re-exports for the public API."""
 
 __all__ = [
+    "AssetsDistribution",
+    "PortfolioFrontier",
+    "PortfolioWrapper",
     "estimate_sample_moments",
     "shrink_mean_jorion",
     "shrink_covariance_ledoit_wolf",
@@ -28,6 +31,7 @@ __all__ = [
     "exposure_stack_frontiers",
 ]
 
+from .portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper
 from .moments import (
     estimate_sample_moments,
     shrink_covariance_ledoit_wolf,

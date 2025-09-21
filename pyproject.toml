@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-vallocation"
-version = "0.1.1"
+version = "0.2.0"
 
 description = "Python package for asset allocation with a primary focus on integrating investor views."
 
@@ -16,7 +16,7 @@ requires-python = ">=3.8"
 # This is the modern way to specify a license.
 # It uses a standard SPDX identifier. "GPL-3.0-or-later" is the correct
 # expression for the GNU General Public License v3.0 or any later version.
-license = { text = "GPL-3.0-or-later" }
+license = "GPL-3.0-or-later"
 
 keywords = [
     "asset-allocation",

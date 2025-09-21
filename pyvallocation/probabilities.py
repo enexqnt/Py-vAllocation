@@ -53,11 +53,16 @@ def generate_gaussian_kernel_probabilities(
         v = np.asarray(v)
     if h is None:
         h = silverman_bandwidth(x)
+    h = float(h)
+    if h <= 0:
+        raise ValueError("Bandwidth `h` must be strictly positive.")
     if x_T is None:
         x_T = x[-1]
     w = np.exp(-((v - x_T) ** 2) / (2 * h**2))
-    p = w / np.sum(w)
-    return p
+    weight_sum = np.sum(w)
+    if not np.isfinite(weight_sum) or weight_sum <= 0:
+        raise ValueError("Kernel weights sum to zero; supply a positive bandwidth and non-degenerate inputs.")
+    return w / weight_sum
 
 
 def compute_effective_number_scenarios(probabilities: np.ndarray) -> float:

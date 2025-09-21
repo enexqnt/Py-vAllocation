@@ -586,7 +586,7 @@ class FlexibleViewsProcessor:
         mu: np.ndarray,
         var: np.ndarray,
     ) -> Tuple[List[np.ndarray], List[float], List[np.ndarray], List[float]]:
-        """
+        r"""
         Translates a dictionary of views for a specific moment type into lists of
         equality and inequality constraints suitable for the `entropy_pooling` function.
 

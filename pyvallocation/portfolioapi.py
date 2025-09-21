@@ -16,7 +16,6 @@ from .probabilities import generate_uniform_probabilities
 from .utils.constraints import build_G_h_A_b
 from .utils.functions import portfolio_cvar
 
-logging.basicConfig(level=logging.INFO, format='[%(name)s - %(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -73,91 +72,108 @@ class AssetsDistribution:
             ValueError: If input parameters have inconsistent shapes or if insufficient
                         data is provided (i.e., neither (mu, cov) nor scenarios).
         """
-        # Use object.__setattr__ as the dataclass is frozen
-        mu, cov, scenarios, probs = self.mu, self.cov, self.scenarios, self.probabilities
-        asset_names = self.asset_names
-        
-        # Infer asset names from pandas objects if not explicitly provided
+        mu, cov = self.mu, self.cov
+        scenarios, probs = self.scenarios, self.probabilities
+        asset_names = list(self.asset_names) if self.asset_names is not None else None
+
+        def _merge_names(existing: Optional[List[str]], candidate: Sequence[str]) -> Optional[List[str]]:
+            candidate_list = list(candidate)
+            if not candidate_list:
+                return existing
+            if existing is None:
+                return candidate_list
+            if candidate_list != existing:
+                raise ValueError("Inconsistent asset names across inputs.")
+            return existing
+
         if isinstance(mu, pd.Series):
-            if asset_names is None:
-                asset_names = mu.index.tolist()
-            mu = mu.values
+            asset_names = _merge_names(asset_names, mu.index)
+            mu = mu.to_numpy(dtype=float)
+        elif mu is not None:
+            mu = np.asarray(mu, dtype=float)
+
         if isinstance(cov, pd.DataFrame):
-            if asset_names is None:
-                asset_names = cov.index.tolist()
-            elif asset_names != cov.index.tolist():
-                raise ValueError("Inconsistent asset names between mu and cov.")
-            cov = cov.values
+            asset_names = _merge_names(asset_names, cov.index)
+            if asset_names is not None and list(cov.columns) != asset_names:
+                raise ValueError("Covariance matrix columns must match asset names.")
+            cov = cov.to_numpy(dtype=float)
+        elif cov is not None:
+            cov = np.asarray(cov, dtype=float)
+
         if isinstance(scenarios, pd.DataFrame):
-            if asset_names is None:
-                asset_names = scenarios.columns.tolist()
-            elif asset_names != scenarios.columns.tolist():
-                 raise ValueError("Inconsistent asset names in inputs.")
-            scenarios = scenarios.values
-        if isinstance(probs, pd.Series):
-            probs = probs.values
-
-        # Initialize N and T
-        N, T = None, None
-
-        # Process scenarios and estimate moments if needed
-        if scenarios is not None:
+            asset_names = _merge_names(asset_names, scenarios.columns)
+            scenarios = scenarios.to_numpy(dtype=float)
+        elif scenarios is not None:
             scenarios = np.asarray(scenarios, dtype=float)
-            if scenarios.ndim != 2: raise ValueError("`scenarios` must be a 2D array (T, N).")
+
+        if isinstance(probs, pd.Series):
+            probs = probs.to_numpy(dtype=float)
+        elif probs is not None:
+            probs = np.asarray(probs, dtype=float)
+
+        N: Optional[int] = None
+        T: Optional[int] = None
+
+        if scenarios is not None:
+            if scenarios.ndim != 2:
+                raise ValueError("`scenarios` must be a 2D array with shape (T, N).")
             T, N = scenarios.shape
-            
             if probs is None:
-                logger.info("No probabilities provided for scenarios. Assuming a uniform distribution.")
+                logger.debug("No probabilities passed with scenarios; assuming uniform weights.")
                 probs = generate_uniform_probabilities(T)
             else:
-                probs = np.asarray(probs, dtype=float)
-                if probs.shape != (T,): raise ValueError(f"Probabilities shape mismatch: expected ({T},), got {probs.shape}.")
-                prob_sum = np.sum(probs)
-                if not np.isclose(prob_sum, 1.0):
-                    logger.warning(f"Probabilities sum to {prob_sum:.4f}, not 1.0. Normalizing to enforce valid distribution.")
-                    probs /= prob_sum
-            
+                probs = probs.reshape(-1)
+                if probs.shape[0] != T:
+                    raise ValueError(
+                        f"Probabilities shape mismatch: expected ({T},), got {probs.shape}."
+                    )
+            if np.any(probs < 0):
+                raise ValueError("Scenario probabilities must be non-negative.")
+            prob_sum = probs.sum()
+            if not np.isfinite(prob_sum) or prob_sum <= 0:
+                raise ValueError("Scenario probabilities must sum to a positive finite value.")
+            if not np.isclose(prob_sum, 1.0):
+                logger.debug("Normalising scenario probabilities (sum=%s).", prob_sum)
+            probs = probs / prob_sum
+
             if mu is None or cov is None:
-                logger.warning(
-                    "`mu` and/or `cov` were not provided. Estimating from scenarios. "
-                )
                 estimated_mu, estimated_cov = estimate_sample_moments(scenarios, probs)
                 if mu is None:
-                    mu = estimated_mu
+                    mu = np.asarray(estimated_mu, dtype=float)
                 if cov is None:
-                    cov = estimated_cov
-        
-        # Process and validate parametric inputs (mu, cov)
-        if mu is not None and cov is not None:
-            mu, cov = np.asarray(mu, dtype=float), np.asarray(cov, dtype=float)
-            if mu.ndim != 1: raise ValueError("`mu` must be a 1D array.")
-            if cov.ndim != 2: raise ValueError("`cov` must be a 2D array.")
-            if mu.shape[0] != cov.shape[0] or cov.shape[0] != cov.shape[1]:
-                raise ValueError(f"Inconsistent shapes for mu {mu.shape} and cov {cov.shape}.")
-            
-            current_N = mu.shape[0]
-            if N is not None and N != current_N:
-                raise ValueError(f"Shape mismatch: N from scenarios is {N}, but from mu/cov is {current_N}.")
-            N = current_N
-        
-        # Final validation
-        if N is None:
-            raise ValueError("Insufficient data. Provide either (mu, cov) or (scenarios).")
+                    cov = np.asarray(estimated_cov, dtype=float)
 
-        if N == 0:
-            raise ValueError("Number of assets (N) cannot be zero.")
-            
+        if mu is not None:
+            mu = np.asarray(mu, dtype=float).reshape(-1)
+            N = mu.size if N is None else N
+            if mu.size != N:
+                raise ValueError(
+                    f"Expected {N} entries in `mu`, received {mu.size}."
+                )
+
+        if cov is not None:
+            cov = np.asarray(cov, dtype=float)
+            if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
+                raise ValueError("`cov` must be a square 2D array.")
+            N = cov.shape[0] if N is None else N
+            if cov.shape != (N, N):
+                raise ValueError("`cov` shape must match the number of assets inferred from other inputs.")
+
+        if N is None or N == 0:
+            raise ValueError("Insufficient data. Provide either (`mu`, `cov`) or `scenarios`.")
+
         if asset_names is not None and len(asset_names) != N:
-            raise ValueError(f"`asset_names` must have length {N}, but has length {len(asset_names)}.")
-        
-        # Set final attributes
-        object.__setattr__(self, 'N', N)
-        object.__setattr__(self, 'T', T)
-        object.__setattr__(self, 'mu', mu)
-        object.__setattr__(self, 'cov', cov)
-        object.__setattr__(self, 'scenarios', scenarios)
-        object.__setattr__(self, 'probabilities', probs)
-        object.__setattr__(self, 'asset_names', asset_names)
+            raise ValueError(
+                f"`asset_names` must have length {N}, received {len(asset_names)}."
+            )
+
+        object.__setattr__(self, "N", N)
+        object.__setattr__(self, "T", T)
+        object.__setattr__(self, "mu", mu)
+        object.__setattr__(self, "cov", cov)
+        object.__setattr__(self, "scenarios", scenarios)
+        object.__setattr__(self, "probabilities", None if scenarios is None else probs)
+        object.__setattr__(self, "asset_names", asset_names)
 
 @dataclass(frozen=True)
 class PortfolioFrontier:
@@ -237,10 +253,10 @@ class PortfolioFrontier:
                 -   **risk** (float): The risk of the tangency portfolio.
         """
         if np.all(np.isclose(self.risks, 0)):
-             logger.warning("All portfolios on the frontier have zero risk. Sharpe ratio is undefined.")
-             nan_weights = np.full(self.weights.shape[0], np.nan)
-             return self._to_pandas(nan_weights, "Undefined"), np.nan, np.nan
-        
+            logger.warning("All portfolios on the frontier have zero risk. Sharpe ratio is undefined.")
+            nan_weights = np.full(self.weights.shape[0], np.nan)
+            return self._to_pandas(nan_weights, "Undefined"), np.nan, np.nan
+
         with np.errstate(divide='ignore', invalid='ignore'):
             sharpe_ratios = (self.returns - risk_free_rate) / self.risks
         sharpe_ratios[~np.isfinite(sharpe_ratios)] = -np.inf
@@ -415,8 +431,24 @@ class PortfolioWrapper:
         logger.info(f"Setting constraints with parameters: {params}")
         try:
             G, h, A, b = build_G_h_A_b(self.dist.N, **params)
-            self.G, self.h = np.atleast_2d(G), np.atleast_1d(h)
-            self.A, self.b = np.atleast_2d(A), np.atleast_1d(b)
+            def _matrix_or_none(value: Optional[np.ndarray]) -> Optional[np.ndarray]:
+                if value is None:
+                    return None
+                arr = np.asarray(value, dtype=float)
+                if arr.size == 0:
+                    return None
+                if arr.ndim == 1:
+                    arr = arr.reshape(1, -1)
+                return arr
+
+            def _vector_or_none(value: Optional[np.ndarray]) -> Optional[np.ndarray]:
+                if value is None:
+                    return None
+                arr = np.asarray(value, dtype=float).reshape(-1)
+                return None if arr.size == 0 else arr
+
+            self.G, self.h = _matrix_or_none(G), _vector_or_none(h)
+            self.A, self.b = _matrix_or_none(A), _vector_or_none(b)
         except Exception as e:
             logger.error(f"Failed to build constraints: {e}", exc_info=True)
             raise RuntimeError(f"Constraint building failed: {e}") from e
@@ -489,8 +521,52 @@ class PortfolioWrapper:
     def _ensure_default_constraints(self):
         """Applies default constraints if none were explicitly set."""
         if self.G is None and self.A is None:
-            logger.warning("No constraints were set. To ensure a solvable problem, applying default constraints: long-only (weights >= 0) and fully-invested (weights sum to 1.0).")
-            self.set_constraints({'long_only': True, 'total_weight': 1.0})
+            logger.debug("Injecting default long-only, fully-invested constraints.")
+            self.set_constraints({"long_only": True, "total_weight": 1.0})
+
+    def _scenario_inputs(
+        self,
+        *,
+        n_simulations: int = 5000,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return scenarios, probabilities, and an expected-return vector."""
+
+        scenarios = self.dist.scenarios
+        probs = self.dist.probabilities
+
+        if scenarios is None:
+            if self.dist.mu is None or self.dist.cov is None:
+                raise ValueError("Cannot simulate scenarios without both `mu` and `cov`.")
+            if n_simulations <= 0:
+                raise ValueError("`n_simulations` must be a positive integer.")
+            logger.info(
+                "No scenarios supplied. Simulating %d multivariate normal scenarios for CVaR calculations.",
+                n_simulations,
+            )
+            rng = np.random.default_rng()
+            scenarios = rng.multivariate_normal(self.dist.mu, self.dist.cov, n_simulations)
+            probs = generate_uniform_probabilities(n_simulations)
+        else:
+            scenarios = np.asarray(scenarios, dtype=float)
+            if probs is None:
+                logger.debug("Distribution supplied scenarios without probabilities; defaulting to uniform weights.")
+                probs = generate_uniform_probabilities(scenarios.shape[0])
+            else:
+                probs = np.asarray(probs, dtype=float).reshape(-1)
+
+        prob_sum = probs.sum()
+        if np.any(probs < 0) or not np.isfinite(prob_sum) or prob_sum <= 0:
+            raise ValueError("Scenario probabilities must be non-negative and sum to a positive finite value.")
+        if not np.isclose(prob_sum, 1.0):
+            probs = probs / prob_sum
+
+        expected_returns = (
+            np.asarray(self.dist.mu, dtype=float)
+            if self.dist.mu is not None
+            else scenarios.T @ probs
+        )
+
+        return scenarios, probs, expected_returns
 
     def mean_variance_frontier(self, num_portfolios: int = 10) -> PortfolioFrontier:
         """Computes the classical Mean-Variance efficient frontier.
@@ -538,17 +614,7 @@ class PortfolioWrapper:
         Returns:
             A :class:`PortfolioFrontier` object.
         """
-        scenarios, probs = self.dist.scenarios, self.dist.probabilities
-        if scenarios is None:
-            if self.dist.mu is None or self.dist.cov is None:
-                raise ValueError("Cannot simulate scenarios for CVaR without `mu` and `cov`.")
-            n_sim=5000
-            logger.info(f"No scenarios provided. Making a modeling choice to simulate {n_sim} scenarios from a Multivariate Normal distribution using the provided `mu` and `cov`.")
-            scenarios = np.random.multivariate_normal(self.dist.mu, self.dist.cov, n_sim)
-            probs = generate_uniform_probabilities(n_sim)
-
-        mu_for_frontier = self.dist.mu if self.dist.mu is not None else np.mean(scenarios, axis=0)
-
+        scenarios, probs, mu_for_frontier = self._scenario_inputs()
         self._ensure_default_constraints()
         if self.initial_weights is not None and self.proportional_costs is not None:
             logger.info("Computing Mean-CVaR frontier with proportional transaction costs.")
@@ -560,7 +626,7 @@ class PortfolioWrapper:
         )
         weights = optimizer.efficient_frontier(num_portfolios)
         returns = mu_for_frontier @ weights
-        risks = abs(np.array([portfolio_cvar(w, scenarios, probs, alpha) for w in weights.T]))
+        risks = np.abs(np.asarray(portfolio_cvar(weights, scenarios, probs, alpha))).reshape(-1)
 
         logger.info(f"Successfully computed Mean-CVaR frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
@@ -681,16 +747,7 @@ class PortfolioWrapper:
         Raises:
             ValueError: If scenarios cannot be used or generated.
         """
-        scenarios, probs = self.dist.scenarios, self.dist.probabilities
-        if scenarios is None:
-            if self.dist.mu is None or self.dist.cov is None:
-                raise ValueError("Cannot simulate scenarios for CVaR without `mu` and `cov`.")
-            n_sim = 5000
-            logger.info(f"No scenarios provided. Simulating {n_sim} scenarios from a Multivariate Normal distribution.")
-            scenarios = np.random.multivariate_normal(self.dist.mu, self.dist.cov, n_sim)
-            probs = generate_uniform_probabilities(n_sim)
-        
-        mu_for_cvar = self.dist.mu if self.dist.mu is not None else np.mean(scenarios, axis=0)
+        scenarios, probs, mu_for_cvar = self._scenario_inputs()
         
         self._ensure_default_constraints()
         
@@ -711,7 +768,7 @@ class PortfolioWrapper:
             return pd.Series(nan_weights, index=self.dist.asset_names, name="Infeasible"), np.nan, np.nan
 
         actual_return = mu_for_cvar @ weights
-        risk = abs(portfolio_cvar(weights, scenarios, probs, alpha))
+        risk = float(np.abs(portfolio_cvar(weights, scenarios, probs, alpha)))
         
         w_series = pd.Series(weights, index=self.dist.asset_names, name=f"CVaR Portfolio (Return >= {return_target:.4f})")
 

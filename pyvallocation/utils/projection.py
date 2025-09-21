@@ -141,12 +141,35 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
     (3, 2)
     """
 
+    if investment_horizon <= 0:
+        raise ValueError("`investment_horizon` must be a positive integer.")
+    if n_simulations <= 0:
+        raise ValueError("`n_simulations` must be a positive integer.")
+
     is_series = isinstance(R, pd.Series)
     is_dataframe = isinstance(R, pd.DataFrame)
     R_np = _to_numpy(R)
-    idx = np.random.choice(
-        R_np.shape[0], size=(n_simulations, investment_horizon), p=p / p.sum()
-    )
+
+    if R_np.ndim not in (1, 2):
+        raise ValueError("`R` must be a 1D or 2D array-like of scenarios.")
+
+    num_rows = R_np.shape[0]
+    weights = np.asarray(p, dtype=float).reshape(-1) if p is not None else None
+    if weights is None:
+        weights = np.full(num_rows, 1.0 / num_rows, dtype=float)
+    else:
+        if weights.shape[0] != num_rows:
+            raise ValueError("Probability vector length must match the number of scenarios.")
+        if np.any(weights < 0):
+            raise ValueError("Scenario probabilities must be non-negative.")
+        weight_sum = weights.sum()
+        if not np.isfinite(weight_sum) or weight_sum <= 0:
+            raise ValueError("Scenario probabilities must sum to a positive finite value.")
+        if not np.isclose(weight_sum, 1.0):
+            weights = weights / weight_sum
+
+    rng = np.random.default_rng()
+    idx = rng.choice(num_rows, size=(n_simulations, investment_horizon), p=weights)
     scenario_sums = R_np[idx].sum(axis=1)
 
     if is_series:
