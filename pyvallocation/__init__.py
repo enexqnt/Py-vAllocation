@@ -22,6 +22,10 @@ __all__ = [
     "allocate_mip",
     "DiscreteAllocationInput",
     "DiscreteAllocationResult",
+    "average_exposures",
+    "exposure_stacking",
+    "average_frontiers",
+    "exposure_stack_frontiers",
 ]
 
 from .moments import (
@@ -44,4 +48,10 @@ from .discrete_allocation import (
     allocate_greedy,
     allocate_mip,
     discretize_weights,
+)
+from .ensembles import (
+    average_exposures,
+    average_frontiers,
+    exposure_stack_frontiers,
+    exposure_stacking,
 )

@@ -2,21 +2,20 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-# --- Assumed to be available from other modules ---
 from .discrete_allocation import DiscreteAllocationResult, discretize_weights
+from .ensembles import average_exposures
 from .moments import estimate_sample_moments
 from .optimization import MeanCVaR, MeanVariance, RobustOptimizer
 from .probabilities import generate_uniform_probabilities
 from .utils.constraints import build_G_h_A_b
 from .utils.functions import portfolio_cvar
 
-# --- Configure Logging ---
 logging.basicConfig(level=logging.INFO, format='[%(name)s - %(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -186,6 +185,12 @@ class PortfolioFrontier:
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
         return pd.Series(w, index=self.asset_names, name=name)
 
+    def _select_weights(self, columns: Optional[Iterable[int]]) -> np.ndarray:
+        if columns is None:
+            return self.weights.copy()
+        indices = np.array(list(columns), dtype=int)
+        return self.weights[:, indices]
+
     def get_min_risk_portfolio(self) -> Tuple[pd.Series, float, float]:
         """
         Finds the portfolio with the minimum risk on the efficient frontier.
@@ -327,6 +332,16 @@ class PortfolioFrontier:
             lot_sizes=lot_sizes,
             **kwargs,
         )
+
+    def ensemble_average(
+        self,
+        columns: Optional[Iterable[int]] = None,
+        *,
+        ensemble_weights: Optional[Sequence[float]] = None,
+    ) -> pd.Series:
+        matrix = self._select_weights(columns)
+        combined = average_exposures(matrix, weights=ensemble_weights)
+        return self._to_pandas(combined, "Average Ensemble")
 
 
 class PortfolioWrapper:

@@ -14,6 +14,11 @@ Portfolio Allocation
 - :doc:`pyvallocation.optimization`: Advanced portfolio optimization techniques
 - :doc:`pyvallocation.views`: Flexible views and constraints management
 
+Ensembling
+^^^^^^^^^^
+
+- :doc:`pyvallocation.ensembles`: Portfolio averaging and exposure stacking utilities
+
 Probabilistic Methods
 ^^^^^^^^^^^^^^^^^^^^^
 

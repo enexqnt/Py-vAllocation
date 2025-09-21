@@ -10,6 +10,7 @@ It's yet another portfolio optimization library, but unlike many others, **Py-vA
 - Incorporate investor views via **fully flexible probabilities** using entropy pooling and the **Black-Litterman** methodology  
 - Support **shrinkage** and other **Bayesian estimation** methods  
 - Support **variance-based**, **scenario-based CVaR**, and **robust optimization models**
+- Combine portfolios using **ensemble averaging** and **exposure stacking** to build diversified allocations across models
 
 ## Installation
 
