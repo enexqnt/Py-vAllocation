@@ -1,40 +1,97 @@
 # Py-vAllocation
 
-Py-vAllocation is a Python package for asset allocation with a primary focus on integrating investor views.
+[![PyPI](https://img.shields.io/pypi/v/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
+[![Python versions](https://img.shields.io/pypi/pyversions/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
 
-## Features
+_Py-vAllocation_ is a batteries-included portfolio-optimisation toolkit for
+Python. It provides consistent APIs for mean-variance, mean-CVaR, robust, and
+Bayesian allocation workflows while keeping the modelling assumptions explicit.
 
-It's yet another portfolio optimization library, but unlike many others, **Py-vAllocation** aims to:
-- Be modular and beginner-friendly with a simple API, while remaining flexible and customizable for advanced users  
-- Avoid hidden assumptions or black-box components, every modeling choice is explicitly stated  
-- Incorporate investor views via **fully flexible probabilities** using entropy pooling and the **Black-Litterman** methodology  
-- Support **shrinkage** and other **Bayesian estimation** methods  
-- Support **variance-based**, **scenario-based CVaR**, and **robust optimization models**
-- Combine portfolios using **ensemble averaging** and **exposure stacking** to build diversified allocations across models
+## Highlights
+
+Why practitioners and researchers use **Py-vAllocation**:
+
+- **Single interface, multiple solvers** – switch between variance, CVaR, and
+  robust objectives without refactoring your pipeline.
+- **Investor views made practical** – flexible entropy pooling and
+  Black–Litterman utilities help you translate qualitative convictions into
+  posterior scenarios.
+- **Statistical hygiene** – shrinkage estimators and Bayesian updates are built
+  in, avoiding the brittle sample-moment defaults.
+- **Portfolio ensembling** – average exposures, stack frontiers, and discretise
+  weights to bridge the gap between research portfolios and executable trades.
+- **Notebook-friendly design** – everything works with NumPy arrays or pandas
+  objects; outputs rehydrate to labelled Series/DataFrames for reporting.
 
 ## Installation
-
-You can install Py-vAllocation from PyPI using:
 
 ```bash
 pip install py-vallocation
 ```
 
-## Quick Start
+The solver stack relies on `cvxopt>=1.2.0`. If you are new to CVXOPT on macOS or
+Windows, the [`cvxopt` installation guide](https://cvxopt.org/install/) walks
+through the necessary system packages.
 
-See [examples here](examples/)
+## Quick start
+
+```python
+import pandas as pd
+from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+
+# Toy scenario matrix (rows = scenarios, columns = assets)
+scenarios = pd.DataFrame(
+    {
+        "Equity_US": [0.021, -0.013, 0.018, 0.007, 0.011],
+        "Equity_EU": [0.017, -0.009, 0.014, 0.004, 0.006],
+        "Credit_US": [0.009, 0.008, 0.007, 0.006, 0.008],
+        "Govt_Bonds": [0.004, 0.003, 0.005, 0.002, 0.004],
+    }
+)
+
+dist = AssetsDistribution(scenarios=scenarios)
+wrapper = PortfolioWrapper(dist)
+wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+
+frontier = wrapper.mean_variance_frontier(num_portfolios=20)
+weights, expected_return, risk = frontier.get_tangency_portfolio(risk_free_rate=0.001)
+
+print(weights.round(4))
+print(f"Expected return: {expected_return:.4%} | Volatility: {risk:.4%}")
+```
+
+## Example gallery
+
+The `examples/` directory mirrors the workflows showcased in the documentation
+and notebooks:
+
+| Script | What it shows |
+| ------ | ------------- |
+| `mean_variance_frontier.py` | Build and interrogate a classical efficient frontier |
+| `cvar_allocation.py` | Optimise against CVaR with scenario probabilities and inspect the tangency portfolio |
+| `robust_frontier.py` | Trace Meucci’s λ-frontier to understand estimation risk budgets |
+| `discrete_allocation.py` | Turn continuous weights into tradeable share counts |
+| `portfolio_ensembles.py` | Blend multiple risk models via exposure averaging and stacking |
+
+Jupyter notebooks (`Example_01.ipynb`, `Bayesian.ipynb`, `Flexible_Views.ipynb`,
+`Simple_views_on_mean.ipynb`) provide annotated walkthroughs of the same
+concepts using richer datasets.
+
+> 📘 **Documentation:** Read the full guide and API reference at
+> [py-vallocation.readthedocs.io](https://py-vallocation.readthedocs.io/).
 
 ## Requirements
 
 - Python 3.8+
-- numpy >= 1.20.0
-- cvxopt >= 1.2.0
-- pandas >=1.0.0
-- scipy >= 1.10.0
+- `numpy>=1.20`
+- `pandas>=1.0`
+- `scipy>=1.10`
+- `cvxopt>=1.2`
 
-## Development Status
+## Development status
 
-**Alpha release**: Under active development. Many features are not yet implemented or fully tested. Breaking changes may occur without notice. Use at your own risk.
+**Alpha release** – under active development. Expect sharp edges and potential
+API changes as we finalise behaviour across the optimisation back-ends.
 
 ## Underlying literature
 
@@ -50,16 +107,16 @@ See [examples here](examples/)
 
 ## Contributing
 
-Contributions and feedback are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Pull requests and issue reports are welcome! Start with
+[CONTRIBUTING.md](CONTRIBUTING.md) and open a discussion if you would like to
+collaborate on new risk models or data utilities.
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 License. See [LICENSE](LICENSE) for details.
+GPL-3.0-or-later – see [LICENSE](LICENSE) for the full text. Portions of the
+optimisation routines are adapted (with attribution) from
+[fortitudo-tech](https://github.com/fortitudo-tech/fortitudo.tech).
 
-## Credits
-
-Some code, where explicitly stated, is adapted from [fortitudo-tech](https://github.com/fortitudo-tech/fortitudo.tech)
-
-## Star History
+## Star history
 
 [![Star History Chart](https://api.star-history.com/svg?repos=enexqnt/Py-vAllocation&type=Date)](https://www.star-history.com/#enexqnt/Py-vAllocation&Date)

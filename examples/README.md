@@ -1,23 +1,29 @@
 # Examples
 
-This directory collects a mix of scripts and notebooks that demonstrate common
+This directory collects runnable scripts and Jupyter notebooks showing typical
 allocation workflows.
 
-- `mean_variance_frontier.py` is a lightweight script that constructs a
-  classical mean-variance frontier using purely in-memory data.
-- `Example_01.ipynb` provides a more detailed walkthrough of the
-  mean-variance API.
-- `Bayesian.ipynb`, `Flexible_Views.ipynb`, and `Simple_views_on_mean.ipynb`
-  focus on incorporating views and Bayesian updates. They reuse a shared CSV
-  dataset (`ETF_prices.csv`).
+Python scripts
+--------------
 
-Run the Python script directly after installing the project dependencies:
+- `mean_variance_frontier.py`: classical mean-variance frontier with summary statistics.
+- `cvar_allocation.py`: minimum-CVaR portfolio and tangency portfolio on the CVaR frontier.
+- `robust_frontier.py`: Meucci-style robust frontier parameterised by λ.
+- `discrete_allocation.py`: convert continuous weights into lot-sized trades.
+- `portfolio_ensembles.py`: combine multiple frontiers using the ensembling helpers.
+
+Execute a script directly after installing the project dependencies:
 
 ```bash
-python examples/mean_variance_frontier.py
+python examples/portfolio_ensembles.py
 ```
 
-For the notebooks, start `jupyter lab` or `jupyter notebook` in the project
-root and open the file you are interested in. Each notebook includes inline
-commentary to explain the scenario being modelled and any required setup
-steps.
+Notebooks
+---------
+
+- `Example_01.ipynb`: detailed walkthrough of the mean-variance API.
+- `Bayesian.ipynb`, `Flexible_Views.ipynb`, `Simple_views_on_mean.ipynb`: view-based
+  workflows that reuse `ETF_prices.csv`.
+
+Launch `jupyter lab` or `jupyter notebook` in the project root to explore the notebooks.
+Each notebook contains guidance and setup notes in the opening cells.

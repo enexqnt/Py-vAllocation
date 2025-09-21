@@ -44,5 +44,16 @@ The snippet below computes a compact mean-variance frontier using the high-level
     print(weights.round(4))
     print(f"Expected return: {expected_return:.4%} | Volatility: {risk:.4%}")
 
-The examples directory contains additional notebooks and scripts that expand on
-this workflow. See :doc:`tutorials/index` for guided walkthroughs.
+The :mod:`examples <pyvallocation.examples>` directory contains runnable scripts
+that reproduce the main workflows:
+
+* ``mean_variance_frontier.py`` – classical efficient frontier summary.
+* ``cvar_allocation.py`` – minimum-CVaR portfolio and tangency allocation.
+* ``robust_frontier.py`` – Meucci-style robust λ-frontier.
+* ``discrete_allocation.py`` – map continuous weights to share counts.
+* ``portfolio_ensembles.py`` – blend frontiers via exposure averaging/stacking.
+
+Run them directly from the repository root, e.g. ``python
+examples/portfolio_ensembles.py``.
+
+See :doc:`tutorials/index` for guided walkthroughs and additional context.
