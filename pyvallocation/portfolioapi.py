@@ -199,13 +199,52 @@ class PortfolioFrontier:
     asset_names: Optional[List[str]] = None
 
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
-        return pd.Series(w, index=self.asset_names, name=name)
+        index = self.asset_names if self.asset_names is not None else None
+        return pd.Series(w, index=index, name=name)
 
     def _select_weights(self, columns: Optional[Iterable[int]]) -> np.ndarray:
         if columns is None:
             return self.weights.copy()
         indices = np.array(list(columns), dtype=int)
         return self.weights[:, indices]
+
+    def to_frame(
+        self,
+        columns: Optional[Iterable[int]] = None,
+        *,
+        column_labels: Optional[Sequence[str]] = None,
+    ) -> pd.DataFrame:
+        """Return the frontier weights as a pandas DataFrame.
+
+        Args:
+            columns: Optional iterable of column indices selecting specific portfolios.
+            column_labels: Optional labels for the resulting DataFrame columns.
+
+        Returns:
+            A DataFrame whose rows correspond to assets and whose columns correspond
+            to efficient portfolios.
+
+        Raises:
+            ValueError: If ``column_labels`` is supplied with a length that does not
+                match the number of selected portfolios.
+        """
+
+        selection = list(columns) if columns is not None else None
+        matrix = self._select_weights(selection)
+
+        if column_labels is not None:
+            labels = list(column_labels)
+            if len(labels) != matrix.shape[1]:
+                raise ValueError(
+                    "`column_labels` length must match the number of selected portfolios."
+                )
+        elif selection is not None:
+            labels = selection
+        else:
+            labels = list(range(matrix.shape[1]))
+
+        index = self.asset_names if self.asset_names is not None else None
+        return pd.DataFrame(matrix, index=index, columns=labels)
 
     def get_min_risk_portfolio(self) -> Tuple[pd.Series, float, float]:
         """
@@ -634,7 +673,13 @@ class PortfolioWrapper:
             risk_measure=f'CVaR (alpha={alpha:.2f})', asset_names=self.dist.asset_names
         )
 
-    def robust_lambda_frontier(self, num_portfolios: int = 10, max_lambda: float = 2.0) -> PortfolioFrontier:
+    def robust_lambda_frontier(
+        self,
+        num_portfolios: int = 10,
+        max_lambda: float = 2.0,
+        *,
+        lambdas: Optional[Sequence[float]] = None,
+    ) -> PortfolioFrontier:
         r"""Computes a robust frontier based on uncertainty in expected returns.
 
         Assumptions & Design Choices:
@@ -646,6 +691,8 @@ class PortfolioWrapper:
             num_portfolios: The number of portfolios to compute. Defaults to 20.
             max_lambda: The maximum value for the risk aversion parameter lambda,
               which controls the trade-off between nominal return and robustness.
+            lambdas: Optional explicit sequence of λ values. When provided, it takes
+              precedence over ``num_portfolios``/``max_lambda``.
 
         Returns:
             A :class:`PortfolioFrontier` object.
@@ -658,7 +705,26 @@ class PortfolioWrapper:
         self._ensure_default_constraints()
         if self.initial_weights is not None and self.proportional_costs is not None:
             logger.info("Including proportional transaction costs in robust optimization.")
-        
+
+        if lambdas is not None:
+            lambda_grid = np.asarray(list(lambdas), dtype=float).reshape(-1)
+            if lambda_grid.size == 0:
+                raise ValueError("`lambdas` must contain at least one value.")
+            if np.any(lambda_grid < 0):
+                raise ValueError("`lambdas` must be non-negative.")
+        else:
+            if num_portfolios <= 0:
+                raise ValueError("`num_portfolios` must be positive.")
+            if max_lambda < 0:
+                raise ValueError("`max_lambda` must be non-negative.")
+            if num_portfolios == 1:
+                lambda_grid = np.array([float(max_lambda)])
+            else:
+                if max_lambda == 0:
+                    lambda_grid = np.zeros(1)
+                else:
+                    lambda_grid = np.linspace(0, max_lambda, num_portfolios)
+
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
             uncertainty_cov=self.dist.cov,
@@ -666,13 +732,14 @@ class PortfolioWrapper:
             initial_weights=self.initial_weights,
             proportional_costs=self.proportional_costs
         )
-        
-        lambdas = np.linspace(0, max_lambda, num_portfolios)
-        returns, risks, weights = optimizer.efficient_frontier(lambdas)
+        lambda_list = lambda_grid.tolist()
+        returns, risks, weights = optimizer.efficient_frontier(lambda_list)
 
         logger.info(f"Successfully computed Robust λ-frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
-            weights=np.array(weights), returns=np.array(returns), risks=np.array(risks),
+            weights=np.asarray(weights, dtype=float),
+            returns=np.asarray(returns, dtype=float),
+            risks=np.asarray(risks, dtype=float),
             risk_measure="Estimation Risk (‖Σ'¹/²w‖₂)", asset_names=self.dist.asset_names
         )
 

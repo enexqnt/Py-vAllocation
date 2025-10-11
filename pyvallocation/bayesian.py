@@ -11,7 +11,9 @@ from scipy.stats import chi2
 import pandas as pd
 
 
-def _cholesky_pd(mat: npt.NDArray[np.floating], jitter: float = 1e-12) -> npt.NDArray[np.floating]:
+def _cholesky_pd(
+    mat: npt.NDArray[np.floating], jitter: float = 1e-12, *, max_attempts: int = 6
+) -> npt.NDArray[np.floating]:
     r"""Computes a Cholesky decomposition that is robust to numerical errors.
 
     The theoretical framework for robust Bayesian allocation often requires
@@ -21,15 +23,18 @@ def _cholesky_pd(mat: npt.NDArray[np.floating], jitter: float = 1e-12) -> npt.ND
     inaccuracies or estimation errors.
 
     This function attempts to compute the Cholesky decomposition of `mat`. If
-    `mat` is not PD, it adds a small multiple of the identity matrix
-    (`jitter` * I) to the matrix to make it PD and then retries. This is a
-    standard numerical stabilization technique.
+    `mat` is not PD, it repeatedly adds a multiple of the identity matrix
+    (`jitter` * I, inflated geometrically) to the matrix and retries. This is a
+    standard numerical stabilization technique that escalates the diagonal
+    adjustment until the decomposition succeeds or a maximum number of attempts
+    is reached.
 
     Args:
         mat: The square matrix (N x N) for which to compute the Cholesky
             decomposition.
-        jitter: A small positive constant to add to the diagonal elements if
+        jitter: A small positive constant to seed the diagonal adjustment if
             the matrix is not positive-definite. Defaults to 1e-12.
+        max_attempts: Maximum number of jitter escalations before giving up.
 
     Returns:
         The lower Cholesky factor of `mat` (or `mat` + `jitter` * I).
@@ -39,20 +44,31 @@ def _cholesky_pd(mat: npt.NDArray[np.floating], jitter: float = 1e-12) -> npt.ND
         RuntimeError: If the matrix is not positive-definite even after
             adding jitter.
     """
+    mat = np.asarray(mat, dtype=float)
     if mat.ndim != 2 or mat.shape[0] != mat.shape[1]:
         raise ValueError("Input to _cholesky_pd must be a square matrix.")
-    try:
-        return sla.cholesky(mat, lower=True, check_finite=False)
-    except sla.LinAlgError:
-        mat_jittered = mat + jitter * np.eye(mat.shape[0])
-        warnings.warn(
-            "Matrix not positive-definite; added jitter for Cholesky decomposition.",
-            RuntimeWarning
-        )
+    mat = 0.5 * (mat + mat.T)
+
+    identity = np.eye(mat.shape[0])
+    min_jitter = float(jitter) if jitter > 0 else 1e-12
+    attempts = 0
+    current_jitter = 0.0
+
+    while True:
+        candidate = mat if current_jitter == 0.0 else mat + current_jitter * identity
         try:
-            return sla.cholesky(mat_jittered, lower=True, check_finite=False)
+            return sla.cholesky(candidate, lower=True, check_finite=False)
         except sla.LinAlgError as exc:
-            raise RuntimeError("Matrix not positive-definite after adding jitter.") from exc
+            if attempts >= max_attempts:
+                raise RuntimeError(
+                    "Matrix not positive-definite after repeated jitter attempts."
+                ) from exc
+            current_jitter = min_jitter if current_jitter == 0.0 else current_jitter * 10.0
+            attempts += 1
+            warnings.warn(
+                f"Matrix not positive-definite; retrying with jitter={current_jitter:.1e} (attempt {attempts}).",
+                RuntimeWarning,
+            )
 
 
 def chi2_quantile(p: float, dof: int, sqrt: bool = False) -> float:

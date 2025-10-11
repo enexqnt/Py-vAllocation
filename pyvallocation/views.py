@@ -8,6 +8,34 @@ from scipy.optimize import Bounds, minimize
 
 import pandas as pd
 
+from .bayesian import _cholesky_pd
+
+
+def _normalise_probabilities(
+    probabilities: Union[np.ndarray, Sequence[float]],
+    *,
+    name: str,
+    strictly_positive: bool = True,
+) -> np.ndarray:
+    """Validate and normalise a 1-D probability vector."""
+    probs = np.asarray(probabilities, dtype=float).reshape(-1)
+    if probs.ndim != 1 or probs.size == 0:
+        raise ValueError(f"{name} must be a one-dimensional array with at least one entry.")
+    if not np.all(np.isfinite(probs)):
+        raise ValueError(f"{name} must contain only finite values.")
+    if strictly_positive:
+        if np.any(probs <= 0.0):
+            raise ValueError(f"{name} must be strictly positive.")
+    else:
+        if np.any(probs < 0.0):
+            raise ValueError(f"{name} must be non-negative.")
+    total = probs.sum()
+    if not np.isfinite(total) or total <= 0.0:
+        raise ValueError(f"{name} must sum to a positive finite value.")
+    if not np.isclose(total, 1.0):
+        probs = probs / total
+    return probs
+
 def _entropy_pooling_dual_objective(
     lagrange_multipliers: np.ndarray,
     log_p_col: np.ndarray,
@@ -98,7 +126,10 @@ def _entropy_pooling_dual_objective(
     """
     lagrange_multipliers_col = lagrange_multipliers[:, np.newaxis]
 
-    x = np.exp(log_p_col - 1.0 - lhs.T @ lagrange_multipliers_col)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore", divide="ignore"):
+        exponent = log_p_col - 1.0 - lhs.T @ lagrange_multipliers_col
+    exponent = np.clip(exponent, -700.0, 700.0)
+    x = np.exp(exponent)
 
     rhs_vec = np.atleast_1d(rhs_squeezed)
     objective_value = -(-np.sum(x) - lagrange_multipliers @ rhs_vec)
@@ -192,8 +223,13 @@ def entropy_pooling(
             f"Method {opt_method} not supported. Choose 'TNC' or 'L-BFGS-B'."
         )
 
-    p_col = p.reshape(-1, 1)
-    b_col = b.reshape(-1, 1)
+    normalised_prior = _normalise_probabilities(
+        p,
+        name="prior probabilities",
+        strictly_positive=True,
+    )
+    p_col = normalised_prior.reshape(-1, 1)
+    b_col = np.asarray(b, dtype=float).reshape(-1, 1)
 
     num_equalities = b_col.shape[0]
 
@@ -215,6 +251,10 @@ def entropy_pooling(
     initial_lagrange_multipliers = np.zeros(current_lhs.shape[0])
     optimizer_bounds = Bounds(bounds_lower, bounds_upper)
 
+    solver_options = {"maxfun": 10000}
+    if opt_method == "L-BFGS-B":
+        solver_options["maxiter"] = 1000
+
     solution = minimize(
         _entropy_pooling_dual_objective,
         x0=initial_lagrange_multipliers,
@@ -222,7 +262,7 @@ def entropy_pooling(
         method=opt_method,
         jac=True,
         bounds=optimizer_bounds,
-        options={"maxiter": 1000, "maxfun": 10000},
+        options=solver_options,
     )
 
     if not solution.success:
@@ -235,9 +275,10 @@ def entropy_pooling(
 
     optimal_lagrange_multipliers_col = solution.x[:, np.newaxis]
 
-    q_posterior = np.exp(
-        log_p_col - 1.0 - current_lhs.T @ optimal_lagrange_multipliers_col
-    )
+    with np.errstate(over="ignore", under="ignore", invalid="ignore", divide="ignore"):
+        posterior_exponent = log_p_col - 1.0 - current_lhs.T @ optimal_lagrange_multipliers_col
+    posterior_exponent = np.clip(posterior_exponent, -700.0, 700.0)
+    q_posterior = np.exp(posterior_exponent)
 
     if not np.all(np.isfinite(q_posterior)):
         raise RuntimeError("Entropy pooling produced non-finite posterior probabilities.")
@@ -419,7 +460,11 @@ class FlexibleViewsProcessor:
             if prior_probabilities is None:
                 self.p0 = np.full((S, 1), 1.0 / S)
             else:
-                p_array = np.asarray(prior_probabilities, float).ravel()
+                p_array = _normalise_probabilities(
+                    prior_probabilities,
+                    name="prior_probabilities",
+                    strictly_positive=True,
+                )
                 if p_array.size != S:
                     raise ValueError(
                         "`prior_probabilities` must match the number of scenarios."
@@ -431,6 +476,9 @@ class FlexibleViewsProcessor:
                 raise ValueError(
                     "Provide either `prior_returns` or both `prior_mean` and `prior_cov`."
                 )
+
+            if not isinstance(num_scenarios, int) or num_scenarios <= 0:
+                raise ValueError("`num_scenarios` must be a positive integer.")
 
             if isinstance(prior_mean, pd.Series):
                 mu = prior_mean.values.astype(float)
@@ -451,12 +499,21 @@ class FlexibleViewsProcessor:
 
             N = mu.size
 
+            if cov.shape != (N, N):
+                raise ValueError(
+                    f"`prior_cov` must be a square matrix of shape ({N}, {N})."
+                )
+            cov = 0.5 * (cov + cov.T)
             cov = cov + np.eye(N) * 1e-6
+            chol = _cholesky_pd(cov)
 
             rng = np.random.default_rng(random_state)
 
             if distribution_fn is None:
-                self.R = rng.multivariate_normal(mu, cov, size=num_scenarios)
+                standard_normals = rng.standard_normal((num_scenarios, N))
+                with np.errstate(over="ignore", under="ignore", invalid="ignore", divide="ignore"):
+                    simulated = standard_normals @ chol.T
+                self.R = simulated + mu
             else:
                 try:
                     self.R = distribution_fn(mu, cov, num_scenarios, rng)

@@ -29,6 +29,7 @@ __all__ = [
     "exposure_stacking",
     "average_frontiers",
     "exposure_stack_frontiers",
+    "plot_frontiers",
 ]
 
 from .portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper
@@ -59,3 +60,4 @@ from .ensembles import (
     exposure_stack_frontiers,
     exposure_stacking,
 )
+from .plotting import plot_frontiers
