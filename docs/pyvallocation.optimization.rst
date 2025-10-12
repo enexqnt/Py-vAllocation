@@ -5,6 +5,7 @@ Portfolio Optimization
    :members:
    :undoc-members:
    :show-inheritance:
+   :noindex:
 
 Related Modules
 ---------------

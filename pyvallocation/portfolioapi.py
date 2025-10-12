@@ -731,6 +731,32 @@ class PortfolioWrapper:
         returns = mu_for_frontier @ weights
         risks = np.abs(np.asarray(portfolio_cvar(weights, scenarios, probs, alpha))).reshape(-1)
 
+        # Numerical guards: enforce non-decreasing, convex CVaR frontier
+        order = np.argsort(returns)
+        returns, risks, weights = returns[order], risks[order], weights[:, order]
+        # 1) monotone non-decreasing risk w.r.t. return target (feasible set shrinks)
+        risks = np.maximum.accumulate(risks)
+
+        # 2) convexify via lower convex envelope in (return, risk)
+        def _lower_convex_envelope(x: np.ndarray, y: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+            idx_stack: list[int] = []
+            for i in range(len(x)):
+                while len(idx_stack) >= 2:
+                    i1, i2 = idx_stack[-2], idx_stack[-1]
+                    cross = (x[i2] - x[i1]) * (y[i] - y[i1]) - (y[i2] - y[i1]) * (x[i] - x[i1])
+                    if cross <= eps:
+                        idx_stack.pop()
+                    else:
+                        break
+                idx_stack.append(i)
+            return np.array(idx_stack, dtype=int)
+
+        keep = _lower_convex_envelope(returns, risks)
+        if keep.size >= 2 and keep.size < returns.size:
+            x_env, y_env = returns[keep], risks[keep]
+            # Interpolate envelope risk onto the original grid (keeps matrix shape)
+            risks = np.interp(returns, x_env, y_env)
+
         logger.info(f"Successfully computed Mean-CVaR frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
             weights=weights, returns=returns, risks=risks,

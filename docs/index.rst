@@ -55,6 +55,7 @@ Where to start
    :caption: Background
 
    bibliography
+   releases
 
 Indices and tables
 ==================

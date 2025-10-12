@@ -1,10 +1,12 @@
-Portfolio Ensembling
-====================
+Portfolio Ensembling Across Models
+==================================
 
-This tutorial shows how to blend portfolios produced under different statistical
-specifications into a single allocation. We combine mean estimates (plain vs.
-shrinkage) with several covariance shrinkers, extract one target portfolio from
-each frontier, and ensemble the resulting weights.
+This tutorial expands on ``portfolio_ensembles.py`` and demonstrates how the
+new :func:`pyvallocation.ensembles.make_portfolio_spec` and
+:func:`pyvallocation.ensembles.assemble_portfolio_ensemble` helpers produce a
+stacked allocation in a handful of lines. The workflow compares two estimation
+styles (shrinkage MV vs. robust RRP) using the same universe as the other
+tutorials.
 
 Setup
 -----
@@ -16,7 +18,12 @@ Setup
     import pandas as pd
 
     from pyvallocation import moments, probabilities
-    from pyvallocation.ensembles import average_exposures, exposure_stacking
+    from pyvallocation.ensembles import (
+        average_exposures,
+        exposure_stacking,
+        average_frontiers,
+        exposure_stack_frontiers,
+    )
     from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
     from pyvallocation.utils.projection import convert_scenarios_compound_to_simple, log2simple, project_mean_covariance
 
@@ -44,7 +51,7 @@ Setup
     covs["exp_lw_id"] = moments.shrink_covariance_ledoit_wolf(weekly_returns, covs["exp_raw"], target="identity")
 
 Extract a target portfolio from each frontier
---------------------------------------------
+---------------------------------------------
 
 .. code-block:: python
 
@@ -77,20 +84,76 @@ Extract a target portfolio from each frontier
         frontier = build_frontier(means[mean_key], covs[cov_key])
         portfolios.append(pick_portfolio(frontier))
 
-Ensemble the exposures
-----------------------
+Run both estimators in a single call
+------------------------------------
 
 .. code-block:: python
 
-    samples = np.column_stack([w.values for w in portfolios])
-    average = average_exposures(samples)
-    stacked = exposure_stacking(samples, L=min(3, samples.shape[1]))
+    from pyvallocation.ensembles import make_portfolio_spec, assemble_portfolio_ensemble
 
-    average_series = pd.Series(average, index=portfolios[0].index, name="Average Ensemble")
-    stacked_series = pd.Series(stacked, index=portfolios[0].index, name="Exposure Stacking")
+    spec_mv = make_portfolio_spec(
+        name="MV",
+        returns=weekly_returns,
+        mean_estimator="james_stein",
+        cov_estimator="oas",
+        optimiser="mean_variance",
+        optimiser_kwargs={
+            "num_portfolios": 15,
+            "constraints": {"long_only": True, "total_weight": 1.0},
+        },
+        selector="tangency",
+        selector_kwargs={"risk_free_rate": 0.01},
+    )
 
-    print(average_series.round(4))
-    print(stacked_series.round(4))
+    spec_rrp = make_portfolio_spec(
+        name="RRP",
+        returns=weekly_returns,
+        mean_estimator="huber",
+        cov_estimator="tyler",
+        cov_kwargs={"shrinkage": 0.1},
+        optimiser="rrp",
+        optimiser_kwargs={
+            "num_portfolios": 6,
+            "max_multiplier": 1.6,
+            "lambda_reg": 0.3,
+            "constraints": {"long_only": True, "total_weight": 1.0},
+        },
+        selector="max_return",
+    )
+
+    ensemble = assemble_portfolio_ensemble(
+        [spec_mv, spec_rrp],
+        ensemble=("average", "stack"),
+        stack_folds=3,
+    )
+
+    stacked_weights = ensemble.stacked
+    average_weights = ensemble.average
+
+    print("Stacked weights (top holdings):")
+    print(stacked_weights.sort_values(ascending=False).head())
+
+    print("\nIndividual selections:")
+    print(ensemble.selections.round(4))
+
+Interpretation & reporting
+--------------------------
+
+- ``ensemble.metadata`` preserves key estimation choices per model – include it
+  in investment memos.
+- Plot ``ensemble.frontiers["MV"]`` and ``ensemble.frontiers["RRP"]`` using
+  :func:`pyvallocation.plotting.plot_frontiers` to show the range of outcomes.
+- Pass ``ensemble_weights`` when calling :func:`assemble_portfolio_ensemble` to
+  reflect qualitative preferences (e.g., overweight robust models).
+- The stacked weights are PSD-safe and label-preserving, so you can feed them
+  directly into discrete allocation, attribution, or risk aggregation modules.
+
+.. note::
+
+   The exposure stacking procedure follows Vorobets
+   :cite:p:`vorobets2024derivatives` and the reference implementation published
+   in the GPL-3 licensed `fortitudo.tech <https://github.com/fortitudo-tech/fortitudo.tech>`_
+   repository.
 
 Interpretation
 --------------

@@ -6,8 +6,8 @@ project = 'Py-vAllocation'
 copyright = '2025, enexqnt'
 author = 'enexqnt'
 
-version = '0.2.0'
-release = '0.2.0'
+version = '0.3.0'
+release = '0.3.0'
 
 extensions = [
     'sphinx.ext.autodoc',
@@ -45,7 +45,10 @@ napoleon_type_aliases = {
 
 templates_path = ['_templates']
 
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = [
+    '_build', 'Thumbs.db', '.DS_Store',
+    'tutorials/notebooks/*.ipynb',
+]
 source_suffix = ['.rst', '.ipynb']
 
 
@@ -66,4 +69,11 @@ autodoc_default_options = {
     'undoc-members': True,
     'show-inheritance': True,
     '__init__': True,
+    'exclude-members': 'weights,marginal_risk,psi,gamma,rho,objective,target_return,max_return',
 }
+
+linkcheck_ignore = [
+    r'https://doi\.org/10\.1093/.*',
+    r'https://doi\.org/10\.2469/faj\.v48\.n5\.28',
+    r'https://doi\.org/10\.2139/ssrn\.792628',
+]

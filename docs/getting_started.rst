@@ -14,6 +14,14 @@ Installation
 The package requires ``numpy``, ``pandas`` and ``cvxopt``. If you are working in
 an isolated environment, the command above will download all dependencies.
 
+Optional extras for shrinkage-heavy research flows are available via
+
+.. code-block:: bash
+
+    python -m pip install "py-vallocation[robust]"
+
+which installs the analytical nonlinear shrinkage backend.
+
 First Allocation
 ----------------
 

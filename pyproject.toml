@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-vallocation"
-version = "0.2.0"
+version = "0.3.0"
 
 description = "Python package for asset allocation with a primary focus on integrating investor views."
 
@@ -46,6 +46,11 @@ dependencies = [
     "cvxopt>=1.2.0",
     "pandas>=1.0.0",
     "scipy>=1.10.0",
+]
+
+[project.optional-dependencies]
+robust = [
+    "non-linear-shrinkage>=1.0.0",
 ]
 
 [project.urls]

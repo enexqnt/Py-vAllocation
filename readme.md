@@ -1,122 +1,100 @@
-# Py-vAllocation
+# Py‑vAllocation
 
 [![PyPI](https://img.shields.io/pypi/v/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
 [![Python versions](https://img.shields.io/pypi/pyversions/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
 
-_Py-vAllocation_ is a batteries-included portfolio-optimisation toolkit for
-Python. It provides consistent APIs for mean-variance, mean-CVaR, robust, and
-Bayesian allocation workflows while keeping the modelling assumptions explicit.
+Practical portfolio allocation tools with a small, consistent API. The library
+covers mean–variance, mean‑CVaR, robust optimisation, Bayesian updates
+(Black–Litterman and NIW), entropy pooling for flexible views, ensembling, and
+discrete trade generation. Pandas labels are preserved throughout.
 
-## Highlights
+## Features
 
-Why practitioners and researchers use **Py-vAllocation**:
+- Mean–variance and CVaR frontiers with simple selectors (tangency, risk target).
+- Robust models: relaxed risk parity and Meucci‑style robust optimisation.
+- Views: Black–Litterman (equality mean views) and entropy pooling (inequalities,
+  vol/corr/skew), plus a robust‑Bayesian NIW posterior.
+- Shrinkage/robust moments: James–Stein, OAS, NLS, Tyler, Huber, POET, Glasso.
+- Portfolio ensembling and discrete allocation with lot sizes.
 
-- **Single interface, multiple solvers** – switch between variance, CVaR, and
-  robust objectives without refactoring your pipeline.
-- **Relaxed risk parity** – reproduce Gambeta–Kwon’s return-target trade-off with
-  a native solver, metadata-rich diagnostics, and plotting-ready frontiers.
-- **Investor views made practical** – flexible entropy pooling and
-  Black–Litterman utilities help you translate qualitative convictions into
-  posterior scenarios.
-- **Statistical hygiene** – shrinkage estimators and Bayesian updates are built
-  in, avoiding the brittle sample-moment defaults.
-- **Portfolio ensembling** – average exposures, stack frontiers, and discretise
-  weights to bridge the gap between research portfolios and executable trades.
-- **Notebook-friendly design** – everything works with NumPy arrays or pandas
-  objects; outputs rehydrate to labelled Series/DataFrames for reporting.
-
-## Installation
+## Install
 
 ```bash
 pip install py-vallocation
+
+# optional extras (nonlinear shrinkage, POET, etc.)
+pip install py-vallocation[robust]
 ```
 
-The solver stack relies on `cvxopt>=1.2.0`. If you are new to CVXOPT on macOS or
-Windows, the [`cvxopt` installation guide](https://cvxopt.org/install/) walks
-through the necessary system packages.
+Requires `cvxopt>=1.2.0`. If CVXOPT is new to your system, follow the
+[official guide](https://cvxopt.org/install/).
 
-## Quick start
+## Quickstart
+
+Run the end‑to‑end ETF example (writes plots/CSVs to `output/`):
+
+```bash
+python examples/quickstart_etf_allocation.py
+```
+
+Or use the API directly:
 
 ```python
 import pandas as pd
 from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
 
-# Toy scenario matrix (rows = scenarios, columns = assets)
-scenarios = pd.DataFrame(
-    {
-        "Equity_US": [0.021, -0.013, 0.018, 0.007, 0.011],
-        "Equity_EU": [0.017, -0.009, 0.014, 0.004, 0.006],
-        "Credit_US": [0.009, 0.008, 0.007, 0.006, 0.008],
-        "Govt_Bonds": [0.004, 0.003, 0.005, 0.002, 0.004],
-    }
-)
-
-dist = AssetsDistribution(scenarios=scenarios)
-wrapper = PortfolioWrapper(dist)
-wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
-
-frontier = wrapper.mean_variance_frontier(num_portfolios=20)
-weights, expected_return, risk = frontier.get_tangency_portfolio(risk_free_rate=0.001)
-
-print(weights.round(4))
-print(f"Expected return: {expected_return:.4%} | Volatility: {risk:.4%}")
-
-# Relaxed risk parity (Gambeta & Kwon, 2020)
-rrp_frontier = wrapper.relaxed_risk_parity_frontier(num_portfolios=4, max_multiplier=1.5, lambda_reg=0.25)
-print(rrp_frontier.metadata)
+R = pd.DataFrame({"A":[0.01,-0.02,0.015],"B":[0.007,0.003,0.004]})
+port = PortfolioWrapper(AssetsDistribution(scenarios=R))
+port.set_constraints({"long_only": True, "total_weight": 1.0})
+front = port.mean_variance_frontier(num_portfolios=20)
+w, ret, risk = front.get_tangency_portfolio(risk_free_rate=0.01)
 ```
 
-## Example gallery
+## Examples & notebooks
 
-The `examples/` directory mirrors the workflows showcased in the documentation
-and notebooks:
-
-| Script | What it shows |
-| ------ | ------------- |
-| `mean_variance_frontier.py` | Build and interrogate a classical efficient frontier |
-| `cvar_allocation.py` | Optimise against CVaR with scenario probabilities and inspect the tangency portfolio |
-| `robust_frontier.py` | Trace Meucci’s λ-frontier to understand estimation risk budgets |
-| `relaxed_risk_parity_frontier.py` | Explore relaxed risk parity targets and diagnostics |
-| `discrete_allocation.py` | Turn continuous weights into tradeable share counts |
-| `portfolio_ensembles.py` | Blend multiple risk models via exposure averaging and stacking |
-
-Jupyter notebooks (`Example_01.ipynb`, `Bayesian.ipynb`, `Flexible_Views.ipynb`,
-`Simple_views_on_mean.ipynb`) provide annotated walkthroughs of the same
-concepts using richer datasets.
-
-> 📘 **Documentation:** Read the full guide and API reference at
-> [py-vallocation.readthedocs.io](https://py-vallocation.readthedocs.io/).
+- Scripts live in `examples/` (see `examples/README.md`). Highlights:
+  - `quickstart_etf_allocation.py` – moments → frontiers → ensemble → trades
+  - `mean_variance_frontier.py`, `cvar_allocation.py`, `robust_frontier.py`
+  - `relaxed_risk_parity_frontier.py`, `portfolio_ensembles.py`, `discrete_allocation.py`
+- Notebooks (`examples/*.ipynb`) mirror the tutorials.
 
 ## Requirements
 
 - Python 3.8+
-- `numpy>=1.20`
-- `pandas>=1.0`
-- `scipy>=1.10`
-- `cvxopt>=1.2`
+- numpy, pandas, scipy, cvxopt
 
-## Development status
+## Documentation
 
-**Alpha release** – under active development. Expect sharp edges and potential
-API changes as we finalise behaviour across the optimisation back-ends.
+Build locally:
 
-## Underlying literature
+```bash
+python -m pip install -e .[robust]
+sphinx-build -b html docs docs/_build/html
+```
+
+Open `docs/_build/html/index.html` for tutorials and API reference.
+
+## References
 
 - Meucci, A. (2008). Fully Flexible Views: Theory and Practice. https://ssrn.com/abstract=1213325
 - Black, F., & Litterman, R. (1992). Global Portfolio Optimization. https://doi.org/10.2469/faj.v48.n5.28
 - Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices. https://doi.org/10.1016/S0047-259X(03)00096-4
+- Ledoit, O., & Wolf, M. (2020). Analytical Nonlinear Shrinkage of Large-Dimensional Covariance Matrices. https://www.jstor.org/stable/27028732
+- Chen, Y., Wiesel, A., Eldar, Y. C., & Hero, A. O. (2010). Shrinkage Algorithms for MMSE Covariance Estimation. https://doi.org/10.1109/TSP.2010.2053029
+- Fan, J., Liao, Y., & Mincheva, M. (2013). Large covariance estimation by thresholding principal orthogonal complements. https://doi.org/10.1093/biomet/ass070
+- Tyler, D. E. (1987). A distribution-free M-estimator of multivariate scatter. https://www.jstor.org/stable/2241079
 - Jorion, P. (1986). Bayes-Stein Estimation for Portfolio Analysis. https://doi.org/10.2307/2331042
+- Friedman, J., Hastie, T., & Tibshirani, R. (2008). Sparse inverse covariance estimation with the graphical lasso. https://doi.org/10.1093/biostatistics/kxm045
 - Rockafellar, R. T., & Uryasev, S. (2000). Optimization of Conditional Value-at-Risk. 10.21314/JOR.2000.038
 - Markowitz, H. (1952). Portfolio Selection. https://doi.org/10.2307/2975974
 - Idzorek, T. (2005). A Step-by-Step Guide to the Black-Litterman Model. https://people.duke.edu/~charvey/Teaching/BA453_2006/Idzorek_onBL.pdf
 - Meucci, A. (2005). Robust Bayesian Allocation, https://dx.doi.org/10.2139/ssrn.681553
 - Vorobets, A. (2021). Sequential Entropy Pooling Heuristics, http://dx.doi.org/10.2139/ssrn.3936392
+- Vorobets, A. (2024). Derivatives Portfolio Optimization and Parameter Uncertainty. https://ssrn.com/abstract=4825945
 
 ## Contributing
 
-Pull requests and issue reports are welcome! Start with
-[CONTRIBUTING.md](CONTRIBUTING.md) and open a discussion if you would like to
-collaborate on new risk models or data utilities.
+Issues and pull requests are welcome. Please see `CONTRIBUTING.md`.
 
 ## License
 
@@ -124,6 +102,6 @@ GPL-3.0-or-later – see [LICENSE](LICENSE) for the full text. Portions of the
 optimisation routines are adapted (with attribution) from
 [fortitudo-tech](https://github.com/fortitudo-tech/fortitudo.tech).
 
-## Star history
+---
 
-[![Star History Chart](https://api.star-history.com/svg?repos=enexqnt/Py-vAllocation&type=Date)](https://www.star-history.com/#enexqnt/Py-vAllocation&Date)
+Copyright © enexqnt. GPL‑3.0‑or‑later.

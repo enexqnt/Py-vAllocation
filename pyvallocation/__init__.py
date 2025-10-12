@@ -5,8 +5,19 @@ __all__ = [
     "PortfolioFrontier",
     "PortfolioWrapper",
     "estimate_sample_moments",
+    "estimate_moments",
     "shrink_mean_jorion",
+    "shrink_mean_james_stein",
+    "robust_mean_huber",
+    "robust_mean_median_of_means",
     "shrink_covariance_ledoit_wolf",
+    "shrink_covariance_oas",
+    "shrink_covariance_nls",
+    "factor_covariance_poet",
+    "robust_covariance_tyler",
+    "sparse_precision_glasso",
+    "posterior_moments_black_litterman",
+    "posterior_moments_niw",
     "generate_uniform_probabilities",
     "generate_exp_decay_probabilities",
     "silverman_bandwidth",
@@ -30,14 +41,27 @@ __all__ = [
     "exposure_stacking",
     "average_frontiers",
     "exposure_stack_frontiers",
+    "assemble_portfolio_ensemble",
+    "make_portfolio_spec",
     "plot_frontiers",
 ]
 
 from .portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper
 from .moments import (
     estimate_sample_moments,
+    estimate_moments,
+    factor_covariance_poet,
+    posterior_moments_black_litterman,
+    posterior_moments_niw,
+    robust_covariance_tyler,
+    robust_mean_huber,
+    robust_mean_median_of_means,
+    shrink_covariance_nls,
     shrink_covariance_ledoit_wolf,
+    shrink_covariance_oas,
+    shrink_mean_james_stein,
     shrink_mean_jorion,
+    sparse_precision_glasso,
 )
 from .optimization import MeanCVaR, MeanVariance, RelaxedRiskParity, RobustOptimizer
 from .probabilities import (
@@ -58,7 +82,9 @@ from .discrete_allocation import (
 from .ensembles import (
     average_exposures,
     average_frontiers,
+    assemble_portfolio_ensemble,
     exposure_stack_frontiers,
     exposure_stacking,
+    make_portfolio_spec,
 )
 from .plotting import plot_frontiers

@@ -86,13 +86,10 @@ def main() -> None:
         frontiers[(mean_key, cov_key)] = frontier
         chosen_weights[(mean_key, cov_key)] = select_portfolio(frontier, max_vol=MAX_ANNUALISED_VOL)
 
-    asset_names = next(iter(chosen_weights.values())).index
-    samples = np.column_stack([weights.values for weights in chosen_weights.values()])
-    average = average_exposures(samples)
-    stacked = exposure_stacking(samples, L=min(3, samples.shape[1]))
-
-    average_series = pd.Series(average, index=asset_names, name="Average Ensemble")
-    stacked_series = pd.Series(stacked, index=asset_names, name="Exposure Stacking")
+    samples_df = pd.concat(chosen_weights.values(), axis=1)
+    samples_df.columns = [f"{mean}|{cov}" for mean, cov in chosen_weights.keys()]
+    average_series = average_exposures(samples_df)
+    stacked_series = exposure_stacking(samples_df, L=min(3, samples_df.shape[1]))
 
     print("\n=== Ensemble averages across specifications ===")
     print(average_series.round(4))

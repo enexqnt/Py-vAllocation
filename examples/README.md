@@ -1,30 +1,53 @@
-# Examples
+Examples
+========
 
-This directory collects runnable scripts and Jupyter notebooks showing typical
-allocation workflows.
+Practical, runnable workflows live here. Use them as entry points and
+as references for your own projects.
 
-Python scripts
---------------
-
-- `mean_variance_frontier.py`: classical mean-variance frontier with summary statistics.
-- `cvar_allocation.py`: minimum-CVaR portfolio and tangency portfolio on the CVaR frontier.
-- `robust_frontier.py`: Meucci-style robust frontier parameterised by λ.
-- `relaxed_risk_parity_frontier.py`: relaxed risk parity target sweep with per-point diagnostics.
-- `discrete_allocation.py`: convert continuous weights into lot-sized trades.
-- `portfolio_ensembles.py`: combine multiple frontiers using the ensembling helpers.
-
-Execute a script directly after installing the project dependencies:
+How to run
+----------
 
 ```bash
-python examples/portfolio_ensembles.py
+# from the repository root
+python -m pip install -e .[robust]
+
+# run any example
+python examples/quickstart_etf_allocation.py
 ```
+
+Quickstarts
+-----------
+
+- `quickstart_etf_allocation.py` – end-to-end ETF allocation (moments → frontiers → ensemble → discrete trades). 
+  Writes results under `output/` with plots (`frontiers_vol.png`, `frontiers_cvar.png`) and CSVs.
+
+Frontiers & risk models
+-----------------------
+
+- `mean_variance_frontier.py` – classical mean–variance frontier with tangency/min-risk picks.
+- `cvar_allocation.py` – CVaR frontier (α=5%) and tangency portfolio.
+- `robust_frontier.py` – Meucci-style robust frontier over λ.
+- `relaxed_risk_parity_frontier.py` – relaxed risk parity sweep with diagnostics.
+
+Utilities
+---------
+
+- `discrete_allocation.py` – transform continuous weights into lot-sized share counts.
+- `portfolio_ensembles.py` – stack/average multiple model selections into a single allocation.
+
+Data
+----
+
+- `ETF_prices.csv` – small, self-contained dataset used by most examples.
 
 Notebooks
 ---------
 
-- `Example_01.ipynb`: detailed walkthrough of the mean-variance API.
-- `Bayesian.ipynb`, `Flexible_Views.ipynb`, `Simple_views_on_mean.ipynb`: view-based
-  workflows that reuse `ETF_prices.csv`.
+Launch Jupyter in the repo root and open any of the notebooks:
 
-Launch `jupyter lab` or `jupyter notebook` in the project root to explore the notebooks.
-Each notebook contains guidance and setup notes in the opening cells.
+- `Example_01.ipynb` – getting started with the API.
+- `Simple_views_on_mean.ipynb` – simple mean views.
+- `Bayesian.ipynb` – Black–Litterman and Bayesian ideas.
+- `Flexible_Views.ipynb` – entropy pooling and flexible constraints.
+
+Tip: the `docs/` site mirrors these workflows in tutorial form if you prefer static pages.

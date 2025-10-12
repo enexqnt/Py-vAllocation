@@ -1,0 +1,8 @@
+,model,horizon,optimiser,mean_estimator,cov_estimator,use_scenarios
+Shrinkage_MV,Shrinkage,1Y,mean_variance,james_stein,oas,False
+NLS_MV,NLS,1Y,mean_variance,james_stein,nls,False
+Robust_RRP,Robust,1Y,rrp,huber,tyler,False
+Robust_Bayes_MV,Robust-Bayes (NIW),1Y,mean_variance,sample,sample,False
+BL_MV,Black-Litterman,1Y,mean_variance,sample,sample,False
+EP_MV,Entropy Pooling,1Y,mean_variance,sample,sample,False
+EP_CVaR,CVaR (EP),1Y,cvar,sample,sample,True

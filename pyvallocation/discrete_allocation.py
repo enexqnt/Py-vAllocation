@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
@@ -136,12 +136,27 @@ def _build_result(inputs: DiscreteAllocationInput, raw_shares: pd.Series) -> Dis
 def allocate_greedy(
     inputs: DiscreteAllocationInput,
     max_iterations: Optional[int] = None,
+    *,
+    fallback_mode: str = "auto",
+    fallback_kwargs: Optional[Dict[str, Any]] = None,
 ) -> DiscreteAllocationResult:
-    """Greedy rounding of weights into integer share counts."""
+    """Greedy rounding of weights into integer share counts.
+
+    The allocator performs an initial floor pass followed by a deficit-driven
+    topping up routine. If the greedy loop cannot make progress (e.g. due to
+    a tight iteration cap), ``fallback_mode`` controls whether the MILP
+    allocator should be tried as a secondary attempt.
+    """
+
+    mode = (fallback_mode or "none").lower()
+    if mode not in {"auto", "milp", "none"}:
+        raise ValueError("`fallback_mode` must be one of {'auto', 'milp', 'none'}.")
 
     weights = inputs.weights.sort_values(ascending=False)
     prices = inputs.latest_prices.loc[weights.index]
     lot_sizes = inputs.lot_sizes.loc[weights.index]
+    cost_per_lot = prices * lot_sizes
+    tolerance = 1e-12
 
     shares = pd.Series(0, index=weights.index, dtype=int)
     available_cash = float(inputs.total_value)
@@ -150,44 +165,95 @@ def allocate_greedy(
     for asset, weight in weights.items():
         price = prices[asset]
         lot_size = lot_sizes[asset]
-        cost_per_lot = price * lot_size
-        if cost_per_lot > available_cash:
+        lot_cost = float(price * lot_size)
+        if lot_cost > available_cash:
             continue
         target_cash = weight * inputs.total_value
-        lots = int(np.floor(target_cash / cost_per_lot))
+        lots = int(np.floor(target_cash / lot_cost))
         if lots <= 0:
             continue
-        cost = lots * cost_per_lot
+        cost = lots * lot_cost
         shares[asset] += lots * lot_size
         available_cash -= cost
 
-    min_cost = float((prices * lot_sizes).min())
+    min_cost = float(cost_per_lot.min())
     if max_iterations is None:
         max_iterations = max(len(weights) * 100, 1)
 
     iteration = 0
-    while available_cash + 1e-12 >= min_cost and iteration < max_iterations:
+    unaffordable: set[str] = set()
+    last_deficits = weights.copy()
+    terminated_via_break = False
+
+    while available_cash + tolerance >= min_cost and iteration < max_iterations:
         values = shares * prices
-        invested = values.sum()
+        invested = float(values.sum())
         if invested <= 0:
-            break
-        current_weights = values / invested
-        deficits = weights - current_weights
+            current_weights = pd.Series(0.0, index=weights.index)
+            deficits = weights.copy()
+        else:
+            current_weights = values / invested
+            deficits = weights - current_weights
+
         deficits[deficits < 0] = 0.0
-        if deficits.max() <= 1e-12:
+        if unaffordable:
+            deficits.loc[list(unaffordable)] = 0.0
+
+        last_deficits = deficits
+
+        if deficits.max() <= tolerance:
+            terminated_via_break = True
             break
         candidate = deficits.idxmax()
         price = prices[candidate]
         lot_size = lot_sizes[candidate]
-        cost_per_lot = price * lot_size
-        if cost_per_lot > available_cash + 1e-12:
-            deficits[candidate] = 0
-            if deficits.max() <= 1e-12:
+        candidate_cost = float(cost_per_lot[candidate])
+
+        if candidate_cost > available_cash + tolerance:
+            unaffordable.add(candidate)
+            if len(unaffordable) == len(weights):
+                terminated_via_break = True
                 break
             continue
-        shares[candidate] += lot_size
-        available_cash -= cost_per_lot
+
+        # Desired additional investment for this asset.
+        desired_cash = deficits[candidate] * inputs.total_value
+        possible_lots = int(np.floor((available_cash + tolerance) / candidate_cost))
+        target_lots = int(np.floor(desired_cash / candidate_cost)) if candidate_cost > 0 else 0
+        lots_to_buy = min(possible_lots, max(target_lots, 1))
+
+        if lots_to_buy <= 0:
+            unaffordable.add(candidate)
+            if len(unaffordable) == len(weights):
+                terminated_via_break = True
+                break
+            continue
+
+        shares[candidate] += lots_to_buy * lot_size
+        available_cash -= lots_to_buy * candidate_cost
         iteration += 1
+
+        if candidate in unaffordable:
+            unaffordable.remove(candidate)
+
+    max_iterations_exhausted = max_iterations is not None and iteration >= max_iterations and not terminated_via_break
+
+    should_try_fallback = False
+    if mode in {"auto", "milp"}:
+        still_cash_for_min_lot = available_cash + tolerance >= min_cost
+        large_deficit_left = float(last_deficits.max()) > 1e-6
+        allocated_nothing = shares.sum() == 0 and inputs.total_value + tolerance >= min_cost
+
+        if max_iterations_exhausted or (still_cash_for_min_lot and large_deficit_left) or allocated_nothing:
+            should_try_fallback = True
+
+    if should_try_fallback:
+        fallback_args = fallback_kwargs or {}
+        try:
+            return allocate_mip(inputs, **fallback_args)
+        except Exception:
+            if mode == "milp":
+                raise
 
     return _build_result(inputs, shares)
 
