@@ -18,6 +18,7 @@ __all__ = [
     # "Optimization",
     "MeanVariance",
     "MeanCVaR",
+    "RelaxedRiskParity",
     "RobustOptimizer",
     "build_G_h_A_b",
     "discretize_weights",
@@ -38,7 +39,7 @@ from .moments import (
     shrink_covariance_ledoit_wolf,
     shrink_mean_jorion,
 )
-from .optimization import MeanCVaR, MeanVariance, RobustOptimizer
+from .optimization import MeanCVaR, MeanVariance, RelaxedRiskParity, RobustOptimizer
 from .probabilities import (
     compute_effective_number_scenarios,
     generate_exp_decay_probabilities,

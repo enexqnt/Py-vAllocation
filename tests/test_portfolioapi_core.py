@@ -80,3 +80,64 @@ def test_robust_lambda_frontier_rejects_negative_lambdas():
     wrapper = _build_long_only_wrapper()
     with pytest.raises(ValueError):
         wrapper.robust_lambda_frontier(lambdas=[-0.1, 0.2])
+
+
+def test_relaxed_risk_parity_portfolio_returns_diagnostics():
+    wrapper = _build_long_only_wrapper()
+    weights, diagnostics = wrapper.relaxed_risk_parity_portfolio()
+
+    assert isinstance(weights, pd.Series)
+    assert pytest.approx(weights.sum(), abs=1e-8) == 1.0
+    assert "risk_contributions" in diagnostics
+    assert diagnostics["risk_contributions"].shape == (2,)
+    assert diagnostics["target_return"] is not None
+    assert diagnostics["achieved_return"] >= diagnostics["target_return"] - 1e-6
+
+
+def test_relaxed_risk_parity_portfolio_allows_risk_parity_fallback():
+    wrapper = _build_long_only_wrapper()
+    weights, diagnostics = wrapper.relaxed_risk_parity_portfolio(lambda_reg=0.0, target_multiplier=None)
+
+    assert diagnostics["target_return"] is None
+    contributions = diagnostics["risk_contributions"]
+    np.testing.assert_allclose(contributions / contributions.sum(), np.full(2, 0.5), atol=1e-4)
+
+
+def test_relaxed_risk_parity_frontier_shapes_and_metadata():
+    wrapper = _build_long_only_wrapper()
+    frontier = wrapper.relaxed_risk_parity_frontier(
+        num_portfolios=3,
+        max_multiplier=1.4,
+        lambda_reg=0.3,
+    )
+
+    assert frontier.weights.shape == (2, 4)  # RP anchor + 3 relaxed points
+    assert frontier.returns.shape == (4,)
+    assert frontier.risks.shape == (4,)
+    assert frontier.metadata is not None
+    assert len(frontier.metadata) == frontier.weights.shape[1]
+    assert frontier.risk_measure.startswith("Volatility")
+
+    anchor_meta = frontier.metadata[0]
+    assert anchor_meta["lambda_reg"] == 0.0
+    assert anchor_meta["target_multiplier"] is None
+
+    for meta in frontier.metadata[1:]:
+        assert meta["lambda_reg"] == pytest.approx(0.3)
+        assert meta["target_multiplier"] >= 1.0
+        assert meta["effective_target"] is None or meta["effective_target"] >= 0.0
+
+
+def test_relaxed_risk_parity_frontier_without_anchor():
+    wrapper = _build_long_only_wrapper()
+    multipliers = [1.0, 1.2]
+    frontier = wrapper.relaxed_risk_parity_frontier(
+        lambda_reg=0.1,
+        target_multipliers=multipliers,
+        include_risk_parity=False,
+    )
+
+    assert frontier.weights.shape == (2, len(multipliers))
+    assert frontier.metadata is not None
+    recorded = [meta["target_multiplier"] for meta in frontier.metadata]
+    np.testing.assert_allclose(recorded, multipliers, atol=1e-8)

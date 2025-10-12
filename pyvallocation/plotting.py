@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Mapping, Optional, Sequence, Tuple, Union, TYPE_CHECKING
+from typing import Callable, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 
@@ -56,24 +56,43 @@ def _resolve_highlight(
     marker: str,
     *,
     risk_free_rate: Optional[float],
-) -> Optional[Tuple[str, float, float, "pd.Series"]]:
+) -> Optional[Tuple[str, float, float, "pd.Series", int]]:
     if marker == "min_risk":
-        weights, target_return, target_risk = frontier.get_min_risk_portfolio()
+        idx = int(np.argmin(frontier.risks))
+        target_risk = float(frontier.risks[idx])
+        target_return = float(frontier.returns[idx])
+        weights = frontier._to_pandas(frontier.weights[:, idx], "Min Risk Portfolio")
         name = "Min Risk"
     elif marker == "max_return":
-        weights, target_return, target_risk = frontier.get_max_return_portfolio()
+        idx = int(np.argmax(frontier.returns))
+        target_risk = float(frontier.risks[idx])
+        target_return = float(frontier.returns[idx])
+        weights = frontier._to_pandas(frontier.weights[:, idx], "Max Return Portfolio")
         name = "Max Return"
     elif marker == "tangency":
         if risk_free_rate is None:
             raise ValueError("Highlighting the tangency portfolio requires `risk_free_rate`.")
-        weights, target_return, target_risk = frontier.get_tangency_portfolio(risk_free_rate)
+        if np.all(np.isclose(frontier.risks, 0)):
+            return None
+        with np.errstate(divide="ignore", invalid="ignore"):
+            sharpe_ratios = (frontier.returns - risk_free_rate) / frontier.risks
+        sharpe_ratios[~np.isfinite(sharpe_ratios)] = -np.inf
+        idx = int(np.argmax(sharpe_ratios))
+        if not np.isfinite(frontier.returns[idx]) or not np.isfinite(frontier.risks[idx]):
+            return None
+        target_risk = float(frontier.risks[idx])
+        target_return = float(frontier.returns[idx])
+        weights = frontier._to_pandas(
+            frontier.weights[:, idx],
+            f"Tangency Portfolio (rf={risk_free_rate:.2%})",
+        )
         name = f"Tangency (rf={risk_free_rate:.2%})"
     else:
         raise ValueError(f"Unknown highlight '{marker}'.")
 
     if not (np.isfinite(target_return) and np.isfinite(target_risk)):
         return None
-    return name, float(target_risk), float(target_return), weights
+    return name, target_risk, target_return, weights, idx
 
 
 def plot_frontiers(
@@ -89,6 +108,8 @@ def plot_frontiers(
     scatter_kwargs: Optional[Mapping[str, object]] = None,
     risk_label: Optional[str] = None,
     return_label: str = "Expected Return",
+    highlight_metadata_keys: Optional[Sequence[str]] = None,
+    metadata_value_formatter: Optional[Callable[[str, object], str]] = None,
 ):
     """Plot one or more efficient frontiers.
 
@@ -107,6 +128,11 @@ def plot_frontiers(
         risk_label: Axis label for the risk dimension. If omitted, use the common
             risk measure when all frontiers agree, otherwise default to ``"Risk"``.
         return_label: Axis label for expected returns.
+        highlight_metadata_keys: Optional iterable of metadata field names to append
+            to highlight labels when the underlying :class:`PortfolioFrontier`
+            exposes ``metadata``.
+        metadata_value_formatter: Optional callable used to render metadata values
+            in highlight labels. Receives ``(key, value)`` and must return a string.
 
     Returns:
         The matplotlib ``Axes`` containing the plot. The axis is also populated
@@ -124,6 +150,15 @@ def plot_frontiers(
     scatter_kwargs = dict(scatter_kwargs or {})
     marker_kwargs = marker_kwargs or {}
     highlight_records = []
+    metadata_keys = tuple(highlight_metadata_keys) if highlight_metadata_keys else tuple()
+
+    if metadata_value_formatter is None:
+        def _default_metadata_formatter(key: str, value: object) -> str:
+            if isinstance(value, (float, np.floating)):
+                return f"{key}={value:.4f}"
+            return f"{key}={value}"
+    else:
+        _default_metadata_formatter = metadata_value_formatter
 
     for supplied_label, frontier in normalized:
         label = supplied_label or frontier.risk_measure
@@ -134,7 +169,10 @@ def plot_frontiers(
             resolved = _resolve_highlight(frontier, marker, risk_free_rate=risk_free_rate)
             if resolved is None:
                 continue
-            display_name, risk_value, return_value, weights = resolved
+            display_name, risk_value, return_value, weights, idx = resolved
+            metadata_entry = (
+                frontier.metadata[idx] if frontier.metadata and idx < len(frontier.metadata) else None
+            )
 
             style = {
                 "color": colour,
@@ -144,7 +182,22 @@ def plot_frontiers(
             style.update(scatter_kwargs)
             style.update(marker_kwargs.get(marker, {}))
 
-            ax.scatter(risk_value, return_value, label=f"{label} – {display_name}", **style)
+            highlight_label = f"{label} – {display_name}"
+            if metadata_entry and metadata_keys:
+                tokens: List[str] = []
+                for key in metadata_keys:
+                    if key not in metadata_entry:
+                        continue
+                    value = metadata_entry[key]
+                    if value is None:
+                        continue
+                    formatted = _default_metadata_formatter(key, value)
+                    if formatted:
+                        tokens.append(formatted)
+                if tokens:
+                    highlight_label = f"{highlight_label} ({', '.join(tokens)})"
+
+            ax.scatter(risk_value, return_value, label=highlight_label, **style)
             highlight_records.append(
                 {
                     "frontier": label,
@@ -153,6 +206,8 @@ def plot_frontiers(
                     "return": return_value,
                     "risk_measure": frontier.risk_measure,
                     "weights": weights,
+                    "index": idx,
+                    "metadata": metadata_entry,
                 }
             )
 

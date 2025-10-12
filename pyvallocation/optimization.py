@@ -160,6 +160,45 @@ class OptimizationResult:
     nominal_return: float
     risk: float
 
+
+@dataclass(frozen=True)
+class RelaxedRiskParityResult:
+    r"""
+    Result container for the relaxed risk parity SOCP.
+
+    Attributes
+    ----------
+    weights :
+        Optimal long-only allocations :math:`x^{\\star}` (shape ``(n,)``).
+    marginal_risk :
+        Marginal risk vector :math:`\\zeta^{\\star} = \\Sigma x^{\\star}`.
+    psi :
+        Optimal average-risk proxy :math:`\\psi^{\\star}`.
+    gamma :
+        Optimal ARC floor :math:`\\gamma^{\\star}`; enforces the lower risk contribution
+        bound :math:`x_i \\zeta_i \\ge \\gamma^2`.
+    rho :
+        Regulator slack variable :math:`\\rho^{\\star}` that upper bounds the diagonal
+        risk penalty :math:`\\lambda\\,x^{\\top}\\Theta x`.
+    objective :
+        Optimal value of :math:`\\psi - \\gamma`, i.e. the gap between the average-risk
+        ceiling and the ARC floor.
+    target_return :
+        Effective return constraint :math:`\\mu^{\\top}x \\ge R` imposed at optimality.
+        May differ from the requested target when clipping was required.
+    max_return :
+        Feasible bound on the return target under the supplied constraints. ``None`` if
+        no target was requested.
+    """
+    weights: npt.NDArray[np.floating]
+    marginal_risk: npt.NDArray[np.floating]
+    psi: float
+    gamma: float
+    rho: float
+    objective: float
+    target_return: float | None
+    max_return: float | None
+
 # ------------------------------------------------------------------ #
 # Base class
 # ------------------------------------------------------------------ #
@@ -734,3 +773,328 @@ class RobustOptimizer(_BaseOptimization):
         x = np.asarray(sol["x"]).ravel()
         w, t = x[:n], x[n]
         return OptimizationResult(w, float(self._mean @ w), float(t))
+
+
+# =================================================================== #
+# 4.  RELAXED RISK PARITY (SOCP)
+# =================================================================== #
+class RelaxedRiskParity(_BaseOptimization):
+    r"""
+    Implement the relaxed risk parity model of Gambeta & Kwon (2020).
+
+    The decision vector is ordered as
+
+    .. code-block:: text
+
+        [ x (n) | ζ (n) | ψ | γ | ρ | q ],
+
+    with ``q`` acting as the auxiliary variable that nests the average-risk
+    constraint into standard SOC blocks. Long-only holdings, non-negative
+    marginal risks, and the regulator variable are enforced explicitly.
+
+    The formulation minimises :math:`\\psi - \\gamma` subject to:
+
+    * marginal risk consistency :math:`\\zeta = \\Sigma x`;
+    * budget constraint :math:`\\mathbf{1}^{\\top}x = 1`;
+    * ARC floor :math:`x_i\\zeta_i \\ge \\gamma^2` (realised via rotated second-order cones);
+    * regulated average risk :math:`\\|Lx\\|_2 \\le q`, :math:`\\|(q,\\sqrt{n}\\rho)\\|_2 \\le \\sqrt{n}\\psi`;
+    * diagonal penalty :math:`\\sqrt{\\lambda}\\,\\|D x\\|_2 \\le \\rho` whenever :math:`\\lambda > 0`;
+    * optional return target :math:`\\mu^{\\top}x \\ge R`.
+
+    All conic blocks are expressed in a solver-ready format compatible with
+    ``cvxopt.solvers.conelp``.
+    """
+
+    def __init__(
+        self,
+        mean: npt.ArrayLike,
+        covariance: npt.ArrayLike,
+        G: Optional[npt.ArrayLike] = None,
+        h: Optional[npt.ArrayLike] = None,
+        A: Optional[npt.ArrayLike] = None,
+        b: Optional[npt.ArrayLike] = None,
+    ):
+        cov = np.asarray(covariance, dtype=float)
+        if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
+            raise ValueError("`covariance` must be a square matrix.")
+        cov = 0.5 * (cov + cov.T)
+
+        super()._init_constraints(mean, G, h, A, b)
+        if cov.shape[0] != self._I:
+            raise ValueError("`mean` and `covariance` dimensions are inconsistent.")
+
+        self._cov = cov
+        self._chol = _cholesky_pd(cov)
+        diag = np.clip(np.diag(cov), a_min=0.0, a_max=None)
+        self._theta_sqrt = np.sqrt(diag, dtype=float)
+        self._finalise_expected_row(self._I + 4)
+
+    # ------------------------------------------------------------------ #
+    # core SOCP
+    # ------------------------------------------------------------------ #
+    def solve(
+        self,
+        *,
+        lambda_reg: float = 0.0,
+        return_target: float | None = None,
+        min_target: float | None = None,
+    ) -> RelaxedRiskParityResult:
+        r"""
+        Solve the relaxed risk parity SOCP for a given ``lambda_reg`` and
+        optional target return ``return_target``.
+        """
+        if lambda_reg < 0:
+            raise ValueError("`lambda_reg` must be non-negative.")
+        if return_target is not None and (not np.isfinite(return_target)):
+            raise ValueError("`return_target` must be a finite scalar.")
+
+        n = self._I
+        x_slice = slice(0, n)
+        zeta_slice = slice(n, 2 * n)
+        psi_idx = 2 * n
+        gamma_idx = 2 * n + 1
+        rho_idx = 2 * n + 2
+        q_idx = 2 * n + 3
+        n_vars = 2 * n + 4
+
+        G_user, h_user, A_user, b_user = self._extract_user_constraints()
+
+        target_used = return_target
+        max_return_value: float | None = None
+        if return_target is not None:
+            max_return_value = self._max_linear_return(G_user, h_user, A_user, b_user)
+            tolerance = max(1e-8, 1e-3 * abs(max_return_value))
+            if target_used >= max_return_value - tolerance:
+                target_used = max_return_value - tolerance
+            if min_target is not None and target_used is not None:
+                target_used = max(target_used, min_target)
+
+        c = np.zeros(n_vars, dtype=float)
+        c[psi_idx] = 1.0
+        c[gamma_idx] = -1.0
+
+        # --- equalities ------------------------------------------------ #
+        A_rows: list[np.ndarray] = []
+        b_rows: list[np.ndarray] = []
+
+        A_rows.append(
+            np.hstack(
+                (-self._cov, np.eye(n, dtype=float), np.zeros((n, 4), dtype=float))
+            )
+        )
+        b_rows.append(np.zeros(n, dtype=float))
+
+        add_budget_row = True
+        if A_user is not None:
+            ones = np.ones(n, dtype=float)
+            for row, rhs in zip(A_user, b_user):
+                if np.allclose(row, ones, atol=1e-8, rtol=1e-8):
+                    add_budget_row = False
+                    break
+
+        if add_budget_row:
+            budget_row = np.zeros((1, n_vars), dtype=float)
+            budget_row[0, x_slice] = 1.0
+            A_rows.append(budget_row)
+            b_rows.append(np.array([1.0], dtype=float))
+
+        if A_user is not None and A_user.size:
+            pad = np.zeros((A_user.shape[0], n + 4), dtype=float)
+            A_rows.append(np.hstack((A_user, pad)))
+            b_rows.append(b_user)
+
+        A_mat = np.vstack(A_rows)
+        b_vec = np.hstack(b_rows)
+
+        # --- linear inequalities -------------------------------------- #
+        G_blocks: list[np.ndarray] = []
+        h_blocks: list[np.ndarray] = []
+
+        G_blocks.append(
+            np.hstack(
+                (-np.eye(n, dtype=float), np.zeros((n, n + 4), dtype=float))
+            )
+        )
+        h_blocks.append(np.zeros(n, dtype=float))
+
+        G_blocks.append(
+            np.hstack(
+                (np.zeros((n, n), dtype=float), -np.eye(n, dtype=float), np.zeros((n, 4), dtype=float))
+            )
+        )
+        h_blocks.append(np.zeros(n, dtype=float))
+
+        for idx in (psi_idx, gamma_idx, rho_idx):
+            row = np.zeros((1, n_vars), dtype=float)
+            row[0, idx] = -1.0
+            G_blocks.append(row)
+            h_blocks.append(np.zeros(1, dtype=float))
+
+        if G_user is not None and G_user.size:
+            pad = np.zeros((G_user.shape[0], n + 4), dtype=float)
+            G_blocks.append(np.hstack((G_user, pad)))
+            h_blocks.append(h_user)
+
+        if target_used is not None:
+            G_ret = np.zeros((1, n_vars), dtype=float)
+            G_ret[0, x_slice] = -self._mean
+            G_blocks.append(G_ret)
+            h_blocks.append(np.array([-target_used], dtype=float))
+
+        if G_blocks:
+            G_lin = np.vstack(G_blocks)
+            h_lin = np.hstack(h_blocks)
+        else:
+            G_lin = np.empty((0, n_vars), dtype=float)
+            h_lin = np.empty(0, dtype=float)
+
+        # --- SOC blocks ----------------------------------------------- #
+        soc_dims: list[int] = []
+        G_soc_all: list[np.ndarray] = []
+        h_soc_all: list[np.ndarray] = []
+
+        G1 = np.zeros((n + 1, n_vars), dtype=float)
+        G1[0, q_idx] = -1.0
+        G1[1:, x_slice] = -self._chol
+        G_soc_all.append(G1)
+        h_soc_all.append(np.zeros(n + 1, dtype=float))
+        soc_dims.append(n + 1)
+
+        sqrt_n = float(np.sqrt(n))
+        G2 = np.zeros((3, n_vars), dtype=float)
+        G2[0, psi_idx] = -sqrt_n
+        G2[1, q_idx] = -1.0
+        G2[2, rho_idx] = -sqrt_n
+        G_soc_all.append(G2)
+        h_soc_all.append(np.zeros(3, dtype=float))
+        soc_dims.append(3)
+
+        if lambda_reg > 0.0:
+            G3 = np.zeros((n + 1, n_vars), dtype=float)
+            G3[0, rho_idx] = -1.0
+            coeffs = np.diag(np.sqrt(lambda_reg) * self._theta_sqrt, k=0)
+            G3[1:, x_slice] = -coeffs
+            G_soc_all.append(G3)
+            h_soc_all.append(np.zeros(n + 1, dtype=float))
+            soc_dims.append(n + 1)
+
+        for i in range(n):
+            block = np.zeros((3, n_vars), dtype=float)
+            block[0, x_slice.start + i] = -1.0
+            block[0, zeta_slice.start + i] = -1.0
+            block[1, gamma_idx] = -2.0
+            block[2, x_slice.start + i] = -1.0
+            block[2, zeta_slice.start + i] = 1.0
+            G_soc_all.append(block)
+            h_soc_all.append(np.zeros(3, dtype=float))
+            soc_dims.append(3)
+
+        dims = {"l": int(G_lin.shape[0]), "q": soc_dims, "s": []}
+        G_total = (
+            np.vstack([G_lin, *G_soc_all])
+            if G_lin.size
+            else np.vstack(G_soc_all)
+        )
+        h_total = (
+            np.hstack([h_lin, *h_soc_all])
+            if h_lin.size
+            else np.hstack(h_soc_all)
+        )
+
+        sol = solvers.conelp(
+            matrix(c),
+            matrix(G_total),
+            matrix(h_total),
+            dims=dims,
+            A=matrix(A_mat),
+            b=matrix(b_vec),
+        )
+        self._assert_optimal(sol, "SOCP")
+
+        x_opt = np.asarray(sol["x"], dtype=float).ravel()
+        weights = x_opt[x_slice]
+        marginal_risk = x_opt[zeta_slice]
+        psi = float(x_opt[psi_idx])
+        gamma = float(x_opt[gamma_idx])
+        rho = float(x_opt[rho_idx])
+
+        return RelaxedRiskParityResult(
+            weights=weights,
+            marginal_risk=marginal_risk,
+            psi=psi,
+            gamma=gamma,
+            rho=rho,
+            objective=psi - gamma,
+            target_return=target_used,
+            max_return=max_return_value,
+        )
+    def _extract_user_constraints(
+        self,
+    ) -> tuple[
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+    ]:
+        """Return user-supplied linear constraint matrices as NumPy arrays."""
+        n = self._I
+        G_user: Optional[np.ndarray] = None
+        h_user: Optional[np.ndarray] = None
+        if self._G is not None:
+            G_user = np.asarray(self._G, dtype=float)
+            if G_user.ndim != 2:
+                raise ValueError("`G` must be a 2D array.")
+            if G_user.shape[1] != n:
+                raise ValueError("`G` must have `n` columns.")
+            h_user = np.asarray(self._h, dtype=float).ravel()
+            if h_user.size != G_user.shape[0]:
+                raise ValueError("`h` dimension mismatch.")
+
+        A_user: Optional[np.ndarray] = None
+        b_user: Optional[np.ndarray] = None
+        if self._A is not None:
+            A_user = np.asarray(self._A, dtype=float)
+            if A_user.ndim != 2:
+                raise ValueError("`A` must be a 2D array.")
+            if A_user.shape[1] != n:
+                raise ValueError("`A` must have `n` columns.")
+            b_user = np.asarray(self._b, dtype=float).ravel()
+            if b_user.size != A_user.shape[0]:
+                raise ValueError("`b` dimension mismatch.")
+
+        return G_user, h_user, A_user, b_user
+
+    def _max_linear_return(
+        self,
+        G_user: Optional[np.ndarray],
+        h_user: Optional[np.ndarray],
+        A_user: Optional[np.ndarray],
+        b_user: Optional[np.ndarray],
+    ) -> float:
+        """Solve a linear program to compute the maximum attainable return."""
+        n = self._I
+        G_lp_rows: list[np.ndarray] = []
+        h_lp_vals: list[np.ndarray] = []
+        if G_user is not None and G_user.size:
+            G_lp_rows.append(G_user)
+            h_lp_vals.append(h_user)
+        G_lp_rows.append(-np.eye(n, dtype=float))
+        h_lp_vals.append(np.zeros(n, dtype=float))
+        G_lp = np.vstack(G_lp_rows)
+        h_lp = np.hstack(h_lp_vals)
+        if A_user is None:
+            A_lp = np.ones((1, n), dtype=float)
+            b_lp = np.array([1.0], dtype=float)
+        else:
+            A_lp, b_lp = A_user, b_user
+
+        sol_lp = solvers.lp(
+            matrix(-self._mean),
+            matrix(G_lp),
+            matrix(h_lp),
+            matrix(A_lp),
+            matrix(b_lp),
+            solver="glpk",
+        )
+        self._assert_optimal(sol_lp, "LP")
+        return -sol_lp["primal objective"]

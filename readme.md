@@ -13,6 +13,8 @@ Why practitioners and researchers use **Py-vAllocation**:
 
 - **Single interface, multiple solvers** – switch between variance, CVaR, and
   robust objectives without refactoring your pipeline.
+- **Relaxed risk parity** – reproduce Gambeta–Kwon’s return-target trade-off with
+  a native solver, metadata-rich diagnostics, and plotting-ready frontiers.
 - **Investor views made practical** – flexible entropy pooling and
   Black–Litterman utilities help you translate qualitative convictions into
   posterior scenarios.
@@ -58,6 +60,10 @@ weights, expected_return, risk = frontier.get_tangency_portfolio(risk_free_rate=
 
 print(weights.round(4))
 print(f"Expected return: {expected_return:.4%} | Volatility: {risk:.4%}")
+
+# Relaxed risk parity (Gambeta & Kwon, 2020)
+rrp_frontier = wrapper.relaxed_risk_parity_frontier(num_portfolios=4, max_multiplier=1.5, lambda_reg=0.25)
+print(rrp_frontier.metadata)
 ```
 
 ## Example gallery
@@ -70,6 +76,7 @@ and notebooks:
 | `mean_variance_frontier.py` | Build and interrogate a classical efficient frontier |
 | `cvar_allocation.py` | Optimise against CVaR with scenario probabilities and inspect the tangency portfolio |
 | `robust_frontier.py` | Trace Meucci’s λ-frontier to understand estimation risk budgets |
+| `relaxed_risk_parity_frontier.py` | Explore relaxed risk parity targets and diagnostics |
 | `discrete_allocation.py` | Turn continuous weights into tradeable share counts |
 | `portfolio_ensembles.py` | Blend multiple risk models via exposure averaging and stacking |
 

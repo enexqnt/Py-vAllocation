@@ -9,3 +9,4 @@ These short tutorials illustrate common allocation workflows using the library.
    mean_variance_frontier
    cvar_portfolio
    portfolio_ensembles
+   relaxed_risk_parity

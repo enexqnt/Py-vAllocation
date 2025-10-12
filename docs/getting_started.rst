@@ -44,12 +44,46 @@ The snippet below computes a compact mean-variance frontier using the high-level
     print(weights.round(4))
     print(f"Expected return: {expected_return:.4%} | Volatility: {risk:.4%}")
 
+Relaxed Risk Parity
+-------------------
+
+The relaxed risk parity solver (Gambeta & Kwon, 2020) is available through the
+same wrapper. It automatically solves for the benchmark risk parity portfolio,
+then sweeps relaxed targets sized by a multiplier ``m``:
+
+.. code-block:: python
+
+    import numpy as np
+    from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+
+    mu = np.array([0.08, 0.06, 0.05, 0.03])
+    cov = np.array(
+        [
+            [0.090, 0.040, 0.025, 0.010],
+            [0.040, 0.070, 0.020, 0.015],
+            [0.025, 0.020, 0.060, 0.018],
+            [0.010, 0.015, 0.018, 0.045],
+        ]
+    )
+
+    dist = AssetsDistribution(mu=mu, cov=cov)
+    wrapper = PortfolioWrapper(dist)
+    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+
+    frontier = wrapper.relaxed_risk_parity_frontier(num_portfolios=4, max_multiplier=1.5, lambda_reg=0.25)
+    weights = frontier.to_frame()
+    print(weights.round(4))
+
+Metadata attached to ``frontier.metadata`` documents the multiplier, target,
+and objective value for each point – ideal inputs for dashboarding or plotting.
+
 The :mod:`examples <pyvallocation.examples>` directory contains runnable scripts
 that reproduce the main workflows:
 
 * ``mean_variance_frontier.py`` – classical efficient frontier summary.
 * ``cvar_allocation.py`` – minimum-CVaR portfolio and tangency allocation.
 * ``robust_frontier.py`` – Meucci-style robust λ-frontier.
+* ``relaxed_risk_parity_frontier.py`` – relaxed risk parity frontier across return targets.
 * ``discrete_allocation.py`` – map continuous weights to share counts.
 * ``portfolio_ensembles.py`` – blend frontiers via exposure averaging/stacking.
 

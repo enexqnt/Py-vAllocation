@@ -11,7 +11,13 @@ import pandas as pd
 from .discrete_allocation import DiscreteAllocationResult, discretize_weights
 from .ensembles import average_exposures
 from .moments import estimate_sample_moments
-from .optimization import MeanCVaR, MeanVariance, RobustOptimizer
+from .optimization import (
+    MeanCVaR,
+    MeanVariance,
+    RelaxedRiskParity,
+    RelaxedRiskParityResult,
+    RobustOptimizer,
+)
 from .probabilities import generate_uniform_probabilities
 from .utils.constraints import build_G_h_A_b
 from .utils.functions import portfolio_cvar
@@ -191,12 +197,15 @@ class PortfolioFrontier:
         risks (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the risk values for each portfolio on the frontier. The specific risk measure (e.g., volatility, CVaR, uncertainty budget) is indicated by `risk_measure`.
         risk_measure (str): A string describing the risk measure used to construct this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)', 'Estimation Risk (‖Σ'¹/²w‖₂)').
         asset_names (Optional[List[str]]): An optional list of names for the assets. If provided, enables pandas Series/DataFrame output for portfolio weights.
+        metadata (Optional[List[Dict[str, Any]]]): Optional per-portfolio diagnostics. Each entry
+            maps diagnostic field names (e.g., ``target_multiplier``) to their values.
     """
     weights: npt.NDArray[np.floating]
     returns: npt.NDArray[np.floating]
     risks: npt.NDArray[np.floating]
     risk_measure: str
     asset_names: Optional[List[str]] = None
+    metadata: Optional[List[Dict[str, Any]]] = None
 
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
         index = self.asset_names if self.asset_names is not None else None
@@ -607,6 +616,61 @@ class PortfolioWrapper:
 
         return scenarios, probs, expected_returns
 
+    def _solve_relaxed_rp(
+        self,
+        optimizer: RelaxedRiskParity,
+        lambda_reg: float,
+        requested_target: Optional[float],
+        lower_bound: float,
+    ) -> Tuple[RelaxedRiskParityResult, Optional[str]]:
+        r"""
+        Solve the relaxed risk parity problem with defensive target fallback.
+
+        Parameters
+        ----------
+        optimizer :
+            Instance of :class:`pyvallocation.optimization.RelaxedRiskParity` configured
+            with the current distribution and constraints.
+        lambda_reg :
+            Regulator coefficient :math:`\\lambda` applied to the diagonal penalty term.
+        requested_target :
+            Desired return level :math:`R`. ``None`` signals an unconstrained solve.
+        lower_bound :
+            Non-negative baseline used for target shrinkage (typically the pure risk
+            parity return).
+
+        Returns
+        -------
+        RelaxedRiskParityResult
+            Optimal solution (possibly obtained after clipping the requested target).
+        Optional[str]
+            Warning message describing why a fallback was required; ``None`` if the
+            requested target proved feasible.
+        """
+        if requested_target is None:
+            result = optimizer.solve(lambda_reg=lambda_reg, return_target=None)
+            return result, None
+
+        target_candidate = float(requested_target)
+        last_error: Optional[Exception] = None
+        for _ in range(8):
+            try:
+                result = optimizer.solve(
+                    lambda_reg=lambda_reg,
+                    return_target=target_candidate,
+                    min_target=lower_bound,
+                )
+                return result, None
+            except RuntimeError as exc:
+                last_error = exc
+                target_candidate = 0.5 * (target_candidate + lower_bound)
+                if target_candidate <= lower_bound + 1e-6:
+                    target_candidate = lower_bound
+
+        warning = str(last_error) if last_error is not None else None
+        result = optimizer.solve(lambda_reg=lambda_reg, return_target=None)
+        return result, warning
+
     def mean_variance_frontier(self, num_portfolios: int = 10) -> PortfolioFrontier:
         """Computes the classical Mean-Variance efficient frontier.
 
@@ -844,6 +908,284 @@ class PortfolioWrapper:
             f"Target Return: {return_target:.4f}, Actual Return: {actual_return:.4f}, Risk (CVaR): {risk:.4f}"
         )
         return w_series, actual_return, risk
+
+    def relaxed_risk_parity_portfolio(
+        self,
+        *,
+        lambda_reg: float = 0.2,
+        target_multiplier: Optional[float] = 1.2,
+        return_target: Optional[float] = None,
+    ) -> Tuple[pd.Series, Dict[str, Any]]:
+        r"""
+        Compute a single relaxed risk parity allocation and expose solver diagnostics.
+
+        The routine first solves the baseline risk parity programme (λ = 0) to obtain
+        the benchmark return :math:`r_{RP} = \mu^{\top}x^{RP}`. Unless an explicit
+        ``return_target`` is supplied, the relaxed model is then solved with the adaptive
+        target :math:`R = m \cdot \max(r_{RP}, 0)` where ``m`` is ``target_multiplier``.
+        Infeasible targets are clipped via a backtracking line-search toward the RP
+        return before falling back to the unconstrained problem if necessary.
+
+        Parameters
+        ----------
+        lambda_reg :
+            Non-negative regulator coefficient :math:`\lambda`. Setting ``0`` recovers
+            the pure risk parity allocation.
+        target_multiplier :
+            Optional multiplier :math:`m` governing the adaptive target-return rule.
+            Ignored whenever ``return_target`` is provided. Must be ``None`` when
+            pairing with ``lambda_reg == 0`` to avoid redundant relaxation.
+        return_target :
+            Explicit target return :math:`R`. When supplied, overrides the adaptive
+            rule. The method clips :math:`R` down to the feasible region if necessary.
+
+        Returns
+        -------
+        pandas.Series
+            Optimal portfolio weights indexed by asset names (when available).
+        Dict[str, Any]
+            Rich diagnostics including achieved return, variance, marginal risks,
+            risk contributions, target information, and any solver warning emitted
+            during target clipping.
+        """
+        if self.dist.mu is None or self.dist.cov is None:
+            raise ValueError("Relaxed risk parity requires `mu` and `cov`.")
+
+        self._ensure_default_constraints()
+        logger.info(
+            "Solving relaxed risk parity portfolio (lambda=%s, return_target=%s, target_multiplier=%s).",
+            lambda_reg,
+            return_target,
+            target_multiplier,
+        )
+
+        optimizer = RelaxedRiskParity(
+            mean=self.dist.mu,
+            covariance=self.dist.cov,
+            G=self.G,
+            h=self.h,
+            A=self.A,
+            b=self.b,
+        )
+
+        rp_solution = optimizer.solve(lambda_reg=0.0, return_target=None)
+        rp_weights = np.asarray(rp_solution.weights, dtype=float)
+        rp_return = float(self.dist.mu @ rp_weights)
+        requested_target: Optional[float] = None
+        solver_warning: Optional[str] = None
+        lower_bound = max(rp_return, 0.0)
+
+        if lambda_reg == 0.0 and return_target is None and target_multiplier is None:
+            solution = rp_solution
+        else:
+            if return_target is not None:
+                requested_target = float(return_target)
+            else:
+                if target_multiplier is None:
+                    raise ValueError("Provide `target_multiplier` or `return_target` when lambda_reg > 0.")
+                if target_multiplier < 0:
+                    raise ValueError("`target_multiplier` must be non-negative.")
+                requested_target = float(target_multiplier * lower_bound)
+
+            solution, solver_warning = self._solve_relaxed_rp(
+                optimizer, lambda_reg, requested_target, lower_bound
+            )
+            if solver_warning is not None:
+                logger.warning(
+                    "Relaxed risk parity target %s infeasible; reverting to unconstrained solve. Details: %s",
+                    requested_target,
+                    solver_warning,
+                )
+
+        weights = np.asarray(solution.weights, dtype=float)
+        asset_names = self.dist.asset_names
+        name = "Relaxed Risk Parity" if solution.target_return is None else f"Relaxed Risk Parity (λ={lambda_reg:.3f})"
+        w_series = pd.Series(weights, index=asset_names, name=name)
+
+        achieved_return = float(self.dist.mu @ weights)
+        portfolio_variance = float(weights @ (self.dist.cov @ weights))
+        risk_contributions = weights * np.asarray(solution.marginal_risk, dtype=float)
+
+        target_clipped = (
+            solution.target_return is not None
+            and requested_target is not None
+            and not np.isclose(solution.target_return, requested_target, rtol=1e-8, atol=1e-10)
+        )
+
+        diagnostics: Dict[str, Any] = {
+            "lambda_reg": float(lambda_reg),
+            "requested_target": requested_target,
+            "target_return": solution.target_return,
+            "target_clipped": target_clipped,
+            "max_feasible_return": solution.max_return,
+            "achieved_return": achieved_return,
+            "risk_parity_return": rp_return,
+            "portfolio_variance": portfolio_variance,
+            "psi": solution.psi,
+            "gamma": solution.gamma,
+            "rho": solution.rho,
+            "objective": solution.objective,
+            "risk_contributions": risk_contributions,
+            "marginal_risk": np.asarray(solution.marginal_risk, dtype=float),
+            "risk_parity_weights": rp_weights,
+            "solver_warning": solver_warning,
+        }
+
+        logger.info(
+            "Relaxed risk parity solved. TargetUsed=%s, Achieved=%s, Variance=%s.",
+            solution.target_return,
+            achieved_return,
+            portfolio_variance,
+        )
+
+        return w_series, diagnostics
+
+    def relaxed_risk_parity_frontier(
+        self,
+        num_portfolios: int = 10,
+        max_multiplier: float = 1.6,
+        *,
+        lambda_reg: float = 0.2,
+        target_multipliers: Optional[Sequence[float]] = None,
+        include_risk_parity: bool = True,
+    ) -> PortfolioFrontier:
+        r"""
+        Build a relaxed risk parity frontier by sweeping target-return multipliers.
+
+        Each frontier column corresponds to a distinct multiplier :math:`m` applied to
+        the benchmark risk parity return :math:`r_{RP}` to generate the target
+        :math:`R = m \cdot \max(r_{RP}, 0)`. The method solves the regulated RP
+        programme for each multiplier using the shared :math:`\lambda` value and stores
+        per-point diagnostics (effective target after clipping, objective value, cone
+        slack variables, solver warnings) in ``PortfolioFrontier.metadata``.
+
+        Parameters
+        ----------
+        num_portfolios :
+            Number of grid points when ``target_multipliers`` is omitted. Must be
+            positive; includes the upper endpoint ``max_multiplier``.
+        max_multiplier :
+            Upper bound for the automatically generated multiplier grid. Ignored if
+            ``target_multipliers`` is supplied.
+        lambda_reg :
+            Regulator coefficient :math:`\lambda`. Applies to every relaxed point; the
+            optional RP anchor always uses :math:`\lambda = 0`.
+        target_multipliers :
+            Explicit iterable of multipliers. When provided the method skips automatic
+            grid generation and uses the supplied values verbatim.
+        include_risk_parity :
+            If ``True`` (default) the frontier prepends the pure risk parity solution so
+            downstream plots can intercept the anchor directly.
+
+        Returns
+        -------
+        PortfolioFrontier
+            Object containing weights ``(n, k)``, realised returns, volatility proxy
+            (standard deviation), and diagnostic metadata for each node on the sweep.
+        """
+        if self.dist.mu is None or self.dist.cov is None:
+            raise ValueError("Relaxed risk parity frontier requires `mu` and `cov`.")
+        if lambda_reg < 0:
+            raise ValueError("`lambda_reg` must be non-negative.")
+        self._ensure_default_constraints()
+
+        optimizer = RelaxedRiskParity(
+            mean=self.dist.mu,
+            covariance=self.dist.cov,
+            G=self.G,
+            h=self.h,
+            A=self.A,
+            b=self.b,
+        )
+
+        rp_solution = optimizer.solve(lambda_reg=0.0, return_target=None)
+        rp_weights = np.asarray(rp_solution.weights, dtype=float)
+        rp_return = float(self.dist.mu @ rp_weights)
+        rp_variance = float(rp_weights @ (self.dist.cov @ rp_weights))
+        lower_bound = max(rp_return, 0.0)
+
+        if target_multipliers is not None:
+            multipliers = np.asarray(list(target_multipliers), dtype=float).reshape(-1)
+            if multipliers.size == 0:
+                raise ValueError("`target_multipliers` must contain at least one entry.")
+            if np.any(multipliers < 0):
+                raise ValueError("`target_multipliers` must be non-negative.")
+        else:
+            if num_portfolios <= 0:
+                raise ValueError("`num_portfolios` must be positive.")
+            if max_multiplier < 1.0:
+                raise ValueError("`max_multiplier` must be at least 1.0.")
+            if num_portfolios == 1:
+                multipliers = np.array([max(1.0, max_multiplier)], dtype=float)
+            else:
+                multipliers = np.linspace(1.0, max_multiplier, num_portfolios)
+
+        weights_list: list[np.ndarray] = []
+        returns_list: list[float] = []
+        risks_list: list[float] = []
+        metadata: list[Dict[str, Any]] = []
+
+        if include_risk_parity:
+            weights_list.append(rp_weights)
+            returns_list.append(rp_return)
+            risks_list.append(np.sqrt(max(rp_variance, 0.0)))
+            metadata.append(
+                {
+                    "lambda_reg": 0.0,
+                    "target_multiplier": None,
+                    "requested_target": None,
+                    "effective_target": rp_solution.target_return,
+                    "objective": rp_solution.objective,
+                    "psi": rp_solution.psi,
+                    "gamma": rp_solution.gamma,
+                    "rho": rp_solution.rho,
+                    "solver_warning": None,
+                }
+            )
+
+        for multiplier in multipliers:
+            requested_target = float(multiplier * lower_bound)
+            solution, warning = self._solve_relaxed_rp(
+                optimizer, lambda_reg, requested_target, lower_bound
+            )
+            weights = np.asarray(solution.weights, dtype=float)
+            returns = float(self.dist.mu @ weights)
+            variance = float(weights @ (self.dist.cov @ weights))
+
+            weights_list.append(weights)
+            returns_list.append(returns)
+            risks_list.append(np.sqrt(max(variance, 0.0)))
+            metadata.append(
+                {
+                    "lambda_reg": float(lambda_reg),
+                    "target_multiplier": float(multiplier),
+                    "requested_target": requested_target,
+                    "effective_target": solution.target_return,
+                    "objective": solution.objective,
+                    "psi": solution.psi,
+                    "gamma": solution.gamma,
+                    "rho": solution.rho,
+                    "solver_warning": warning,
+                }
+            )
+
+        weight_matrix = np.column_stack(weights_list)
+        returns_array = np.array(returns_list, dtype=float)
+        risks_array = np.array(risks_list, dtype=float)
+
+        logger.info(
+            "Computed relaxed risk parity frontier with %d portfolios (λ=%s).",
+            weight_matrix.shape[1],
+            lambda_reg,
+        )
+        return PortfolioFrontier(
+            weights=weight_matrix,
+            returns=returns_array,
+            risks=risks_array,
+            risk_measure="Volatility (Relaxed RP)",
+            asset_names=self.dist.asset_names,
+            metadata=metadata,
+        )
 
     def solve_robust_gamma_portfolio(self, gamma_mu: float, gamma_sigma_sq: float) -> Tuple[pd.Series, float, float]:
         """Solves for a single robust portfolio with explicit uncertainty constraints.

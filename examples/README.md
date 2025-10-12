@@ -9,6 +9,7 @@ Python scripts
 - `mean_variance_frontier.py`: classical mean-variance frontier with summary statistics.
 - `cvar_allocation.py`: minimum-CVaR portfolio and tangency portfolio on the CVaR frontier.
 - `robust_frontier.py`: Meucci-style robust frontier parameterised by λ.
+- `relaxed_risk_parity_frontier.py`: relaxed risk parity target sweep with per-point diagnostics.
 - `discrete_allocation.py`: convert continuous weights into lot-sized trades.
 - `portfolio_ensembles.py`: combine multiple frontiers using the ensembling helpers.
 

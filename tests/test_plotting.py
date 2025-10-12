@@ -67,3 +67,35 @@ def test_plot_frontiers_requires_risk_free_for_tangency():
     with pytest.raises(ValueError):
         plot_frontiers(frontier, highlight=("tangency",))
 
+
+def test_plot_frontiers_metadata_in_highlight_labels():
+    plt = pytest.importorskip("matplotlib.pyplot")
+    metadata = [
+        {"lambda_reg": 0.0, "target_multiplier": None},
+        {"lambda_reg": 0.2, "target_multiplier": 1.2},
+        {"lambda_reg": 0.2, "target_multiplier": 1.4},
+    ]
+    frontier = PortfolioFrontier(
+        weights=np.array([[0.5, 0.4, 0.3], [0.5, 0.6, 0.7]]),
+        returns=np.array([0.04, 0.06, 0.08]),
+        risks=np.array([0.07, 0.09, 0.12]),
+        risk_measure="Volatility",
+        asset_names=["AAA", "BBB"],
+        metadata=metadata,
+    )
+
+    ax = plot_frontiers(
+        frontier,
+        highlight=("max_return",),
+        highlight_metadata_keys=("target_multiplier", "lambda_reg"),
+    )
+    _, legend_labels = ax.get_legend_handles_labels()
+    joined = " ".join(legend_labels)
+    assert "target_multiplier" in joined
+    assert "lambda_reg" in joined
+
+    highlights = getattr(ax, "_frontier_highlights")
+    assert highlights[0]["metadata"]["target_multiplier"] == 1.4
+    assert highlights[0]["index"] == 2
+
+    plt.close(ax.figure)
