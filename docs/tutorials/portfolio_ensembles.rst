@@ -139,7 +139,7 @@ Run both estimators in a single call
 Interpretation & reporting
 --------------------------
 
-- ``ensemble.metadata`` preserves key estimation choices per model – include it
+- ``ensemble.metadata`` preserves key estimation choices per model - include it
   in investment memos.
 - Plot ``ensemble.frontiers["MV"]`` and ``ensemble.frontiers["RRP"]`` using
   :func:`pyvallocation.plotting.plot_frontiers` to show the range of outcomes.

@@ -9,14 +9,14 @@ ensembling utilities so research portfolios can become investable allocations.
 Key capabilities
 ----------------
 
-- **Multiple risk models, one wrapper** – switch between mean-variance,
+- **Multiple risk models, one wrapper** - switch between mean-variance,
   CVaR, and robust formulations without changing how you declare constraints or
   transaction costs.
-- **Investor views made actionable** – entropy pooling and Black–Litterman
+- **Investor views made actionable** - entropy pooling and Black-Litterman
   helpers transform qualitative views into posterior distributions.
-- **Scenario-aware statistics** – shrinkage estimators, Bayesian updates and
+- **Scenario-aware statistics** - shrinkage estimators, Bayesian updates and
   scenario bootstrapping reduce estimation error out of the box.
-- **Portfolio ensembling** – average exposures, stack frontiers, and discretise
+- **Portfolio ensembling** - average exposures, stack frontiers, and discretise
   weights to bridge the gap between optimisation outputs and tradeable lists.
 
 Where to start
@@ -24,9 +24,11 @@ Where to start
 
 - :doc:`getting_started` for installation and a minimal efficient frontier
   example.
+- :doc:`tutorials/quickstart_etf_allocation` for the ETF allocation walk-through
+  that mirrors the runnable quickstart script.
 - :doc:`tutorials/index` for guided walkthroughs of the main workflows
   (mean-variance, CVaR, and portfolio ensembling).
-- The `examples/` directory offers runnable scripts that mirror the tutorials –
+- The `examples/` directory offers runnable scripts that mirror the tutorials -
   try ``python examples/portfolio_ensembles.py`` for a quick demonstration.
 
 .. toctree::

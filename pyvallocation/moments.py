@@ -1,6 +1,6 @@
 """
-High-quality estimators for the first two moments (mean vector ``μ`` and
-covariance matrix ``Σ``) of asset returns, including classical and robust
+High-quality estimators for the first two moments (mean vector ``\mu`` and
+covariance matrix ``\Sigma``) of asset returns, including classical and robust
 shrinkage techniques. The implementations follow well-established statistical
 and quantitative-finance references and are engineered to preserve pandas
 indices/columns when supplied.
@@ -11,18 +11,18 @@ Overview
 The module provides:
 
 * Weighted sample statistics (``estimate_sample_moments``).
-* Bayes–Stein :cite:p:`jorion1986bayes` and James–Stein shrinkage estimators for the
+* Bayes-Stein :cite:p:`jorion1986bayes` and James-Stein shrinkage estimators for the
   mean vector.
-* Linear shrinkage for covariance matrices, including Ledoit–Wolf
+* Linear shrinkage for covariance matrices, including Ledoit-Wolf
   :cite:p:`ledoit2004well` and Oracle Approximating Shrinkage (OAS)
   :cite:p:`chen2010shrinkage`.
 * Analytical nonlinear shrinkage (QuEST) :cite:p:`ledoit2020analytical`.
 * POET factor+sparse covariance estimator :cite:p:`fan2013large`.
-* Tyler’s M-estimator with shrinkage toward a target for elliptical robustness
+* Tyler's M-estimator with shrinkage toward a target for elliptical robustness
   :cite:p:`tyler1987statistical,chen2010shrinkage`.
 * Sparse precision matrices via Graphical Lasso :cite:p:`friedman2008sparse`.
-* Convenience adapters to the Black–Litterman
-  :cite:p:`black1992global,he2002intuition` and Normal–Inverse-Wishart workflows.
+* Convenience adapters to the Black-Litterman
+  :cite:p:`black1992global,he2002intuition` and Normal-Inverse-Wishart workflows.
 * A factory (``estimate_moments``) to combine any of the above seamlessly.
 
 Usage Examples
@@ -81,7 +81,7 @@ Robust combinations
    # Blend sample and robust covariances (50/50)
    sigma_blend = 0.5 * (sigma_nls + sigma_tyler)
 
-   # Extract Black–Litterman posterior moments using existing views infrastructure
+   # Extract Black-Litterman posterior moments using existing views infrastructure
    mu_bl, sigma_bl = posterior_moments_black_litterman(
        prior_cov=sigma_blend,
        prior_mean=mu_huber,
@@ -213,7 +213,7 @@ def estimate_sample_moments(R: ArrayLike, p: ArrayLike) -> Tuple[ArrayLike, Arra
 
 def shrink_mean_jorion(mu: ArrayLike, S: ArrayLike, T: int) -> ArrayLike:
     """
-    Applies Bayes–Stein shrinkage to the mean vector as in Jorion :cite:p:`jorion1986bayes`.
+    Applies Bayes-Stein shrinkage to the mean vector as in Jorion :cite:p:`jorion1986bayes`.
 
     This shrinkage estimator aims to improve the out-of-sample performance of
     mean estimates, especially when the number of assets (N) is large relative
@@ -223,7 +223,7 @@ def shrink_mean_jorion(mu: ArrayLike, S: ArrayLike, T: int) -> ArrayLike:
     Args:
         mu (ArrayLike): The sample mean vector (1D array-like, length N).
             Can be a :class:`numpy.ndarray` or :class:`pandas.Series`.
-        S (ArrayLike): The sample covariance matrix (2D array-like, N×N).
+        S (ArrayLike): The sample covariance matrix (2D array-like, NxN).
             Can be a :class:`numpy.ndarray` or :class:`pandas.DataFrame`.
         T (int): The number of observations (scenarios) used to estimate `mu` and `S`.
 
@@ -275,7 +275,7 @@ def shrink_covariance_ledoit_wolf(
     target: str = "identity",
 ) -> ArrayLike:
     """
-    Applies the Ledoit–Wolf shrinkage estimator for the covariance matrix :cite:p:`ledoit2004well`.
+    Applies the Ledoit-Wolf shrinkage estimator for the covariance matrix :cite:p:`ledoit2004well`.
 
     This estimator provides a well-conditioned covariance matrix, especially useful
     when the number of observations is small relative to the number of assets,
@@ -286,7 +286,7 @@ def shrink_covariance_ledoit_wolf(
         R (ArrayLike): A 2D array-like object (e.g., :class:`numpy.ndarray`,
             :class:`pandas.DataFrame`) of shape (T, N), where T is the number of
             observations and N is the number of assets. These are the returns data.
-        S_hat (ArrayLike): The sample covariance matrix (2D array-like, N×N).
+        S_hat (ArrayLike): The sample covariance matrix (2D array-like, NxN).
             Can be a :class:`numpy.ndarray` or :class:`pandas.DataFrame`.
         target (str, optional): The shrinkage target.
             -   ``"identity"``: Shrinks towards a scaled identity matrix.
@@ -396,7 +396,7 @@ def shrink_covariance_nls(
     input_is_cov: bool = False,
     dof_correction: int = 0,
 ) -> ArrayLike:
-    """Return Ledoit–Wolf analytical nonlinear shrinkage (QuEST) of covariance."""
+    """Return Ledoit-Wolf analytical nonlinear shrinkage (QuEST) of covariance."""
     if input_is_cov:
         raise ValueError(
             "`shrink_covariance_nls` expects raw returns. "
@@ -737,7 +737,7 @@ def shrink_mean_james_stein(
     T: int,
     target: str | np.ndarray | pd.Series = "grand_mean",
 ) -> ArrayLike:
-    """Return James–Stein shrinkage estimate for the mean vector."""
+    """Return James-Stein shrinkage estimate for the mean vector."""
     mu_arr = np.asarray(mu_hat, dtype=float).reshape(-1)
     Sigma = np.asarray(S, dtype=float)
     if Sigma.ndim != 2 or Sigma.shape[0] != Sigma.shape[1]:

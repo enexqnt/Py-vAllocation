@@ -6,7 +6,7 @@ format. We construct a global equity/bond universe, apply shrinkage estimates
 for stability, and generate a mean-variance frontier that is ready to ship to a
 portfolio committee.
 
-Step 1 – Load market data & scenarios
+Step 1 - Load market data & scenarios
 --------------------------------------
 
 We use the ETF sample bundled with the repository. Returns are computed at a
@@ -22,14 +22,14 @@ weekly frequency and reindexed for convenience.
     weekly_prices = prices.resample("W-FRI").last().dropna(how="all")
     weekly_returns = weekly_prices.pct_change().dropna()
 
-    # Always keep asset names tidy – they propagate through every output.
+    # Always keep asset names tidy - they propagate through every output.
     weekly_returns = weekly_returns.rename(columns=lambda c: c.replace(" ", "_"))
 
-Step 2 – Estimate robust moments
+Step 2 - Estimate robust moments
 --------------------------------
 
 High-dimensional problems need shrinkage. The helper below applies
-James–Stein mean shrinkage and OAS covariance shrinkage, preserving the original
+James-Stein mean shrinkage and OAS covariance shrinkage, preserving the original
 labels.
 
 .. code-block:: python
@@ -42,7 +42,7 @@ labels.
         cov_estimator="oas",
     )
 
-Step 3 – Optimise and generate the frontier
+Step 3 - Optimise and generate the frontier
 -------------------------------------------
 
 The :class:`pyvallocation.portfolioapi.PortfolioWrapper` handles constraints and
@@ -62,7 +62,7 @@ frontier construction. We supply the estimated moments via
         risk_free_rate=0.01
     )
 
-Step 4 – Visualise & interpret the curve
+Step 4 - Visualise & interpret the curve
 ----------------------------------------
 
 .. code-block:: python
@@ -86,7 +86,7 @@ Step 4 – Visualise & interpret the curve
 - Use :func:`pyvallocation.utils.projection.project_mean_covariance` to map
   weekly statistics to monthly or annual horizons.
 - Sensitivity-test your inputs by swapping ``cov_estimator`` to ``"nls"`` or
-  ``"poet"`` – no other code changes are required.
+  ``"poet"`` - no other code changes are required.
 - Combine the frontier with :func:`pyvallocation.ensembles.assemble_portfolio_ensemble`
   for multi-model comparisons.
 - Export ``mv_frontier.to_frame()`` to capture the entire surface for reporting

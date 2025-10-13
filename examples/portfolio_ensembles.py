@@ -34,8 +34,8 @@ def select_portfolio(frontier: PortfolioFrontier, max_vol: float) -> pd.Series:
     weights, expected_return, risk = frontier.portfolio_at_risk_target(max_vol)
     if weights.isna().any():
         weights, expected_return, risk = frontier.get_min_risk_portfolio()
-        print("  ├─ Risk target infeasible; using minimum-risk portfolio instead.")
-    print(f"  ├─ Selected portfolio: return={expected_return:.4%}, risk={risk:.4%}")
+        print("  |-- Risk target infeasible; using minimum-risk portfolio instead.")
+    print(f"  |-- Selected portfolio: return={expected_return:.4%}, risk={risk:.4%}")
     return weights
 
 

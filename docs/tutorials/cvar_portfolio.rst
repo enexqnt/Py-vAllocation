@@ -27,7 +27,7 @@ target a minimum CVaR portfolio, and visualise the risk/return envelope.
         probabilities=exp_probs.reshape(-1, 1),
     )
 
-Step 2 – Optimise for a return target under CVaR
+Step 2 - Optimise for a return target under CVaR
 ------------------------------------------------
 
 .. code-block:: python
@@ -44,7 +44,7 @@ Step 2 – Optimise for a return target under CVaR
     print(weights.sort_values(ascending=False).round(4))
     print(f"Expected return {exp_return:.2%} | CVaR {cvar:.2%}")
 
-Step 3 – Map the entire frontier
+Step 3 - Map the entire frontier
 --------------------------------
 
 .. code-block:: python
@@ -55,12 +55,12 @@ Step 3 – Map the entire frontier
     from pyvallocation.plotting import plot_frontiers
 
     ax = plot_frontiers(frontier, highlight=("min_risk", "max_return"))
-    ax.set_title("CVaR Frontier (α = 5%)")
+    ax.set_title("CVaR Frontier (alpha = 5%)")
     ax.set_xlabel("CVaR")
     ax.set_ylabel("Expected Return")
     ax.figure.tight_layout()
 
-Step 4 – Practical considerations
+Step 4 - Practical considerations
 ---------------------------------
 
 - **Parametric fallback:** If you only have ``mu`` and ``cov``, the wrapper

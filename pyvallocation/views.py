@@ -145,7 +145,7 @@ def entropy_pooling(
     h: Optional[np.ndarray] = None,
     method: Optional[str] = None,
 ) -> np.ndarray:
-    r"""Return posterior probabilities via the entropy‑pooling algorithm.
+    r"""Return posterior probabilities via the entropy-pooling algorithm.
 
     This function serves as a wrapper around :func:`scipy.optimize.minimize` to
     solve the dual optimization problem of *Entropy Pooling* (EP), a method
@@ -166,7 +166,7 @@ def entropy_pooling(
 
     The optimization is performed using quasi-Newton methods from `scipy.optimize.minimize`.
     Only ``'TNC'`` (Truncated Newton) and ``'L-BFGS-B'``
-    (Limited-memory Broyden–Fletcher–Goldfarb–Shanno algorithm with box
+    (Limited-memory Broyden-Fletcher-Goldfarb-Shanno algorithm with box
     constraints) are supported, as they allow for box bounds on the Lagrange
     multipliers.
 
@@ -292,7 +292,7 @@ def entropy_pooling(
     return q_posterior
 
 class FlexibleViewsProcessor:
-    r"""Entropy‑pooling engine with fully flexible moment views.
+    r"""Entropy-pooling engine with fully flexible moment views.
 
     The `FlexibleViewsProcessor` class provides a robust framework for adjusting a
     discrete **prior** distribution of multivariate asset returns to incorporate
@@ -301,8 +301,8 @@ class FlexibleViewsProcessor:
     distribution. The class implements the *Fully Flexible Views*
     methodology proposed by Attilio Meucci, supporting views on
     various statistical moments, including **means**, **variances**, **skewnesses**,
-    and **correlations**. It supports both *simultaneous* (“one‑shot”) and
-    *iterated* (block‑wise) entropy pooling.
+    and **correlations**. It supports both *simultaneous* ("one-shot") and
+    *iterated* (block-wise) entropy pooling.
 
     Mathematical background
     -----------------------
@@ -325,13 +325,13 @@ class FlexibleViewsProcessor:
 
     For practitioners
     ~~~~~~~~~~~~~~~~~
-    * **Plug‑and‑play Scenario Handling:** Users can either provide historical
+    * **Plug-and-play Scenario Handling:** Users can either provide historical
         returns directly or specify prior mean and covariance, allowing the
         processor to synthesize scenarios. The output includes posterior moments
         (mean, covariance) and the adjusted probabilities.
     * **Sequential Updating (Iterated EP):** By setting `sequential=True`, the
         class applies view blocks (e.g., mean views, then volatility views) in a
-        predefined order (*mean → vol → skew → corr*). This iterated approach,
+        predefined order (*mean -> vol -> skew -> corr*). This iterated approach,
         also known as Sequential Entropy Pooling (SeqEP), can lead to
         significantly better solutions and ensure logical consistency, especially
         when views on higher-order moments (like variance or skewness) implicitly
@@ -345,7 +345,7 @@ class FlexibleViewsProcessor:
 
     Parameters
     ----------
-    prior_returns : (S, N) ndarray or DataFrame, optional
+    prior_returns : (S, N) ndarray or DataFrame, optional
         A matrix or DataFrame of historical or simulated prior scenarios. `S` is the
         number of scenarios, and `N` is the number of assets/risk factors. If
         provided, `prior_mean` and `prior_cov` are ignored.
@@ -354,7 +354,7 @@ class FlexibleViewsProcessor:
         (i.e., `1/S` for each scenario) is assumed.
     prior_mean : (N,) array_like, optional
         The mean vector used for synthesizing scenarios when `prior_returns` is not supplied.
-    prior_cov : (N, N) array_like, optional
+    prior_cov : (N, N) array_like, optional
         The covariance matrix used for synthesizing scenarios when `prior_returns` is not supplied.
     distribution_fn : callable, optional
         A custom function for generating synthetic scenarios when `prior_returns`
@@ -371,16 +371,16 @@ class FlexibleViewsProcessor:
         `numpy.random.multivariate_normal`.
     mean_views, vol_views, corr_views, skew_views : mapping or array_like, optional
         View payloads. Keys are asset labels (or pairs for correlations);
-        values are either a scalar *x* (equality) or a 2‑tuple such as
+        values are either a scalar *x* (equality) or a 2-tuple such as
         ``('>=', x)``.
     sequential : bool, default ``False``
         If ``True``, views are applied sequentially (iterated EP). The views are
-        processed in the order *mean → vol → skew → corr*. If ``False``,
+        processed in the order *mean -> vol -> skew -> corr*. If ``False``,
         all views are processed simultaneously in a single EP optimization.
 
     Attributes
     ----------
-    posterior_probabilities : (S, 1) ndarray
+    posterior_probabilities : (S, 1) ndarray
         The optimal probability vector :math:`q`.
     posterior_returns : ndarray or Series
         The posterior mean.
@@ -576,8 +576,8 @@ class FlexibleViewsProcessor:
 
         Accepted syntaxes:
         -----------------
-        * ``x`` (e.g., `0.03`)   → `('==', x)`: Implies an equality view.
-        * ``('>=', x)`` (e.g., `('>=', 0.05)`) → `('>=', x)`: Implies a greater-than-or-equal-to inequality view.
+        * ``x`` (e.g., `0.03`)   -> `('==', x)`: Implies an equality view.
+        * ``('>=', x)`` (e.g., `('>=', 0.05)`) -> `('>=', x)`: Implies a greater-than-or-equal-to inequality view.
         * Similar for `'<=', '>', '<'`.
 
         For **relative mean views** (e.g., `mean_views={('Asset A', 'Asset B'): ('>=', 0.0)}`),
@@ -845,7 +845,7 @@ class FlexibleViewsProcessor:
             return do_ep(p0, A_all, b_all, G_all, h_all)
 
     def get_posterior_probabilities(self) -> np.ndarray:
-        """Return the (S × 1) posterior probability vector.
+        """Return the (S x 1) posterior probability vector.
 
         This method provides access to the final probability distribution `q`
         computed by the entropy pooling process, which incorporates all specified
@@ -882,7 +882,7 @@ class FlexibleViewsProcessor:
     
 class BlackLittermanProcessor:
     r"""
-    Bayesian Black–Litterman (BL) updater for *equality* **mean views**.
+    Bayesian Black-Litterman (BL) updater for *equality* **mean views**.
 
     The processor combines a *prior* distribution of excess returns
     :math:`\mathcal N(\boldsymbol\pi,\;\boldsymbol\Sigma)` with
@@ -936,12 +936,12 @@ class BlackLittermanProcessor:
     Exactly *one* of the following mutually exclusive inputs must be supplied
     to initialise :math:`\boldsymbol\pi`:
 
-    1. ``pi`` – direct numeric vector.
-    2. ``market_weights`` – reverse-optimised
+    1. ``pi`` - direct numeric vector.
+    2. ``market_weights`` - reverse-optimised
        :math:`\boldsymbol\pi=\delta\boldsymbol\Sigma\mathbf w`
        (CAPM equilibrium) with
        **risk-aversion** :math:`\delta>0` :cite:p:`black1992global`.
-    3. ``prior_mean`` – treat the sample mean as :math:`\boldsymbol\pi`.
+    3. ``prior_mean`` - treat the sample mean as :math:`\boldsymbol\pi`.
 
     Parameters
     ----------
@@ -955,11 +955,11 @@ class BlackLittermanProcessor:
         Risk-aversion coefficient :math:`\delta\;(>0)`.
     tau : float, default 0.05
         Shrinkage scalar :math:`\tau` controlling the weight on the prior
-        covariance; typical values 0.01–0.10
+        covariance; typical values 0.01-0.10
         :cite:p:`he2002intuition`.
     idzorek_use_tau : bool, default True
         If *True* the Idzorek confidence rule scales by
-        :math:`\tau\boldsymbol\Sigma` (original He–Litterman convention);
+        :math:`\tau\boldsymbol\Sigma` (original He-Litterman convention);
         if *False* it uses :math:`\boldsymbol\Sigma` instead.
     pi : (N,) array_like, optional
         Direct prior mean (exclusive with the other two options above).
@@ -974,9 +974,9 @@ class BlackLittermanProcessor:
         Idzorek confidences :math:`c_k\in(0,1]` per view.
     omega : {"idzorek"} | array_like, optional
         View covariance :math:`\boldsymbol\Omega`.
-        * ``"idzorek"`` – derive from confidences.
-        * vector length *K* – treated as diagonal.
-        * full :math:`K\times K` matrix – used verbatim.
+        * ``"idzorek"`` - derive from confidences.
+        * vector length *K* - treated as diagonal.
+        * full :math:`K\times K` matrix - used verbatim.
     verbose : bool, default False
         Print intermediate diagnostics.
 
@@ -989,7 +989,7 @@ class BlackLittermanProcessor:
 
     Methods
     -------
-    get_posterior() → (posterior_mean, posterior_cov)
+    get_posterior() -> (posterior_mean, posterior_cov)
         Return the posterior moments in the same *NumPy / Pandas* flavour as
         the inputs.
 
@@ -1027,7 +1027,7 @@ class BlackLittermanProcessor:
         verbose: bool = False,
     ) -> None:
 
-        # ---------- Σ (prior covariance) --------------------------------
+        # ---------- \Sigma (prior covariance) --------------------------------
         self._is_pandas: bool = isinstance(prior_cov, pd.DataFrame)
         self._assets: List[Union[str, int]] = (
             list(prior_cov.index)
@@ -1049,21 +1049,21 @@ class BlackLittermanProcessor:
 
         if pi is not None:
             self._pi = np.asarray(pi, dtype=float).reshape(-1, 1)
-            src = "user π"
+            src = "user \pi"
         elif market_weights is not None:
             weights = np.asarray(market_weights, dtype=float).ravel()
             if weights.size != n_assets:
                 raise ValueError("market_weights length mismatch.")
             weights /= weights.sum()
             self._pi = risk_aversion * self._sigma @ weights.reshape(-1, 1)
-            src = "δ Σ w"
+            src = "\delta \Sigma w"
         elif prior_mean is not None:
             self._pi = np.asarray(prior_mean, dtype=float).reshape(-1, 1)
             src = "prior_mean"
         else:
             raise ValueError("Provide exactly one of pi, market_weights or prior_mean.")
         if verbose:
-            print(f"[BL] π source: {src}.")
+            print(f"[BL] \pi source: {src}.")
 
         def _vec_to_dict(vec_like):
             if vec_like is None:
@@ -1081,7 +1081,7 @@ class BlackLittermanProcessor:
         if verbose:
             print(f"[BL] Built P {self._p.shape}, Q {self._q.shape}.")
 
-        # ---------- confidences & Ω -------------------------------------
+        # ---------- confidences & \Omega -------------------------------------
         self._conf: Optional[np.ndarray] = self._parse_conf(view_confidences, view_keys)
         self._idzorek_use_tau = bool(idzorek_use_tau)
         self._omega: np.ndarray = self._build_omega(omega, verbose)
@@ -1121,18 +1121,18 @@ class BlackLittermanProcessor:
             if isinstance(value, Sequence) and not isinstance(value, str):
                 if len(value) != 1:
                     raise ValueError(
-                        "Inequality views not supported – use scalar value."
+                        "Inequality views not supported - use scalar value."
                     )
                 target = float(value[0])
             else:
                 target = float(value)
 
-            if isinstance(key, tuple):  # relative view μ_i − μ_j = target
+            if isinstance(key, tuple):  # relative view \mu_i - \mu_j = target
                 asset_i, asset_j = key
                 i_idx, j_idx = self._asset_index(asset_i), self._asset_index(asset_j)
                 row = np.zeros(n)
                 row[i_idx], row[j_idx] = 1.0, -1.0
-            else:  # absolute view μ_i = target
+            else:  # absolute view \mu_i = target
                 idx = self._asset_index(key)
                 row = np.zeros(n)
                 row[idx] = 1.0
@@ -1163,9 +1163,9 @@ class BlackLittermanProcessor:
             raise ValueError("view_confidences length mismatch.")
         return arr
 
-    # ---- Ω construction ----------------------------------------------
+    # ---- \Omega construction ----------------------------------------------
     def _build_omega(self, omega: Any, verbose: bool) -> np.ndarray:
-        if self._k == 0:  # no views → empty Ω
+        if self._k == 0:  # no views -> empty \Omega
             return np.zeros((0, 0))
 
         tau_sigma = self._tau * self._sigma
@@ -1178,20 +1178,20 @@ class BlackLittermanProcessor:
             base_sigma = tau_sigma if self._idzorek_use_tau else self._sigma
             for i, conf in enumerate(self._conf):
                 p_i = self._p[i : i + 1]  # (1, N)
-                var_i = (p_i @ base_sigma @ p_i.T).item()  # σ²(view)
+                var_i = (p_i @ base_sigma @ p_i.T).item()  # \sigma^2(view)
                 c = np.clip(conf, 1e-6, 1.0 - 1e-6)
                 factor = (1.0 - c) / c
                 diag.append(factor * var_i)
             omega_mat = np.diag(diag)
             if verbose:
-                suffix = "τ Σ" if self._idzorek_use_tau else "Σ"
-                print(f"[BL] Ω from Idzorek confidences (base = {suffix}).")
+                suffix = "\tau \Sigma" if self._idzorek_use_tau else "\Sigma"
+                print(f"[BL] \Omega from Idzorek confidences (base = {suffix}).")
 
         # -- default diagonal -------------------------------------------
         elif omega is None:
             omega_mat = np.diag(np.diag(self._p @ tau_sigma @ self._p.T))
             if verbose:
-                print("[BL] Ω = τ·diag(P Σ Pᵀ).")
+                print("[BL] Omega = tau*diag(P Sigma P^T).")
 
         # -- user-supplied ----------------------------------------------
         else:
@@ -1202,10 +1202,10 @@ class BlackLittermanProcessor:
                 omega_mat = omega_arr
             else:
                 raise ValueError(
-                    "omega must be 'idzorek', length-K vector, or K×K matrix."
+                    "omega must be 'idzorek', length-K vector, or KxK matrix."
                 )
             if verbose:
-                print("[BL] Using user-provided Ω.")
+                print("[BL] Using user-provided \Omega.")
 
         return omega_mat
 
@@ -1215,10 +1215,10 @@ class BlackLittermanProcessor:
 
         if self._k == 0:  # no views: posterior = prior
             if verbose:
-                print("[BL] No views → posterior = prior.")
+                print("[BL] No views -> posterior = prior.")
             return self._pi.flatten(), self._sigma
 
-        # P τ Σ Pᵀ + Ω
+        # P tau Sigma P^T + Omega
         mat_a = self._p @ tau_sigma @ self._p.T + self._omega  # (K, K)
 
         # Solve rather than invert for numerical stability

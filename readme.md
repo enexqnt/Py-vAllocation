@@ -1,23 +1,28 @@
-# Py‑vAllocation
+# Py-vAllocation
 
 [![PyPI](https://img.shields.io/pypi/v/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
 [![Python versions](https://img.shields.io/pypi/pyversions/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
 
-Practical portfolio allocation tools with a small, consistent API. The library
-covers mean–variance, mean‑CVaR, robust optimisation, Bayesian updates
-(Black–Litterman and NIW), entropy pooling for flexible views, ensembling, and
-discrete trade generation. Pandas labels are preserved throughout.
+Practical portfolio allocation tools with a compact, well-tested API. The
+library covers mean-variance, mean-CVaR, relaxed risk parity, Meucci-style
+robust optimisation, Bayesian updates (Black-Litterman and NIW), entropy
+pooling, portfolio ensembling, and discrete trade generation. Pandas labels are
+preserved throughout every workflow.
 
-## Features
+## Highlights
 
-- Mean–variance and CVaR frontiers with simple selectors (tangency, risk target).
-- Robust models: relaxed risk parity and Meucci‑style robust optimisation.
-- Views: Black–Litterman (equality mean views) and entropy pooling (inequalities,
-  vol/corr/skew), plus a robust‑Bayesian NIW posterior.
-- Shrinkage/robust moments: James–Stein, OAS, NLS, Tyler, Huber, POET, Glasso.
-- Portfolio ensembling and discrete allocation with lot sizes.
+- **Consistent optimisation surface** - switch between mean-variance, CVaR,
+  relaxed risk parity, and robust formulations without re-writing constraints.
+- **View integration out of the box** - Black-Litterman and entropy pooling
+  helpers let discretionary macro views flow into posterior moments.
+- **Shrinkage-heavy statistics** - Jorion, James-Stein, OAS, NLS, Tyler, Huber,
+  POET, and graphical lasso estimators are wired into `estimate_moments`.
+- **Production plumbing** - ensemble builders, discrete allocation, and plotting
+  utilities reduce friction between research code and reporting.
+- **Optional extras** - install the `robust` extra to enable POET, nonlinear
+  shrinkage, and other heavy dependencies only when required.
 
-## Install
+## Installation
 
 ```bash
 pip install py-vallocation
@@ -31,11 +36,17 @@ Requires `cvxopt>=1.2.0`. If CVXOPT is new to your system, follow the
 
 ## Quickstart
 
-Run the end‑to‑end ETF example (writes plots/CSVs to `output/`):
+Run the end-to-end ETF example (writes plots and CSVs to `output/`):
 
 ```bash
 python examples/quickstart_etf_allocation.py
 ```
+
+Key artefacts:
+
+- `output/frontiers.png`, `frontiers_vol.png`, `frontiers_cvar.png` - efficient frontiers.
+- `output/stacked_weights.csv`, `selected_weights.csv`, `average_weights.csv` - ensemble summaries.
+- Terminal output covering discrete trade sizing and stress results.
 
 Or use the API directly:
 
@@ -53,26 +64,30 @@ w, ret, risk = front.get_tangency_portfolio(risk_free_rate=0.01)
 ## Examples & notebooks
 
 - Scripts live in `examples/` (see `examples/README.md`). Highlights:
-  - `quickstart_etf_allocation.py` – moments → frontiers → ensemble → trades
+  - `quickstart_etf_allocation.py` - moments -> frontiers -> ensemble -> trades
   - `mean_variance_frontier.py`, `cvar_allocation.py`, `robust_frontier.py`
   - `relaxed_risk_parity_frontier.py`, `portfolio_ensembles.py`, `discrete_allocation.py`
 - Notebooks (`examples/*.ipynb`) mirror the tutorials.
+
+## Documentation & resources
+
+- Full documentation is built with Sphinx/napoleon and is ready for Read the Docs deployment. Build locally with
+  `sphinx-build -b html docs docs/_build/html`.
+- Tutorials live under `docs/tutorials/` and mirror the runnable scripts.
+- The API reference is generated from docstrings (`docs/pyvallocation*.rst`).
+
+## Repository layout
+
+- `pyvallocation/` - library source code.
+- `examples/` - runnable end-to-end workflows (ETF quickstart, CVaR frontier, ensembles, discrete allocation).
+- `docs/` - Sphinx site (tutorials, API reference, bibliography).
+- `tests/` - pytest suite covering numerical routines, ensembles, plotting, and discrete allocation.
+- `output/` - artefacts written by example scripts.
 
 ## Requirements
 
 - Python 3.8+
 - numpy, pandas, scipy, cvxopt
-
-## Documentation
-
-Build locally:
-
-```bash
-python -m pip install -e .[robust]
-sphinx-build -b html docs docs/_build/html
-```
-
-Open `docs/_build/html/index.html` for tutorials and API reference.
 
 ## References
 
@@ -98,10 +113,10 @@ Issues and pull requests are welcome. Please see `CONTRIBUTING.md`.
 
 ## License
 
-GPL-3.0-or-later – see [LICENSE](LICENSE) for the full text. Portions of the
+GPL-3.0-or-later - see [LICENSE](LICENSE) for the full text. Portions of the
 optimisation routines are adapted (with attribution) from
 [fortitudo-tech](https://github.com/fortitudo-tech/fortitudo.tech).
 
 ---
 
-Copyright © enexqnt. GPL‑3.0‑or‑later.
+Copyright (c) enexqnt. GPL-3.0-or-later.

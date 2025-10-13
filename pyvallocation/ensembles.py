@@ -2,11 +2,11 @@
 Ensemble utilities for blending portfolio weights.
 
 The helpers in this module implement two complementary recipes that operate on
-sample portfolios organised column-wise (``n_assets × n_samples``):
+sample portfolios organised column-wise (``n_assets x n_samples``):
 
-* :func:`average_exposures` – arithmetic averaging (optionally weighted) across
+* :func:`average_exposures` - arithmetic averaging (optionally weighted) across
   a panel of sample portfolios.
-* :func:`exposure_stacking` – the exposure-stacking quadratic programme first
+* :func:`exposure_stacking` - the exposure-stacking quadratic programme first
   introduced by Vorobets :cite:p:`vorobets2024derivatives` and implemented in
   the GPL-3 licensed `fortitudo.tech <https://github.com/fortitudo-tech/fortitudo.tech>`_
   repository. The routine dampens idiosyncratic exposures while preserving the
@@ -98,7 +98,7 @@ def _to_2d_array(
             arr = arr.reshape(-1, 1)
 
     if arr.ndim != 2:
-        raise ValueError("Sample portfolios must broadcast to a 2D array (assets × portfolios).")
+        raise ValueError("Sample portfolios must broadcast to a 2D array (assets x portfolios).")
     return arr, asset_names, sample_names
 
 
@@ -627,9 +627,9 @@ def make_portfolio_spec(
     projection:
         Optional dictionary with projection settings. Recognised keys:
 
-        * ``annualization_factor`` – passed to :func:`project_mean_covariance`.
-        * ``log_to_simple`` / ``to_simple`` (bool) – apply :func:`log2simple`.
-        * ``transform`` – callable ``transform(mu, Sigma) -> (mu, Sigma)``.
+        * ``annualization_factor`` - passed to :func:`project_mean_covariance`.
+        * ``log_to_simple`` / ``to_simple`` (bool) - apply :func:`log2simple`.
+        * ``transform`` - callable ``transform(mu, Sigma) -> (mu, Sigma)``.
     distribution / distribution_factory:
         Supply an :class:`AssetsDistribution` directly (or a factory returning
         one) instead of estimating from data.

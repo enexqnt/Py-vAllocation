@@ -72,7 +72,7 @@ def _cholesky_pd(
 
 
 def chi2_quantile(p: float, dof: int, sqrt: bool = False) -> float:
-    r"""Computes the quantile of the chi-square (χ²) distribution.
+    r"""Computes the quantile of the chi-square (\chi^2) distribution.
 
     This function is used to determine the size of the uncertainty ellipsoids
     for the market parameters (mean and covariance). The size is
@@ -101,7 +101,7 @@ def chi2_quantile(p: float, dof: int, sqrt: bool = False) -> float:
         sqrt: If True, returns the square root of the quantile. Defaults to False.
 
     Returns:
-        The chi-square quantile :math:`Q_{\chi²}(p)` or :math:`\sqrt{Q_{\chi²}(p)}`
+        The chi-square quantile :math:`Q_{\chi^2}(p)` or :math:`\sqrt{Q_{\chi^2}(p)}`
         if `sqrt` is True.
 
     Raises:
@@ -263,7 +263,7 @@ class NIWPosterior:
         r"""Updates the posterior parameters using sample statistics.
 
         This method implements the Bayesian update rules for the NIW parameters
-        as given by Eqs. (11)–(14) in Meucci (2005).
+        as given by Eqs. (11)-(14) in Meucci (2005).
 
         .. math::
             \begin{align*}
@@ -329,10 +329,10 @@ class NIWPosterior:
                             + n_obs * ssigma
                             + cross_term_weighted)
         if nu1 <= 0:
-            raise ValueError("Posterior degrees of freedom ν₁ must be positive.")
+            raise ValueError("Posterior degrees of freedom \nu_1 must be positive.")
         sigma1_array = sigma1_numerator / nu1
 
-        _ = _cholesky_pd(sigma1_array)  # Ensure Σ₁ is PD or near-PD
+        _ = _cholesky_pd(sigma1_array)  # Ensure \Sigma_1 is PD or near-PD
 
         # Wrap into pandas if appropriate
         if self._pandas and self._asset_index is not None:
@@ -408,7 +408,7 @@ class NIWPosterior:
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
         if self._posterior.nu1 <= 2:
-            raise ValueError("Posterior degrees of freedom ν₁ must be greater than 2 to compute S_μ.")
+            raise ValueError("Posterior degrees of freedom \nu_1 must be greater than 2 to compute S_\mu.")
         factor = self._posterior.nu1 / (self._posterior.T1 * (self._posterior.nu1 - 2.0))
         # Ensure underlying data is array for multiplication
         sigma1_array = self._posterior.sigma1
@@ -445,7 +445,7 @@ class NIWPosterior:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
         denom = self._posterior.nu1 + self.N + 1.0
         if denom == 0:
-            raise ValueError("Denominator (ν₁ + N + 1) for Σ_ce is zero.")
+            raise ValueError("Denominator (\nu_1 + N + 1) for \Sigma_ce is zero.")
         factor = self._posterior.nu1 / denom
 
         sigma1_array = self._posterior.sigma1
@@ -485,7 +485,7 @@ class NIWPosterior:
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
         if self._posterior.nu1 <= 2:
-            raise ValueError("Posterior ν₁ must be greater than 2 for γ_μ calculation.")
+            raise ValueError("Posterior \nu_1 must be greater than 2 for \gamma_\mu calculation.")
         if not (0.0 < p_mu < 1.0):
             raise ValueError("Confidence level p_mu must be between 0 and 1 (exclusive).")
         q_mu_squared = chi2_quantile(p_mu, self.N, sqrt=False)
@@ -529,7 +529,7 @@ class NIWPosterior:
         nu1 = self._posterior.nu1
         denom_cubed_base = nu1 + self.N + 1.0
         if denom_cubed_base <= 0:
-            raise ValueError("Term (ν₁ + N + 1) must be positive for C_Σ calculation.")
+            raise ValueError("Term (\nu_1 + N + 1) must be positive for C_\Sigma calculation.")
 
         dof = self.N * (self.N + 1) // 2
         q_sigma_squared_val = chi2_quantile(p_sigma, dof, sqrt=False)
@@ -538,12 +538,12 @@ class NIWPosterior:
         numerator_term2 = 2.0 * nu1**2 * q_sigma_squared_val
         denominator_term2 = denom_cubed_base**3
         if denominator_term2 == 0:
-            raise ValueError("Denominator for sqrt term in C_Σ is zero.")
+            raise ValueError("Denominator for sqrt term in C_\Sigma is zero.")
         term2_arg = numerator_term2 / denominator_term2
         if term2_arg < 0:
             # This should not happen with valid inputs but good to check
             warnings.warn(
-                f"Argument for sqrt in C_Σ calculation is negative ({term2_arg:f}); result may be NaN.",
+                f"Argument for sqrt in C_\Sigma calculation is negative ({term2_arg:f}); result may be NaN.",
                 RuntimeWarning
             )
         term2 = np.sqrt(term2_arg)

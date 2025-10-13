@@ -50,6 +50,29 @@ def build_G_h_A_b(
     Optional[np.ndarray],
     Optional[np.ndarray],
 ]:
+    """
+    Assemble inequality and equality constraints for portfolio optimisers.
+
+    The helper converts high-level constraint specifications (long-only,
+    box bounds, pairwise relative bounds, and custom rows) into the ``G``,
+    ``h``, ``A`` and ``b`` matrices expected by CVXOPT-based solvers.
+
+    Args:
+        n_assets: Number of portfolio weights to constrain.
+        total_weight: Target sum of weights. ``None`` disables the equality row.
+        long_only: When ``True`` append ``-I w <= 0`` so weights remain non-negative.
+        bounds: Either a single ``(lower, upper)`` tuple applied to every asset,
+            a sequence of per-asset tuples, or a mapping ``asset -> (lower, upper)``.
+        relative_bounds: Sequence of triples ``(i, j, bound)`` implementing
+            ``w_i - w_j <= bound`` style constraints.
+        additional_G_h: Extra inequality rows supplied as ``(row, rhs)`` pairs.
+        additional_A_b: Extra equality rows supplied as ``(row, rhs)`` pairs.
+        return_none_if_empty: When ``True`` return ``None`` instead of empty arrays.
+
+    Returns:
+        Tuple ``(G, h, A, b)`` suitable for CVXOPT/QP front-end functions. Each entry
+        is ``None`` when no constraint of that type is required.
+    """
     if not isinstance(n_assets, int) or n_assets <= 0:
         logger.error("n_assets must be a positive integer, got %s", n_assets)
         raise ValueError("n_assets must be a positive integer")
@@ -203,13 +226,13 @@ def build_G_h_A_b(
 
     if not long_only and bounds is None and not relative_bounds and not additional_G_h:
         warnings.warn(
-            "No position bounds given and long_only=False – feasible set may be "
-            "unbounded → optimisation can fail.",
+            "No position bounds given and long_only=False - feasible set may be "
+            "unbounded -> optimisation can fail.",
             UserWarning,
             stacklevel=2,
         )
         logger.warning(
-            "No position bounds given and long_only=False – feasible set may be unbounded."
+            "No position bounds given and long_only=False - feasible set may be unbounded."
         )
 
     if (
@@ -220,13 +243,13 @@ def build_G_h_A_b(
         and bounds[0] >= 0
     ):
         warnings.warn(
-            "long_only=True already enforces w ≥ 0; supplying a non-negative lower "
+            "long_only=True already enforces w >= 0; supplying a non-negative lower "
             "bound duplicates that constraint.",
             UserWarning,
             stacklevel=2,
         )
         logger.warning(
-            "long_only=True already enforces w ≥ 0; supplying a non-negative lower bound duplicates that constraint."
+            "long_only=True already enforces w >= 0; supplying a non-negative lower bound duplicates that constraint."
         )
 
     def _stack(rows: List[np.ndarray]) -> Optional[np.ndarray]:

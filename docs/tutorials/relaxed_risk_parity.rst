@@ -4,7 +4,7 @@ Relaxed Risk Parity Diagnostics
 This walkthrough mirrors the ``relaxed_risk_parity.ipynb`` notebook. The use
 case: a balanced multi-asset mandate where the client wants risk-parity as the
 starting point but is willing to accept additional return targets via the
-Gambeta–Kwon relaxed framework.
+Gambeta-Kwon relaxed framework.
 
 Setup
 -----
@@ -28,7 +28,7 @@ Setup
     wrapper = PortfolioWrapper(dist)
     wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
 
-Step 2 – Frontier and diagnostics
+Step 2 - Frontier and diagnostics
 ----------------------------------
 
 .. code-block:: python
@@ -44,7 +44,7 @@ Step 2 – Frontier and diagnostics
     diagnostics["expected_return"] = frontier.returns
     diagnostics
 
-Step 3 – Visualise the frontier
+Step 3 - Visualise the frontier
 --------------------------------
 
 .. code-block:: python
@@ -60,22 +60,22 @@ Step 3 – Visualise the frontier
     ax.set_title("Relaxed Risk Parity Frontier")
     ax.figure
 
-Step 4 – Interpreting the metadata
+Step 4 - Interpreting the metadata
 -----------------------------------
 
 The ``frontier.metadata`` list records, for each portfolio:
 
-* ``target_multiplier`` – the relaxed multiplier applied to the base risk-parity
+* ``target_multiplier`` - the relaxed multiplier applied to the base risk-parity
   profile.
-* ``lambda_reg`` – the diagonal penalty used during optimisation.
-* ``target_return`` – the effective return constraint at the solution. If
+* ``lambda_reg`` - the diagonal penalty used during optimisation.
+* ``target_return`` - the effective return constraint at the solution. If
   clipping occurred, this may differ from the originally requested target.
 
-This enriched metadata is ideal for governance dashboards—combine it with the
+This enriched metadata is ideal for governance dashboards--combine it with the
 ``diagnostics`` DataFrame to monitor trade-offs between target multipliers and
 achievable returns.
 
-Step 5 – Deployment tips
+Step 5 - Deployment tips
 -------------------------
 
 - Replace the synthetic ``mu``/``cov`` with shrinkage estimates from

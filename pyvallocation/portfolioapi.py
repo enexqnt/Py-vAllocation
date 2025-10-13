@@ -195,7 +195,7 @@ class PortfolioFrontier:
             number of assets and M is the number of portfolios on the frontier. Each column represents the weights of an optimal portfolio.
         returns (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the expected returns for each portfolio on the frontier.
         risks (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the risk values for each portfolio on the frontier. The specific risk measure (e.g., volatility, CVaR, uncertainty budget) is indicated by `risk_measure`.
-        risk_measure (str): A string describing the risk measure used to construct this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)', 'Estimation Risk (‖Σ'¹/²w‖₂)').
+        risk_measure (str): A string describing the risk measure used to construct this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)', 'Estimation Risk (||\Sigma'^1/^2w||_2)').
         asset_names (Optional[List[str]]): An optional list of names for the assets. If provided, enables pandas Series/DataFrame output for portfolio weights.
         metadata (Optional[List[Dict[str, Any]]]): Optional per-portfolio diagnostics. Each entry
             maps diagnostic field names (e.g., ``target_multiplier``) to their values.
@@ -781,16 +781,16 @@ class PortfolioWrapper:
             num_portfolios: The number of portfolios to compute. Defaults to 20.
             max_lambda: The maximum value for the risk aversion parameter lambda,
               which controls the trade-off between nominal return and robustness.
-            lambdas: Optional explicit sequence of λ values. When provided, it takes
+            lambdas: Optional explicit sequence of \lambda values. When provided, it takes
               precedence over ``num_portfolios``/``max_lambda``.
 
         Returns:
             A :class:`PortfolioFrontier` object.
         """
         if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError("Robust optimization requires `mu` (μ₁) and `cov` (Σ₁).")
+            raise ValueError("Robust optimization requires `mu` (\mu_1) and `cov` (\Sigma_1).")
         logger.info(
-            "Computing robust λ-frontier. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
+            "Computing robust \lambda-frontier. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
         )
         self._ensure_default_constraints()
         if self.initial_weights is not None and self.proportional_costs is not None:
@@ -825,12 +825,12 @@ class PortfolioWrapper:
         lambda_list = lambda_grid.tolist()
         returns, risks, weights = optimizer.efficient_frontier(lambda_list)
 
-        logger.info(f"Successfully computed Robust λ-frontier with {weights.shape[1]} portfolios.")
+        logger.info(f"Successfully computed Robust \lambda-frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
             weights=np.asarray(weights, dtype=float),
             returns=np.asarray(returns, dtype=float),
             risks=np.asarray(risks, dtype=float),
-            risk_measure="Estimation Risk (‖Σ'¹/²w‖₂)", asset_names=self.dist.asset_names
+            risk_measure="Estimation Risk (||\Sigma'^1/^2w||_2)", asset_names=self.dist.asset_names
         )
 
     def mean_variance_portfolio_at_return(self, return_target: float) -> Tuple[pd.Series, float, float]:
@@ -945,7 +945,7 @@ class PortfolioWrapper:
         r"""
         Compute a single relaxed risk parity allocation and expose solver diagnostics.
 
-        The routine first solves the baseline risk parity programme (λ = 0) to obtain
+        The routine first solves the baseline risk parity programme (\lambda = 0) to obtain
         the benchmark return :math:`r_{RP} = \mu^{\top}x^{RP}`. Unless an explicit
         ``return_target`` is supplied, the relaxed model is then solved with the adaptive
         target :math:`R = m \cdot \max(r_{RP}, 0)` where ``m`` is ``target_multiplier``.
@@ -1025,7 +1025,7 @@ class PortfolioWrapper:
 
         weights = np.asarray(solution.weights, dtype=float)
         asset_names = self.dist.asset_names
-        name = "Relaxed Risk Parity" if solution.target_return is None else f"Relaxed Risk Parity (λ={lambda_reg:.3f})"
+        name = "Relaxed Risk Parity" if solution.target_return is None else f"Relaxed Risk Parity (\lambda={lambda_reg:.3f})"
         w_series = pd.Series(weights, index=asset_names, name=name)
 
         achieved_return = float(self.dist.mu @ weights)
@@ -1200,7 +1200,7 @@ class PortfolioWrapper:
         risks_array = np.array(risks_list, dtype=float)
 
         logger.info(
-            "Computed relaxed risk parity frontier with %d portfolios (λ=%s).",
+            "Computed relaxed risk parity frontier with %d portfolios (\lambda=%s).",
             weight_matrix.shape[1],
             lambda_reg,
         )
@@ -1224,13 +1224,13 @@ class PortfolioWrapper:
             A tuple containing the portfolio weights, return, and risk.
         """
         if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError("Robust optimization requires `mu` (μ₁) and `cov` (Σ₁).")
+            raise ValueError("Robust optimization requires `mu` (\mu_1) and `cov` (\Sigma_1).")
         logger.info(
-            "Solving robust γ-portfolio. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
+            "Solving robust \gamma-portfolio. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
         )
         self._ensure_default_constraints()
         if self.initial_weights is not None and self.proportional_costs is not None:
-            logger.info("Including proportional transaction costs in robust γ-portfolio optimization.")
+            logger.info("Including proportional transaction costs in robust \gamma-portfolio optimization.")
 
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
@@ -1245,7 +1245,7 @@ class PortfolioWrapper:
         w_series = pd.Series(result.weights, index=self.dist.asset_names, name="Robust Gamma Portfolio")
             
         logger.info(
-            f"Successfully solved for robust γ-portfolio. "
+            f"Successfully solved for robust \gamma-portfolio. "
             f"Nominal Return: {result.nominal_return:.4f}, Estimation Risk: {result.risk:.4f}"
         )
         return w_series, result.nominal_return, result.risk

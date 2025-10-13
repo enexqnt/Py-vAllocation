@@ -49,7 +49,7 @@ def _wrap_matrix(x_np, template):
 
 
 def log2simple(mu_g, cov_g):
-    """μ,Σ of log-returns → μ,Σ of simple returns (vectorised, pandas-aware)."""
+    """\mu,\Sigma of log-returns -> \mu,\Sigma of simple returns (vectorised, pandas-aware)."""
     mu_g_np = _to_numpy(mu_g)
     cov_g_np = _to_numpy(cov_g)
 
@@ -66,7 +66,7 @@ def log2simple(mu_g, cov_g):
 
 
 def simple2log(mu_r, cov_r):
-    """μ,Σ of simple returns → μ,Σ of log-returns (log-normal assumption)."""
+    """\mu,\Sigma of simple returns -> \mu,\Sigma of log-returns (log-normal assumption)."""
     mu_r_np = _to_numpy(mu_r)
     cov_r_np = _to_numpy(cov_r)
 
@@ -82,62 +82,38 @@ def simple2log(mu_r, cov_r):
 
 def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
     """
-    Simulate scenario‐based sums of rows drawn from R over a given horizon.
+    Simulate horizon sums by sampling scenarios with replacement.
 
     Parameters
     ----------
-    R : np.ndarray or pd.DataFrame or pd.Series
-        If 1-D (shape = (n_rows,)), we treat each entry as a possible return (Series-style).
-        If 2-D (shape = (n_rows, n_cols)), each row is one multivariate outcome (DataFrame-style).
-    investment_horizon : int, default 2
-        Number of time-steps to draw for each simulation. For each of the n_simulations,
-        we sample `investment_horizon` rows (with replacement).
-    p : array-like or None, default None
-        Probability weights for sampling each row. If None, rows are drawn uniformly.
-        Length must equal the number of rows in R.
-    n_simulations : int, default 1000
-        Number of simulated “paths” to generate.
+    R : array-like or pandas object
+        Historical or simulated scenarios. One-dimensional inputs represent
+        single-asset returns (length ``T``). Two-dimensional inputs represent
+        ``T`` scenarios across ``N`` assets.
+    investment_horizon : int, default ``2``
+        Number of draws (with replacement) per simulated path.
+    p : array-like, optional
+        Scenario probabilities. When omitted, draws are uniform. Length must
+        match the number of rows in ``R``.
+    n_simulations : int, default ``1000``
+        Number of simulated paths to generate.
 
     Returns
     -------
-    results : np.ndarray or pd.Series or pd.DataFrame
-        ─ If `R` was a NumPy array of shape (n_rows,) or (n_rows, n_cols), returns a
-          NumPy array:
-            • If R was 1-D, output is shape (n_simulations,) – sums across the horizon.
-            • If R was 2-D, output is shape (n_simulations, n_cols).
-        ─ If `R` was a pandas Series (length = n_rows), returns a pandas Series of length
-          n_simulations (sum-over-horizon for each sim).
-        ─ If `R` was a pandas DataFrame (shape = (n_rows, n_cols)), returns a pandas
-          DataFrame of shape (n_simulations, n_cols), where each row is the sum over
-          the randomly drawn horizon for each column.
+    numpy.ndarray or pandas.Series or pandas.DataFrame
+        Simulated sums whose structure mirrors the input type:
+
+        * 1-D inputs yield length-``n_simulations`` vectors.
+        * 2-D inputs yield ``(n_simulations, n_assets)`` matrices.
 
     Examples
     --------
-    # (a) Passing a NumPy 1-D array
-    >>> R_np = np.array([0.01, -0.02, 0.03, 0.00])
-    >>> out_np = project_scenarios(R_np, investment_horizon=3, n_simulations=5)
-    >>> type(out_np)
-    <class 'numpy.ndarray'>
-    >>> out_np.shape
-    (5,)
-
-    # (b) Passing a pandas Series
-    >>> R_ser = pd.Series([0.01, -0.02, 0.03, 0.00], name="daily_return")
-    >>> out_ser = project_scenarios(R_ser, investment_horizon=3, n_simulations=5)
-    >>> type(out_ser)
-    <class 'pandas.core.series.Series'>
-    >>> out_ser.shape
-    (5,)
-
-    # (c) Passing a pandas DataFrame
-    >>> R_df = pd.DataFrame({
-    ...     "ret_a": [0.01, -0.02, 0.03, 0.00],
-    ...     "ret_b": [0.02, -0.01, 0.01, 0.03]
-    ... })
-    >>> out_df = project_scenarios(R_df, investment_horizon=2, n_simulations=3)
-    >>> type(out_df)
-    <class 'pandas.core.frame.DataFrame'>
-    >>> out_df.shape
+    >>> import numpy as np
+    >>> project_scenarios(np.array([0.01, -0.02, 0.03]), investment_horizon=2, n_simulations=4).shape
+    (4,)
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({'a': [0.01, -0.02], 'b': [0.0, 0.02]})
+    >>> project_scenarios(df, investment_horizon=2, n_simulations=3).shape
     (3, 2)
     """
 

@@ -182,7 +182,7 @@ def plot_frontiers(
             style.update(scatter_kwargs)
             style.update(marker_kwargs.get(marker, {}))
 
-            highlight_label = f"{label} – {display_name}"
+            highlight_label = f"{label} - {display_name}"
             if metadata_entry and metadata_keys:
                 tokens: List[str] = []
                 for key in metadata_keys:

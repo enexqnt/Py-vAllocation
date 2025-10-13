@@ -1,11 +1,11 @@
 """
 Comprehensive ETF allocation quickstart.
 
-This script mirrors the documentation tutorial and executes an end-to-end
+This script mirrors ``docs/tutorials/quickstart_etf_allocation.rst`` and executes an end-to-end
 workflow:
 
 1. Load ETF prices and compute weekly returns.
-2. Estimate moments via shrinkage, robust methods, and a Black–Litterman view.
+2. Estimate moments via shrinkage, robust methods, and a Black-Litterman view.
 3. Project the statistics to a 1-year horizon.
 4. Build optimised frontiers for each specification.
 5. Assemble stacked/average ensemble portfolios.
@@ -98,7 +98,7 @@ def long_term_views_nov2025(asset_names: pd.Index) -> tuple[dict, dict, dict]:
     Views are deliberately modest and diversified:
     - Equities expected to outperform duration over the long run.
     - A mild positive drift for gold and broad commodities as inflation hedges.
-    - Moderately negative stock–bond correlation; bounded commodity and gold vols.
+    - Moderately negative stock-bond correlation; bounded commodity and gold vols.
 
     Returns:
         mean_views_bl: Mapping used with BL (equality mean views).
@@ -200,12 +200,12 @@ def plot_frontier_weights(frontiers: dict, *, outfile: Path, max_specs: int = 4)
         x = np.arange(W.shape[1])
         labels = f.asset_names or [f"A{i}" for i in range(W.shape[0])]
         ax.stackplot(x, W, labels=labels)
-        ax.set_title(f"Frontier Weights – {name}")
+        ax.set_title(f"Frontier Weights - {name}")
         ax.set_ylabel("Weight")
         ax.set_xlim(x.min(), x.max())
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc="upper right", ncols=len(labels))
-    axes[-1].set_xlabel("Frontier index (low → high risk)")
+    axes[-1].set_xlabel("Frontier index (low -> high risk)")
     fig.tight_layout()
     fig.savefig(outfile, dpi=150)
     plt.close(fig)
@@ -229,7 +229,7 @@ def main() -> None:
     weekly_returns, weekly_prices = load_weekly_data()
 
     # Moment estimation
-    log("Estimating shrinkage moments (James–Stein + OAS)...")
+    log("Estimating shrinkage moments (James-Stein + OAS)...")
     mu_shrink, sigma_oas = estimate_moments(
         weekly_returns,
         mean_estimator="james_stein",
@@ -255,7 +255,7 @@ def main() -> None:
         sample_sigma=sigma_tyler,
         n_obs=n_obs,
     )
-    log("Building Black–Litterman posterior with macro view...")
+    log("Building Black-Litterman posterior with macro view...")
     mu_bl, sigma_bl = build_black_litterman(mu_shrink, sigma_oas)
     log("Opinion pooling via entropy pooling (Flexible Views)...")
     mu_ep, sigma_ep, q_ep = build_opinion_pooling(weekly_returns)
@@ -420,7 +420,7 @@ def main() -> None:
     sharpe = (annualised_return - 0.01) / annualised_vol if annualised_vol > 0 else np.nan
     print(
         f"\nStacked portfolio trailing metrics: "
-        f"return={annualised_return:.2%}, vol={annualised_vol:.2%}, Sharpe≈{sharpe:.2f} (rf=1%)"
+        f"return={annualised_return:.2%}, vol={annualised_vol:.2%}, Sharpe~{sharpe:.2f} (rf=1%)"
     )
 
     # Plot the frontiers together
@@ -446,7 +446,7 @@ def main() -> None:
                 asset_names=f_ep_cvar.asset_names,
             )
     plot_frontiers(mv_frontiers, ax=ax, highlight=())
-    ax.set_title("ETF Frontier Comparison – 1Y Horizon (Volatility)")
+    ax.set_title("ETF Frontier Comparison - 1Y Horizon (Volatility)")
     ax.set_xlabel("Risk")
     ax.set_ylabel("Expected Return")
     fig.tight_layout()
@@ -458,7 +458,7 @@ def main() -> None:
         fig2, ax2 = plt.subplots(figsize=(8, 5))
         cvar_frontiers = {k: v for k, v in ensemble.frontiers.items() if "CVaR" in k}
         plot_frontiers(cvar_frontiers, ax=ax2, highlight=())
-        ax2.set_title("ETF Frontier – 1Y Horizon (CVaR)")
+        ax2.set_title("ETF Frontier - 1Y Horizon (CVaR)")
         ax2.set_xlabel("CVaR Risk")
         ax2.set_ylabel("Expected Return")
         fig2.tight_layout()
@@ -475,7 +475,7 @@ def main() -> None:
         axB.set_title("CVaR (alpha=0.05)")
         axB.set_xlabel("Risk")
         axB.set_ylabel("Expected Return")
-        fig3.suptitle("ETF Frontier Comparison – 1Y Horizon")
+        fig3.suptitle("ETF Frontier Comparison - 1Y Horizon")
         fig3.tight_layout()
         fig3.savefig(OUTPUT_DIR / "frontiers.png", dpi=150)
         plt.close(fig3)
