@@ -16,6 +16,7 @@ Pick the storyline that best matches your use case:
    cvar_portfolio
    relaxed_risk_parity
    portfolio_ensembles
+   stress_testing
 
 Examples & notebooks
 --------------------

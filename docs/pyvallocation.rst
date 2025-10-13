@@ -30,3 +30,9 @@ Utility Functions
 ^^^^^^^^^^^^^^^^^
 
 - :doc:`pyvallocation.utils`: Comprehensive utility functions for data handling, validation, and projection
+- :doc:`pyvallocation.utils.performance`: Scenario PnL helpers and performance summaries
+
+Stress Testing
+^^^^^^^^^^^^^^
+
+- :doc:`pyvallocation.stress`: Probability tilts and linear scenario shocks

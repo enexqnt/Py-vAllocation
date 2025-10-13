@@ -520,27 +520,30 @@ def main() -> None:
 
     # Stress-test with flexible views: adverse equity drift and weaker hedging
     log("Stress-testing with adverse flexible views...")
-    stress_processor = FlexibleViewsProcessor(
-        prior_returns=weekly_returns,
-        mean_views={"SPY": ("<=", -0.0002)},  # soft negative drift
-        corr_views={("SPY", "TLT"): (">=", -0.02)},  # weaker negative correlation
-        sequential=True,
-        random_state=7,
-    )
-    mu_stress, sigma_stress = stress_processor.get_posterior()
-    mu_stress_1y, sigma_stress_1y = log2simple(*project_mean_covariance(
-        pd.Series(mu_stress, index=weekly_returns.columns),
-        pd.DataFrame(sigma_stress, index=weekly_returns.columns, columns=weekly_returns.columns),
-        annualization_factor=52,
-    ))
-    from pyvallocation.portfolioapi import PortfolioWrapper
-    stress_frontier = PortfolioWrapper(AssetsDistribution(mu=mu_stress_1y, cov=sigma_stress_1y))
-    stress_frontier.set_constraints(long_only)
-    stress_mv = stress_frontier.mean_variance_frontier(num_portfolios=21)
-    stress_weights, *_ = stress_mv.portfolio_at_risk_target(max_risk=0.12)
-    drift = (stress_weights - ensemble.stacked).dropna()
-    print("\nStress-test change vs baseline (top 5 by abs delta):")
-    print(drift.reindex(drift.abs().sort_values(ascending=False).head().index))
+    try:
+        stress_processor = FlexibleViewsProcessor(
+            prior_returns=weekly_returns,
+            mean_views={"SPY": ("<=", -0.0002)},  # soft negative drift
+            corr_views={("SPY", "TLT"): (">=", -0.02)},  # weaker negative correlation
+            sequential=True,
+            random_state=7,
+        )
+        mu_stress, sigma_stress = stress_processor.get_posterior()
+        mu_stress_1y, sigma_stress_1y = log2simple(*project_mean_covariance(
+            pd.Series(mu_stress, index=weekly_returns.columns),
+            pd.DataFrame(sigma_stress, index=weekly_returns.columns, columns=weekly_returns.columns),
+            annualization_factor=52,
+        ))
+        from pyvallocation.portfolioapi import PortfolioWrapper
+        stress_frontier = PortfolioWrapper(AssetsDistribution(mu=mu_stress_1y, cov=sigma_stress_1y))
+        stress_frontier.set_constraints(long_only)
+        stress_mv = stress_frontier.mean_variance_frontier(num_portfolios=21)
+        stress_weights, *_ = stress_mv.portfolio_at_risk_target(max_risk=0.12)
+        drift = (stress_weights - ensemble.stacked).dropna()
+        print("\nStress-test change vs baseline (top 5 by abs delta):")
+        print(drift.reindex(drift.abs().sort_values(ascending=False).head().index))
+    except RuntimeError as exc:
+        log(f"Flexible view stress-test failed ({exc}); skipping stress comparison.")
 
     log("Quickstart completed successfully.")
 

@@ -27,9 +27,9 @@ Where to start
 - :doc:`tutorials/quickstart_etf_allocation` for the ETF allocation walk-through
   that mirrors the runnable quickstart script.
 - :doc:`tutorials/index` for guided walkthroughs of the main workflows
-  (mean-variance, CVaR, and portfolio ensembling).
+  (mean-variance, CVaR, stress testing, and portfolio ensembling).
 - The `examples/` directory offers runnable scripts that mirror the tutorials -
-  try ``python examples/portfolio_ensembles.py`` for a quick demonstration.
+  try ``python examples/stress_and_pnl.py`` for probability tilts and performance summaries.
 
 .. toctree::
    :maxdepth: 1
@@ -51,6 +51,8 @@ Where to start
    pyvallocation.moments
    pyvallocation.ensembles
    pyvallocation.utils
+   pyvallocation.stress
+   pyvallocation.utils.performance
 
 .. toctree::
    :maxdepth: 1

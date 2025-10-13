@@ -44,6 +44,13 @@ __all__ = [
     "assemble_portfolio_ensemble",
     "make_portfolio_spec",
     "plot_frontiers",
+    "stress_test",
+    "exp_decay_stress",
+    "kernel_focus_stress",
+    "entropy_pooling_stress",
+    "linear_map",
+    "scenario_pnl",
+    "performance_report",
 ]
 
 from .portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper
@@ -88,3 +95,11 @@ from .ensembles import (
     make_portfolio_spec,
 )
 from .plotting import plot_frontiers
+from .stress import (
+    entropy_pooling_stress,
+    exp_decay_stress,
+    kernel_focus_stress,
+    linear_map,
+    stress_test,
+)
+from .utils.performance import performance_report, scenario_pnl

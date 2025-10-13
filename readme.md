@@ -116,7 +116,3 @@ Issues and pull requests are welcome. Please see `CONTRIBUTING.md`.
 GPL-3.0-or-later - see [LICENSE](LICENSE) for the full text. Portions of the
 optimisation routines are adapted (with attribution) from
 [fortitudo-tech](https://github.com/fortitudo-tech/fortitudo.tech).
-
----
-
-Copyright (c) enexqnt. GPL-3.0-or-later.

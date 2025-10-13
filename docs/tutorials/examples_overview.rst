@@ -35,6 +35,7 @@ Utilities
   lot-sized share counts.
 - :file:`examples/portfolio_ensembles.py` - blend multiple model selections via
   stacking/averaging to a single allocation.
+- :file:`examples/stress_and_pnl.py` - probability tilts, linear shocks, and performance summaries.
 
 Notebooks
 ---------

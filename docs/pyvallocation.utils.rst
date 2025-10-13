@@ -12,6 +12,7 @@ Submodules
    pyvallocation.utils.functions
    pyvallocation.utils.projection
    pyvallocation.utils.validation
+   pyvallocation.utils.performance
 
 Module contents
 ---------------

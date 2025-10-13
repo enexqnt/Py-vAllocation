@@ -34,6 +34,7 @@ Utilities
 
 - `discrete_allocation.py` - transform continuous weights into lot-sized share counts.
 - `portfolio_ensembles.py` - stack/average multiple model selections into a single allocation.
+- `stress_and_pnl.py` - stress-testing utilities and performance summaries (half-life, kernel focus, linear shocks).
 
 Data
 ----
