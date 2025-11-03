@@ -13,12 +13,31 @@ if TYPE_CHECKING:  # pragma: no cover - typing helper
 
 
 def _require_matplotlib():
+    """
+    Import :mod:`matplotlib.pyplot` and fall back to the Agg backend when GUI
+    toolkits are unavailable (e.g. headless CI environments).
+    """
     try:
         import matplotlib.pyplot as plt
     except ImportError as exc:  # pragma: no cover - guarded by tests
         raise ImportError(
             "`plot_frontiers` requires `matplotlib`. Install it via `pip install matplotlib`."
         ) from exc
+
+    try:
+        fig = plt.figure()
+    except Exception:  # pragma: no cover - backend fallback
+        try:
+            plt.switch_backend("Agg")
+        except Exception:
+            import matplotlib
+
+            matplotlib.use("Agg", force=True)
+            import matplotlib.pyplot as plt  # type: ignore[no-redef]
+
+        fig = plt.figure()
+
+    plt.close(fig)
     return plt
 
 

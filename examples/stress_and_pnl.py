@@ -60,7 +60,7 @@ def main() -> None:
     print(df_half_life.round(4))
 
     print("\n=== Kernel focus stress on SPY drawdowns ===")
-    focus = returns["SPY"].rolling(12).std(ddof=0).fillna(method="bfill")
+    focus = returns["SPY"].rolling(12).std(ddof=0).bfill()
     df_kernel = kernel_focus_stress(
         weights,
         returns.values,
@@ -86,4 +86,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

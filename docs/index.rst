@@ -18,6 +18,8 @@ Key capabilities
   scenario bootstrapping reduce estimation error out of the box.
 - **Portfolio ensembling** - average exposures, stack frontiers, and discretise
   weights to bridge the gap between optimisation outputs and tradeable lists.
+- **Stress testing made easy** - probability tilts, linear shocks, and PnL summaries
+  reuse the same scenario machinery to keep analyses consistent.
 
 Where to start
 --------------
@@ -51,8 +53,6 @@ Where to start
    pyvallocation.moments
    pyvallocation.ensembles
    pyvallocation.utils
-   pyvallocation.stress
-   pyvallocation.utils.performance
 
 .. toctree::
    :maxdepth: 1

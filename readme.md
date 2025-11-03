@@ -19,6 +19,8 @@ preserved throughout every workflow.
   POET, and graphical lasso estimators are wired into `estimate_moments`.
 - **Production plumbing** - ensemble builders, discrete allocation, and plotting
   utilities reduce friction between research code and reporting.
+- **Stress testing & PnL summary** - one-line helpers for probability tilts,
+  linear shocks, and risk reports keep analyses consistent with scenario maths.
 - **Optional extras** - install the `robust` extra to enable POET, nonlinear
   shrinkage, and other heavy dependencies only when required.
 
@@ -67,19 +69,20 @@ w, ret, risk = front.get_tangency_portfolio(risk_free_rate=0.01)
   - `quickstart_etf_allocation.py` - moments -> frontiers -> ensemble -> trades
   - `mean_variance_frontier.py`, `cvar_allocation.py`, `robust_frontier.py`
   - `relaxed_risk_parity_frontier.py`, `portfolio_ensembles.py`, `discrete_allocation.py`
+  - `stress_and_pnl.py` - probability tilts + linear shocks + performance reports
 - Notebooks (`examples/*.ipynb`) mirror the tutorials.
 
 ## Documentation & resources
 
 - Full documentation is built with Sphinx/napoleon and is ready for Read the Docs deployment. Build locally with
   `sphinx-build -b html docs docs/_build/html`.
-- Tutorials live under `docs/tutorials/` and mirror the runnable scripts.
+- Tutorials live under `docs/tutorials/` and mirror the runnable scripts (including the stress-testing walkthrough).
 - The API reference is generated from docstrings (`docs/pyvallocation*.rst`).
 
 ## Repository layout
 
 - `pyvallocation/` - library source code.
-- `examples/` - runnable end-to-end workflows (ETF quickstart, CVaR frontier, ensembles, discrete allocation).
+- `examples/` - runnable end-to-end workflows (ETF quickstart, CVaR frontier, ensembles, stress testing, discrete allocation).
 - `docs/` - Sphinx site (tutorials, API reference, bibliography).
 - `tests/` - pytest suite covering numerical routines, ensembles, plotting, and discrete allocation.
 - `output/` - artefacts written by example scripts.

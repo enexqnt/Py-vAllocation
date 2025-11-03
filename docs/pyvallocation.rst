@@ -36,3 +36,9 @@ Stress Testing
 ^^^^^^^^^^^^^^
 
 - :doc:`pyvallocation.stress`: Probability tilts and linear scenario shocks
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+
+   pyvallocation.stress

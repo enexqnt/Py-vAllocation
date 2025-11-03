@@ -1,3 +1,5 @@
+.. _stress_testing_tutorial:
+
 Stress Testing & PnL Summary
 ============================
 

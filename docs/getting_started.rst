@@ -117,6 +117,7 @@ Where to go next
   * ``relaxed_risk_parity_frontier.py`` - relaxed risk parity diagnostics.
   * ``discrete_allocation.py`` - map continuous weights to share counts.
   * ``portfolio_ensembles.py`` - blend multiple frontiers into a single allocation.
+  * ``stress_and_pnl.py`` - probability tilts, linear shocks, and performance summaries.
 
 - Dive into the API reference starting at :doc:`pyvallocation.portfolioapi`;
   docstrings are synchronised with the published documentation.
