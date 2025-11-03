@@ -7,6 +7,13 @@ NumPy arrays or :class:`~pyvallocation.portfolioapi.PortfolioFrontier`
 instances, so research portfolios can be piped into production workflows with
 minimal glue code.
 
+.. important::
+
+   The exposure stacking routines adapt the GPL-3 implementation released by
+   the `fortitudo.tech <https://github.com/fortitudo-tech/fortitudo.tech>`_
+   project. If you build on top of them, please keep the original attribution in
+   downstream documentation or research notes.
+
 At a glance
 -----------
 
@@ -43,6 +50,22 @@ to get a feel for the APIs:
    print(avg)      # -> [0.45 0.55]
    print(stacked)  # -> exposure stacking output with damped idiosyncratic bets
 
+Workflow summary
+----------------
+
+End-to-end ensemble construction typically follows these steps:
+
+1. **Generate candidate portfolios.** Optimise frontiers or run bespoke models
+   to obtain a set of column-organised sample weights.
+2. **Select representatives.** Use methods such as
+   :meth:`pyvallocation.portfolioapi.PortfolioFrontier.portfolio_at_risk_target`
+   or :func:`pyvallocation.ensembles.make_portfolio_spec` to standardise inputs.
+3. **Blend exposures.** Apply :func:`average_exposures` for a linear average or
+   :func:`exposure_stacking` to damp idiosyncratic bets while keeping the common
+   factor structure.
+4. **Report and trade.** The outputs are pandas-aware vectors, so they can be
+   fed straight into stress testing, discrete allocation, or attribution.
+
 When you work with pre-built frontiers the API stays consistent:
 
 .. code-block:: python
@@ -73,6 +96,17 @@ Tips
   flow straight into downstream reporting.
 - Solver options can be forwarded via ``solver_options`` when you need to tweak
   CVXOPT tolerances or iteration limits.
+
+Troubleshooting
+---------------
+
+- **Shape mismatches.** Ensure inputs broadcast to ``(n_assets, n_samples)``.
+  Use ``DataFrame.T`` or ``np.column_stack`` to align your sample set.
+- **Missing labels.** When averaging/stacking Series with different indices the
+  helpers will reindex and raise on missing entries—double-check asset names.
+- **Solver errors.** Exposure stacking relies on CVXOPT. Pass
+  ``solver_options={'feastol': 1e-7}`` (or similar) for noisy inputs, and verify
+  that no column contains NaNs or violates the long-only assumption.
 
 Reference
 ---------

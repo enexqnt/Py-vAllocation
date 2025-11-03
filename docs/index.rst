@@ -34,13 +34,33 @@ Where to start
 - The `examples/` directory offers runnable scripts that mirror the tutorials -
   try ``python examples/stress_and_pnl.py`` for probability tilts and performance summaries.
 
+Install & quickstart
+--------------------
+
+.. code-block:: bash
+
+   # Clone and install the library (full instructions in :doc:`getting_started`)
+   git clone https://github.com/enexqnt/py-vallocation.git
+   cd py-vallocation
+   python -m pip install -e .[robust]
+
+.. code-block:: python
+
+   import numpy as np
+   from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+
+   wrapper = PortfolioWrapper(AssetsDistribution(scenarios=np.random.normal(0, 0.01, size=(252, 4))))
+   wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+   frontier = wrapper.mean_variance_frontier(num_portfolios=11)
+   weights, ret, risk = frontier.get_tangency_portfolio(risk_free_rate=0.01)
+   print(weights.round(3))
+
 .. toctree::
    :maxdepth: 1
    :caption: Tutorials & Examples
 
    getting_started
    tutorials/index
-   tutorials/examples_overview
 
 .. toctree::
    :maxdepth: 2
