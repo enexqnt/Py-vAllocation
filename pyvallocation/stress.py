@@ -142,11 +142,12 @@ def stress_test(
     >>> import numpy as np
     >>> from pyvallocation.stress import stress_test, linear_map
     >>> weights = np.array([0.6, 0.4])
-    >>> scenarios = np.array([[0.01, -0.02], [0.02, 0.01], [-0.03, 0.00]])
+    >>> scenarios = np.array([[0.01, 0.02], [0.00, 0.01], [-0.02, 0.00]])
     >>> shock = linear_map(scale=1.5)  # magnify returns by 50%
-    >>> stress_test(weights, scenarios, transform=shock)[["return_nom", "return_stress"]]
+    >>> df = stress_test(weights, scenarios, transform=shock)
+    >>> df[["return_nom", "return_stress"]].round(3)
                  return_nom  return_stress
-    portfolio_0    0.000800        0.00120
+    portfolio_0        0.002          0.003
     """
 
     if not 0.0 < alpha < 1.0:
@@ -264,9 +265,10 @@ def exp_decay_stress(
     >>> from pyvallocation.stress import exp_decay_stress
     >>> weights = np.array([0.5, 0.5])
     >>> scenarios = np.array([[0.01, 0.00], [-0.02, 0.03], [0.015, -0.01]])
-    >>> exp_decay_stress(weights, scenarios, half_life=2)[["return_nom", "return_stress"]]
+    >>> df = exp_decay_stress(weights, scenarios, half_life=2)
+    >>> df[["return_nom", "return_stress"]].round(4)
                  return_nom  return_stress
-    portfolio_0    0.004500        0.00129
+    portfolio_0        0.0042         0.0039
     """
     scenario_array = np.asarray(scenarios, dtype=float)
     p_star = generate_exp_decay_probabilities(scenario_array.shape[0], half_life)
@@ -323,10 +325,10 @@ def kernel_focus_stress(
     >>> from pyvallocation.stress import kernel_focus_stress
     >>> returns = np.array([[0.01, 0.00], [-0.02, 0.03], [0.015, -0.01]])
     >>> vol_proxy = np.array([0.10, 0.15, 0.30])  # e.g. rolling volatility
-    >>> kernel_focus_stress([0.5, 0.5], returns, focus_series=vol_proxy,
-    ...                     target=0.30)[["return_nom", "return_stress"]]
+    >>> df = kernel_focus_stress([0.5, 0.5], returns, focus_series=vol_proxy, target=0.30)
+    >>> df[["return_nom", "return_stress"]].round(4)
                  return_nom  return_stress
-    portfolio_0    0.004500        0.00391
+    portfolio_0        0.0042         0.0031
     """
     v = np.asarray(focus_series, dtype=float).reshape(-1)
     if v.shape[0] != np.asarray(scenarios, dtype=float).shape[0]:
@@ -378,10 +380,10 @@ def entropy_pooling_stress(
     >>> from pyvallocation.stress import entropy_pooling_stress
     >>> scenarios = np.array([[0.01, -0.02], [0.02, 0.01], [-0.03, 0.00]])
     >>> posterior = np.array([0.10, 0.70, 0.20])  # output of entropy_pooling
-    >>> entropy_pooling_stress([0.4, 0.6], scenarios,
-    ...                        posterior_probabilities=posterior)[["return_nom", "return_stress"]]
-                 return_nom  return_stress
-    portfolio_0   -0.000200        0.00260
+    >>> df = entropy_pooling_stress([0.4, 0.6], scenarios, posterior_probabilities=posterior)
+    >>> df[["return_nom", "return_stress", "KL_q_p"]].round(4)
+                 return_nom  return_stress  KL_q_p
+    portfolio_0       -0.002         0.0066  0.2968
     """
     return stress_test(
         weights,
