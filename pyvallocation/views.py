@@ -1024,21 +1024,21 @@ class BlackLittermanProcessor:
 
         if pi is not None:
             self._pi = np.asarray(pi, dtype=float).reshape(-1, 1)
-            src = "user \pi"
+            src = "user \\pi"
         elif market_weights is not None:
             weights = np.asarray(market_weights, dtype=float).ravel()
             if weights.size != n_assets:
                 raise ValueError("market_weights length mismatch.")
             weights /= weights.sum()
             self._pi = risk_aversion * self._sigma @ weights.reshape(-1, 1)
-            src = "\delta \Sigma w"
+            src = "\\delta \\Sigma w"
         elif prior_mean is not None:
             self._pi = np.asarray(prior_mean, dtype=float).reshape(-1, 1)
             src = "prior_mean"
         else:
             raise ValueError("Provide exactly one of pi, market_weights or prior_mean.")
         if verbose:
-            print(f"[BL] \pi source: {src}.")
+            print(f"[BL] \\pi source: {src}.")
 
         def _vec_to_dict(vec_like):
             if vec_like is None:
@@ -1159,8 +1159,8 @@ class BlackLittermanProcessor:
                 diag.append(factor * var_i)
             omega_mat = np.diag(diag)
             if verbose:
-                suffix = "\tau \Sigma" if self._idzorek_use_tau else "\Sigma"
-                print(f"[BL] \Omega from Idzorek confidences (base = {suffix}).")
+                suffix = "\\tau \\Sigma" if self._idzorek_use_tau else "\\Sigma"
+                print(f"[BL] \\Omega from Idzorek confidences (base = {suffix}).")
 
         # -- default diagonal -------------------------------------------
         elif omega is None:
@@ -1180,7 +1180,7 @@ class BlackLittermanProcessor:
                     "omega must be 'idzorek', length-K vector, or KxK matrix."
                 )
             if verbose:
-                print("[BL] Using user-provided \Omega.")
+                print("[BL] Using user-provided \\Omega.")
 
         return omega_mat
 
