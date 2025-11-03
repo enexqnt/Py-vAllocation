@@ -47,6 +47,14 @@ def scenario_pnl(weights: WeightsLike, scenarios: ArrayLike) -> ArrayLike:
     ------
     ValueError
         If scenario dimensions are inconsistent with the weight vector/matrix.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pyvallocation.utils.performance import scenario_pnl
+    >>> scenarios = np.array([[0.02, 0.00], [0.00, 0.02]])
+    >>> scenario_pnl([0.5, 0.5], scenarios)
+    array([0.01, 0.01])
     """
     if isinstance(scenarios, pd.DataFrame):
         arr = scenarios.to_numpy(dtype=float)
@@ -131,6 +139,24 @@ def performance_report(
     ValueError
         If inputs are inconsistent (e.g. mismatched dimensions or invalid
         probabilities).
+
+    Notes
+    -----
+    VaR and CVaR follow the loss convention, so profitable scenarios appear as
+    negative numbers (representing gains) while losses are positive.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pyvallocation.utils.performance import performance_report
+    >>> scenarios = np.array([[0.02, 0.00], [0.02, 0.00]])
+    >>> performance_report([0.5, 0.5], scenarios).round(4)
+    mean      0.0100
+    stdev     0.0000
+    VaR95    -0.0100
+    CVaR95   -0.0100
+    ENS       2.0000
+    dtype: float64
     """
     if not 0.0 < alpha < 1.0:
         raise ValueError("`alpha` must be in (0, 1).")
