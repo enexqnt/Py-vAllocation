@@ -62,12 +62,17 @@ When you work with pre-built frontiers the API stays consistent:
 Tips
 ----
 
-- The stacking depth ``L`` controls how tightly the exposures are shrunk.
-  Larger values create smoother allocations but require more sample portfolios.
+- The stacking depth ``L`` controls how tightly exposures are shrunk. Larger
+  values yield smoother allocations but require more sample portfolios (``L``
+  cannot exceed the number of samples).
+- Exposure stacking assumes portfolios are long-only and sum to one. If your
+  research stack permits leverage, normalise samples first.
 - :func:`assemble_portfolio_ensemble` can mix averaging and stacking in a single
   call. See :doc:`tutorials/portfolio_ensembles` for an end-to-end example.
 - Every helper preserves pandas indices when they are present so the output can
   flow straight into downstream reporting.
+- Solver options can be forwarded via ``solver_options`` when you need to tweak
+  CVXOPT tolerances or iteration limits.
 
 Reference
 ---------

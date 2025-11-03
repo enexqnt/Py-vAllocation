@@ -30,15 +30,17 @@ Where to start
   that mirrors the runnable quickstart script.
 - :doc:`tutorials/index` for guided walkthroughs of the main workflows
   (mean-variance, CVaR, stress testing, and portfolio ensembling).
+- :doc:`tutorials/examples_overview` for a catalog of runnable scripts and notebooks.
 - The `examples/` directory offers runnable scripts that mirror the tutorials -
   try ``python examples/stress_and_pnl.py`` for probability tilts and performance summaries.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Getting Started
+   :caption: Tutorials & Examples
 
    getting_started
    tutorials/index
+   tutorials/examples_overview
 
 .. toctree::
    :maxdepth: 2
