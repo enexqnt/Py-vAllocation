@@ -1,8 +1,91 @@
 import logging
-from typing import Union
+from typing import Optional, Sequence, Union
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+ProbabilityLike = Union[np.ndarray, Sequence[float]]
+
+
+def normalize_probability_vector(
+    probabilities: ProbabilityLike,
+    *,
+    strictly_positive: bool = False,
+    name: str = "probabilities",
+) -> np.ndarray:
+    """
+    Validate and normalise a 1-D probability vector.
+
+    Parameters
+    ----------
+    probabilities :
+        Array-like of probabilities. Must be one-dimensional and contain at least
+        one entry.
+    strictly_positive :
+        When ``True`` all entries must be strictly greater than zero. When
+        ``False`` non-negative weights are accepted.
+    name :
+        Identifier used in error messages.
+
+    Returns
+    -------
+    numpy.ndarray
+        Normalised probability vector summing to one.
+    """
+    probs = np.asarray(probabilities, dtype=float).reshape(-1)
+    if probs.ndim != 1 or probs.size == 0:
+        raise ValueError(f"{name} must be a one-dimensional array with at least one entry.")
+    if not np.all(np.isfinite(probs)):
+        raise ValueError(f"{name} must contain only finite values.")
+    if strictly_positive:
+        if np.any(probs <= 0.0):
+            raise ValueError(f"{name} must be strictly positive.")
+    else:
+        if np.any(probs < 0.0):
+            raise ValueError(f"{name} must be non-negative.")
+    total = probs.sum()
+    if not np.isfinite(total) or total <= 0.0:
+        raise ValueError(f"{name} must sum to a positive finite value.")
+    if not np.isclose(total, 1.0):
+        probs = probs / total
+    return probs
+
+
+def resolve_probabilities(
+    probabilities: Optional[ProbabilityLike],
+    n_observations: int,
+    *,
+    strictly_positive: bool = False,
+    name: str = "probabilities",
+) -> np.ndarray:
+    """
+    Return a normalised probability vector of length ``n_observations``.
+
+    Parameters
+    ----------
+    probabilities :
+        Optional array-like of probabilities. When ``None`` a uniform
+        distribution is generated.
+    n_observations :
+        Expected number of observations (length of scenario set).
+    strictly_positive :
+        Forwarded to :func:`normalize_probability_vector`.
+    name :
+        Identifier used in error messages.
+
+    Returns
+    -------
+    numpy.ndarray
+        Probability vector summing to one with shape ``(n_observations,)``.
+    """
+    if probabilities is None:
+        return generate_uniform_probabilities(n_observations)
+    probs = normalize_probability_vector(
+        probabilities, strictly_positive=strictly_positive, name=name
+    )
+    if probs.shape[0] != n_observations:
+        raise ValueError(f"{name} length must match the number of observations ({n_observations}).")
+    return probs
 
 
 def generate_uniform_probabilities(num_observations: int) -> np.ndarray:

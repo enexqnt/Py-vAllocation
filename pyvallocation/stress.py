@@ -18,7 +18,7 @@ from .probabilities import (
     compute_effective_number_scenarios,
     generate_exp_decay_probabilities,
     generate_gaussian_kernel_probabilities,
-    generate_uniform_probabilities,
+    resolve_probabilities,
 )
 from .utils.functions import portfolio_cvar, portfolio_var
 
@@ -33,22 +33,6 @@ __all__ = [
     "entropy_pooling_stress",
     "linear_map",
 ]
-
-
-def _ensure_probabilities(p: Optional[ProbabilityLike], n_obs: int) -> np.ndarray:
-    if p is None:
-        return generate_uniform_probabilities(n_obs)
-    p_arr = np.asarray(p, dtype=float).reshape(-1)
-    if p_arr.shape[0] != n_obs:
-        raise ValueError("Probability vector length must match the number of scenarios.")
-    if np.any(p_arr < 0):
-        raise ValueError("Scenario probabilities must be non-negative.")
-    total = float(np.sum(p_arr))
-    if not np.isfinite(total) or total <= 0:
-        raise ValueError("Scenario probabilities must sum to a positive finite value.")
-    if not np.isclose(total, 1.0):
-        p_arr = p_arr / total
-    return p_arr
 
 
 def _align_weights(
@@ -160,7 +144,7 @@ def stress_test(
         raise ValueError("`scenarios` must be a 2D array-like.")
 
     n_scenarios, n_assets = R_arr.shape
-    p_nom = _ensure_probabilities(probabilities, n_scenarios)
+    p_nom = resolve_probabilities(probabilities, n_scenarios)
     W, aligned_assets, portfolio_names = _align_weights(weights, asset_names)
     if W.shape[0] != n_assets:
         raise ValueError("Weight dimension does not match number of assets in `scenarios`.")
@@ -196,7 +180,11 @@ def stress_test(
 
     if stressed_probabilities is not None or transform is not None:
         p_star = (
-            _ensure_probabilities(stressed_probabilities, n_scenarios)
+            resolve_probabilities(
+                stressed_probabilities,
+                n_scenarios,
+                name="stressed_probabilities",
+            )
             if stressed_probabilities is not None
             else p_nom
         )

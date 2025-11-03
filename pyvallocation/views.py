@@ -9,32 +9,7 @@ from scipy.optimize import Bounds, minimize
 import pandas as pd
 
 from .bayesian import _cholesky_pd
-
-
-def _normalise_probabilities(
-    probabilities: Union[np.ndarray, Sequence[float]],
-    *,
-    name: str,
-    strictly_positive: bool = True,
-) -> np.ndarray:
-    """Validate and normalise a 1-D probability vector."""
-    probs = np.asarray(probabilities, dtype=float).reshape(-1)
-    if probs.ndim != 1 or probs.size == 0:
-        raise ValueError(f"{name} must be a one-dimensional array with at least one entry.")
-    if not np.all(np.isfinite(probs)):
-        raise ValueError(f"{name} must contain only finite values.")
-    if strictly_positive:
-        if np.any(probs <= 0.0):
-            raise ValueError(f"{name} must be strictly positive.")
-    else:
-        if np.any(probs < 0.0):
-            raise ValueError(f"{name} must be non-negative.")
-    total = probs.sum()
-    if not np.isfinite(total) or total <= 0.0:
-        raise ValueError(f"{name} must sum to a positive finite value.")
-    if not np.isclose(total, 1.0):
-        probs = probs / total
-    return probs
+from .probabilities import normalize_probability_vector
 
 def _entropy_pooling_dual_objective(
     lagrange_multipliers: np.ndarray,
@@ -223,7 +198,7 @@ def entropy_pooling(
             f"Method {opt_method} not supported. Choose 'TNC' or 'L-BFGS-B'."
         )
 
-    normalised_prior = _normalise_probabilities(
+    normalised_prior = normalize_probability_vector(
         p,
         name="prior probabilities",
         strictly_positive=True,
@@ -460,7 +435,7 @@ class FlexibleViewsProcessor:
             if prior_probabilities is None:
                 self.p0 = np.full((S, 1), 1.0 / S)
             else:
-                p_array = _normalise_probabilities(
+                p_array = normalize_probability_vector(
                     prior_probabilities,
                     name="prior_probabilities",
                     strictly_positive=True,

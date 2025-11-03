@@ -10,7 +10,10 @@ import numpy as np
 import pandas as pd
 
 from ..moments import estimate_sample_moments
-from ..probabilities import compute_effective_number_scenarios, generate_uniform_probabilities
+from ..probabilities import (
+    compute_effective_number_scenarios,
+    resolve_probabilities,
+)
 from ..utils.functions import portfolio_cvar, portfolio_var
 
 ArrayLike = Union[np.ndarray, pd.DataFrame, pd.Series]
@@ -141,18 +144,7 @@ def performance_report(
     if R_arr.ndim != 2:
         raise ValueError("`scenarios` must be a 2D array-like.")
 
-    n_obs = R_arr.shape[0]
-    if probabilities is None:
-        p = generate_uniform_probabilities(n_obs)
-    else:
-        p = np.asarray(probabilities, dtype=float).reshape(-1)
-        if p.shape[0] != n_obs:
-            raise ValueError("Probability vector length must match number of scenarios.")
-        total = p.sum()
-        if not np.isfinite(total) or total <= 0:
-            raise ValueError("Scenario probabilities must sum to a positive finite value.")
-        if not np.isclose(total, 1.0):
-            p = p / total
+    p = resolve_probabilities(probabilities, R_arr.shape[0])
 
     if isinstance(weights, pd.Series):
         if asset_names is not None and list(weights.index) != asset_names:
