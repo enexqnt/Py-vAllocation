@@ -113,12 +113,15 @@ def generate_exp_decay_probabilities(
 
 
 def silverman_bandwidth(x: np.ndarray) -> float:
-    """Return Silverman's rule-of-thumb bandwidth for ``x``."""
+    """Return Silverman's rule-of-thumb bandwidth for ``x``.
 
+    Uses the standard Gaussian kernel bandwidth constant of 1.06.
+    """
+    SILVERMAN_CONSTANT = 1.06  # Standard rule-of-thumb for Gaussian kernels
     x = np.asarray(x)
     n = len(x)
     sigma = np.std(x, ddof=1)
-    return 1.06 * sigma * n ** (-1 / 5)
+    return SILVERMAN_CONSTANT * sigma * n ** (-1 / 5)
 
 
 def generate_gaussian_kernel_probabilities(

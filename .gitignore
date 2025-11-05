@@ -5,35 +5,48 @@ __pycache__/
 *.so
 *.dll
 *.dylib
+*.egg-info/
 
 # Virtual environments
 .env/
 .venv/
 venv/
 env/
+ENV/
 
 # Packaging
-*.egg-info/
 build/
 dist/
+*.egg
+*.whl
 
 # Testing and coverage
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.coverage*
+.tox/
+.coverage
+.coverage.*
 htmlcov/
+.hypothesis/
 
 # Jupyter
 .ipynb_checkpoints/
+*.ipynb_checkpoints/
 
 # IDEs and OS files
 .vscode/
 .idea/
 .DS_Store
+*.swp
+*.swo
+*~
 
 # Documentation builds
 docs/_build/
+docs/_static/
+docs/_templates/
 
-# Sphinx-generated files
-*.swp
+# Output directories
+output/
+*.log

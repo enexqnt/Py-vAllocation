@@ -14,10 +14,11 @@ Portfolio Allocation
 - :doc:`pyvallocation.optimization`: Advanced portfolio optimization techniques
 - :doc:`pyvallocation.views`: Flexible views and constraints management
 
-Ensembling
-^^^^^^^^^^
+Ensembling & Discrete Allocation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - :doc:`pyvallocation.ensembles`: Portfolio averaging and exposure stacking utilities
+- :doc:`pyvallocation.discrete_allocation`: Convert continuous weights to discrete share counts
 
 Probabilistic Methods
 ^^^^^^^^^^^^^^^^^^^^^
@@ -31,6 +32,7 @@ Utility Functions
 
 - :doc:`pyvallocation.utils`: Comprehensive utility functions for data handling, validation, and projection
 - :doc:`pyvallocation.utils.performance`: Scenario PnL helpers and performance summaries
+- :doc:`pyvallocation.plotting`: Plotting utilities for visualizing frontiers and allocations
 
 Stress Testing
 ^^^^^^^^^^^^^^

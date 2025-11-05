@@ -51,6 +51,6 @@ def check_weights_sum_to_one(weights: np.ndarray, tolerance: float = 1e-6) -> bo
     return np.isclose(np.sum(weights), 1.0, atol=tolerance)
 
 
-def check_non_negativity(array: np.ndarray, tolerance: float = -1e-9) -> bool:
+def check_non_negativity(array: np.ndarray, tolerance: float = 1e-9) -> bool:
     """Check if all elements in the array are non-negative within a tolerance."""
-    return np.all(array >= tolerance)
+    return np.all(array >= -tolerance)

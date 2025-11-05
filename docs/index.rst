@@ -74,6 +74,8 @@ Install & quickstart
    pyvallocation.probabilities
    pyvallocation.moments
    pyvallocation.ensembles
+   pyvallocation.discrete_allocation
+   pyvallocation.plotting
    pyvallocation.utils
 
 .. toctree::
