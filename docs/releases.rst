@@ -5,6 +5,13 @@ Release Notes
    :local:
    :depth: 1
 
+Version 0.3.1 (2025-11-06)
+--------------------------
+
+- Added dedicated API reference pages for discrete allocation and plotting utilities, wiring them into the core module index.
+- Refreshed the README messaging to highlight the consistent optimisation surface, view integration, and production plumbing helpers.
+- Synced with upstream improvements and reran the full pytest suite to keep 0.3.x validated on Python 3.12.
+
 
 Version 0.3.0 (2025-02-25)
 --------------------------
