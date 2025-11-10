@@ -1,88 +1,67 @@
 """
-Comprehensive ETF allocation quickstart.
+Concise ETF allocation quickstart.
 
-This script mirrors ``docs/tutorials/quickstart_etf_allocation.rst`` and executes an end-to-end
-workflow:
-
-1. Load ETF prices and compute weekly returns.
-2. Estimate moments via shrinkage, robust methods, and a Black-Litterman view.
-3. Project the statistics to a 1-year horizon.
-4. Build optimised frontiers for each specification.
-5. Assemble stacked/average ensemble portfolios.
-6. Generate plots and convert the final allocation to discrete share counts.
-
-Run with:
-
-    python examples/quickstart_etf_allocation.py
-
-Outputs are written to the ``output/`` directory.
+The workflow stays end-to-end (data → views → frontiers → ensemble → trades) while
+keeping the finance steps explicit and fixing earlier modelling slips:
+- Black-Litterman risk aversion is rescaled for weekly inputs.
+- Entropy-pooling volatility caps respect realised volatility.
+- Every optimisation selects the best portfolio below a 12% annualised-vol cap.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Dict, Tuple
-
 import sys
 import time
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+from pathlib import Path
+from typing import Callable, Dict, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from pyvallocation.discrete_allocation import discretize_weights
 from pyvallocation.ensembles import assemble_portfolio_ensemble, make_portfolio_spec
 from pyvallocation.moments import estimate_moments, posterior_moments_niw
+from pyvallocation.plotting import plot_frontiers_grid
 from pyvallocation.portfolioapi import AssetsDistribution, PortfolioFrontier
 from pyvallocation.utils.projection import (
+    convert_scenarios_compound_to_simple,
     log2simple,
     project_mean_covariance,
     project_scenarios,
-    convert_scenarios_compound_to_simple,
 )
 from pyvallocation.views import BlackLittermanProcessor, FlexibleViewsProcessor
 
-OUTPUT_DIR = Path("output")
-DATA_PATH = ROOT_DIR / "examples" / "ETF_prices.csv"
+DATA_PATH = ROOT / "examples" / "ETF_prices.csv"
+OUTPUT_DIR = ROOT / "output"
+VOL_TARGET = 0.12  # annualised volatility target for selection
+RISK_FREE = 0.01
 
 
-def load_weekly_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(
-            f"Sample ETF data not found at {DATA_PATH}. "
-            "Ensure the repository data files are available."
-        )
+def load_weekly_returns() -> Tuple[pd.DataFrame, pd.DataFrame]:
     prices = pd.read_csv(DATA_PATH, index_col="Date", parse_dates=True).ffill()
     weekly_prices = prices.resample("W-FRI").last().dropna(how="all")
-    # Use log returns for estimation consistency; convert later for reporting
     weekly_returns = np.log(weekly_prices).diff().dropna()
-    weekly_returns = weekly_returns.rename(columns=lambda c: c.replace(" ", "_"))
-    weekly_prices = weekly_prices.rename(columns=lambda c: c.replace(" ", "_"))
-    return weekly_returns, weekly_prices
+    rename = lambda c: c.replace(" ", "_")
+    return weekly_returns.rename(columns=rename), weekly_prices.rename(columns=rename)
 
 
-def project_to_horizon(mu: pd.Series, sigma: pd.DataFrame, annualisation: int):
-    mu_proj, sigma_proj = project_mean_covariance(mu, sigma, annualization_factor=annualisation)
-    return log2simple(mu_proj, sigma_proj)
+def project_one_year(mu: pd.Series, sigma: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
+    mu_h, sigma_h = project_mean_covariance(mu, sigma, annualization_factor=52)
+    return log2simple(mu_h, sigma_h)
 
 
-def build_black_litterman(mu_prior: pd.Series, sigma_prior: pd.DataFrame):
-    """Encode a simple macro view: SPY outperforms TLT by 50 bps."""
-    if "SPY" not in mu_prior.index or "TLT" not in mu_prior.index:
-        raise ValueError("Expected ETFs 'SPY' and 'TLT' in the dataset for the macro view.")
-    # Views are specified in the same units as the prior: weekly log returns.
-    # We express modest tilts to avoid unrealistic annualised expectations.
+def scaled_black_litterman(mu_prior: pd.Series, sigma_prior: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
+    views = {"SPY": 0.0003, ("SPY", "TLT"): 0.0001}  # modest weekly tilts
     processor = BlackLittermanProcessor(
         prior_cov=sigma_prior,
         prior_mean=mu_prior,
-        mean_views={
-            "SPY": 0.0003,                # ~1.6%/year absolute tilt for SPY
-            ("SPY", "TLT"): 0.0001,       # ~0.5%/year relative tilt vs TLT
-        },
-        risk_aversion=2.5,
+        mean_views=views,
+        risk_aversion=2.5 / 52.0,  # scale for weekly units
         tau=0.05,
     )
     mu_bl, sigma_bl = processor.get_posterior()
@@ -92,460 +71,324 @@ def build_black_litterman(mu_prior: pd.Series, sigma_prior: pd.DataFrame):
     )
 
 
-def long_term_views_nov2025(asset_names: pd.Index) -> tuple[dict, dict, dict]:
-    """Return long-term macro views for Nov 2025 in weekly-log units.
-
-    Views are deliberately modest and diversified:
-    - Equities expected to outperform duration over the long run.
-    - A mild positive drift for gold and broad commodities as inflation hedges.
-    - Moderately negative stock-bond correlation; bounded commodity and gold vols.
-
-    Returns:
-        mean_views_bl: Mapping used with BL (equality mean views).
-        mean_views_ep: Mapping used with EP (equalities/inequalities supported).
-        other_ep_views: Dict containing 'vol_views' and 'corr_views'.
-    """
-    names = set(asset_names)
-    required = {"SPY", "TLT", "GLD", "DBC"}
-    if not required.issubset(names):
-        missing = ", ".join(sorted(required - names))
-        raise ValueError(f"ETF universe must include {missing} to use long-term views.")
-
-    # Weekly log-return tilts roughly corresponding to annualised drifts
-    # of ~3.0% (equity over bonds), ~1.2% (equity over gold), and small
-    # positive absolute drifts for gold/commodities.
-    mean_views_bl = {
-        ("SPY", "TLT"): 0.0006,  # ~3%/year
-        ("SPY", "GLD"): 0.00023,  # ~1.2%/year
-        "GLD": 0.00015,           # ~0.8%/year
-        "DBC": 0.00010,           # ~0.5%/year
-    }
-
-    # EP accepts inequalities as well; keep the same direction but allow flexibility.
-    mean_views_ep = {
+def entropy_pool_posterior(weekly_returns: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame, np.ndarray]:
+    ann_to_week = lambda x: x / np.sqrt(52.0)
+    sample_vol = weekly_returns.std(ddof=0)
+    mean_views = {
         ("SPY", "TLT"): (">=", 0.0005),
         ("SPY", "GLD"): (">=", 0.0002),
         "GLD": (">=", 0.0001),
         "DBC": (">=", 0.00005),
     }
-
-    # Volatility bounds in weekly units (~annual targets divided by sqrt(52))
-    ann_to_week = lambda x: x / np.sqrt(52.0)
-    vol_views = {
-        "SPY": ("<=", ann_to_week(0.23)),
-        "TLT": ("<=", ann_to_week(0.18)),
-        "GLD": ("<=", ann_to_week(0.22)),
-        "DBC": ("<=", ann_to_week(0.28)),
+    vol_caps = {
+        asset: ("<=", max(ann_to_week(target), sample_vol.get(asset, 0.0) * 1.05))
+        for asset, target in {"SPY": 0.23, "TLT": 0.18, "GLD": 0.22, "DBC": 0.28}.items()
     }
-    corr_views = {("SPY", "TLT"): ("<=", -0.10)}
-    return mean_views_bl, mean_views_ep, {"vol_views": vol_views, "corr_views": corr_views}
-
-
-def build_opinion_pooling(weekly_log_returns: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame, np.ndarray]:
-    """Apply entropy pooling to weekly log scenarios using long-term views."""
-    mean_bl, mean_ep, extra = long_term_views_nov2025(weekly_log_returns.columns)
     processor = FlexibleViewsProcessor(
-        prior_returns=weekly_log_returns,
-        mean_views=mean_ep,
-        vol_views=extra["vol_views"],
-        corr_views=extra["corr_views"],
+        prior_returns=weekly_returns,
+        mean_views=mean_views,
+        vol_views=vol_caps,
+        corr_views={("SPY", "TLT"): ("<=", -0.10)},
         sequential=True,
         random_state=42,
-        num_scenarios=0,  # not used when prior_returns provided
     )
-    mu_post, sigma_post = processor.get_posterior()
-    q = processor.get_posterior_probabilities().reshape(-1)
+    mu_ep, sigma_ep = processor.get_posterior()
+    q_ep = processor.get_posterior_probabilities().reshape(-1)
+    columns = weekly_returns.columns
     return (
-        pd.Series(mu_post, index=weekly_log_returns.columns),
-        pd.DataFrame(sigma_post, index=weekly_log_returns.columns, columns=weekly_log_returns.columns),
-        q,
+        pd.Series(mu_ep, index=columns),
+        pd.DataFrame(sigma_ep, index=columns, columns=columns),
+        q_ep,
     )
 
 
-def build_annual_simple_scenarios(
-    weekly_log_returns: pd.DataFrame,
-    posterior_probs: np.ndarray,
-    *,
-    horizon_weeks: int = 52,
-    n_simulations: int = 8000,
-) -> pd.DataFrame:
-    """Generate 1Y simple-return scenarios consistent with EP probabilities.
-
-    We draw ``horizon_weeks`` weekly log-return rows with replacement according to
-    the posterior probability vector, sum them (log-additive), then convert to
-    simple returns via ``exp(sum) - 1``. This maintains coherence with CVaR
-    modelling where risk and return are assessed on the same annual horizon.
-    """
+def annual_scenarios(weekly_returns: pd.DataFrame, probs: np.ndarray, *, horizon_weeks: int = 52, n_sim: int = 8000) -> pd.DataFrame:
     sums = project_scenarios(
-        weekly_log_returns.values,
+        weekly_returns.values,
         investment_horizon=horizon_weeks,
-        p=posterior_probs,
-        n_simulations=n_simulations,
+        p=probs,
+        n_simulations=n_sim,
     )
-    annual_simple = convert_scenarios_compound_to_simple(sums)
-    return pd.DataFrame(annual_simple, columns=weekly_log_returns.columns)
+    return pd.DataFrame(convert_scenarios_compound_to_simple(sums), columns=weekly_returns.columns)
 
 
-def plot_frontier_weights(frontiers: dict, *, outfile: Path, max_specs: int = 4) -> None:
-    """Stacked area chart of weights along each frontier for up to `max_specs` specs."""
-    import matplotlib.pyplot as plt
+def vol_capped_selector(cov: pd.DataFrame, max_vol: float) -> Callable[[PortfolioFrontier], pd.Series]:
+    cov = cov.copy()
 
-    selected = list(frontiers.items())[:max_specs]
-    n = len(selected)
-    fig, axes = plt.subplots(nrows=n, ncols=1, figsize=(9, 2.5 * n), sharex=False)
-    if n == 1:
-        axes = [axes]
-    for ax, (name, f) in zip(axes, selected):
-        W = np.asarray(f.weights, dtype=float)
-        x = np.arange(W.shape[1])
-        labels = f.asset_names or [f"A{i}" for i in range(W.shape[0])]
-        ax.stackplot(x, W, labels=labels)
-        ax.set_title(f"Frontier Weights - {name}")
-        ax.set_ylabel("Weight")
-        ax.set_xlim(x.min(), x.max())
-        ax.set_ylim(0.0, 1.0)
-        ax.legend(loc="upper right", ncols=len(labels))
-    axes[-1].set_xlabel("Frontier index (low -> high risk)")
-    fig.tight_layout()
-    fig.savefig(outfile, dpi=150)
-    plt.close(fig)
+    def _select(frontier: PortfolioFrontier) -> pd.Series:
+        names = frontier.asset_names or list(cov.index)
+        sigma = cov.loc[names, names].to_numpy(dtype=float)
+        weights = np.asarray(frontier.weights, dtype=float)
+        vols = np.sqrt(np.sum((weights.T @ sigma) * weights.T, axis=1))
+        idx_feasible = np.where(vols <= max_vol + 1e-6)[0]
+        if idx_feasible.size:
+            best = idx_feasible[np.argmax(frontier.returns[idx_feasible])]
+        else:
+            best = int(np.argmin(vols))
+        return pd.Series(weights[:, best], index=names, name=f"Max return <= {max_vol:.0%} vol")
+
+    return _select
 
 
-def ensure_output_dir() -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def enforce_cvar_convexity(frontier: PortfolioFrontier) -> PortfolioFrontier:
+    if "CVaR" not in frontier.risk_measure:
+        return frontier
+    returns = np.asarray(frontier.returns, float)
+    risks = np.asarray(frontier.risks, float)
+    order = np.argsort(returns)
+    r_sorted, cvar_sorted = returns[order], risks[order]
+    idx_stack: list[int] = []
+    for i, x in enumerate(r_sorted):
+        while len(idx_stack) >= 2:
+            i1, i2 = idx_stack[-2], idx_stack[-1]
+            cross = (r_sorted[i2] - r_sorted[i1]) * (cvar_sorted[i] - cvar_sorted[i1]) - (
+                cvar_sorted[i2] - cvar_sorted[i1]
+            ) * (x - r_sorted[i1])
+            if cross <= 1e-10:
+                idx_stack.pop()
+            else:
+                break
+        idx_stack.append(i)
+    keep = order[idx_stack]
+    if keep.size == returns.size:
+        return frontier
+    return PortfolioFrontier(
+        weights=frontier.weights[:, keep],
+        returns=returns[keep],
+        risks=risks[keep],
+        risk_measure=frontier.risk_measure,
+        asset_names=frontier.asset_names,
+    )
+
+
+def build_specs(
+    weekly_returns: pd.DataFrame,
+    annual_covariances: Dict[str, pd.DataFrame],
+    annual_mu: Dict[str, pd.Series],
+    ep_cov_1y: pd.DataFrame,
+    ep_mu_1y: pd.Series,
+    ep_scenarios: pd.DataFrame,
+) -> Sequence:
+    long_only = {"long_only": True, "total_weight": 1.0, "bounds": (None, 0.6)}
+    projection = {"annualization_factor": 52, "log_to_simple": True}
+    common_mv = {"num_portfolios": 31, "constraints": long_only}
+
+    spec_defs = [
+        {
+            "name": "Shrinkage_MV",
+            "returns": weekly_returns,
+            "mean_estimator": "james_stein",
+            "cov_estimator": "oas",
+            "selector": vol_capped_selector(annual_covariances["Shrinkage"], VOL_TARGET),
+            "optimiser": "mean_variance",
+            "optimiser_kwargs": common_mv,
+            "projection": projection,
+            "metadata": {"model": "Shrinkage", "horizon": "1Y"},
+        },
+        {
+            "name": "NLS_MV",
+            "returns": weekly_returns,
+            "mean_estimator": "james_stein",
+            "cov_estimator": "nls",
+            "selector": vol_capped_selector(annual_covariances["NLS"], VOL_TARGET),
+            "optimiser": "mean_variance",
+            "optimiser_kwargs": common_mv,
+            "projection": projection,
+            "metadata": {"model": "Shrinkage (NLS)", "horizon": "1Y"},
+        },
+        {
+            "name": "Robust_RRP",
+            "returns": weekly_returns,
+            "mean_estimator": "huber",
+            "cov_estimator": "tyler",
+            "cov_kwargs": {"shrinkage": 0.1},
+            "selector": vol_capped_selector(annual_covariances["Robust"], VOL_TARGET),
+            "optimiser": "rrp",
+            "optimiser_kwargs": {"num_portfolios": 11, "max_multiplier": 1.4, "lambda_reg": 0.2, "constraints": long_only},
+            "projection": projection,
+            "metadata": {"model": "Robust (Huber+Tyler)", "horizon": "1Y"},
+        },
+        {
+            "name": "Robust_Bayes_MV",
+            "distribution": AssetsDistribution(mu=annual_mu["RobustBayes"], cov=annual_covariances["RobustBayes"]),
+            "selector": vol_capped_selector(annual_covariances["RobustBayes"], VOL_TARGET),
+            "optimiser": "mean_variance",
+            "optimiser_kwargs": common_mv,
+            "metadata": {"model": "Robust-Bayes (NIW)", "horizon": "1Y"},
+        },
+        {
+            "name": "BL_MV",
+            "distribution": AssetsDistribution(mu=annual_mu["BL"], cov=annual_covariances["BL"]),
+            "selector": vol_capped_selector(annual_covariances["BL"], VOL_TARGET),
+            "optimiser": "mean_variance",
+            "optimiser_kwargs": common_mv,
+            "metadata": {"model": "Black-Litterman", "horizon": "1Y"},
+        },
+        {
+            "name": "EP_MV",
+            "distribution": AssetsDistribution(mu=ep_mu_1y, cov=ep_cov_1y),
+            "selector": vol_capped_selector(ep_cov_1y, VOL_TARGET),
+            "optimiser": "mean_variance",
+            "optimiser_kwargs": common_mv,
+            "metadata": {"model": "Entropy Pooling", "horizon": "1Y"},
+        },
+        {
+            "name": "EP_CVaR",
+            "distribution": AssetsDistribution(scenarios=ep_scenarios),
+            "use_scenarios": True,
+            "selector": vol_capped_selector(ep_cov_1y, VOL_TARGET),
+            "optimiser": "cvar",
+            "optimiser_kwargs": {"num_portfolios": 21, "alpha": 0.05, "constraints": long_only},
+            "metadata": {"model": "CVaR (EP scenarios)", "horizon": "1Y"},
+        },
+    ]
+
+    return [make_portfolio_spec(**spec) for spec in spec_defs]
 
 
 def main() -> None:
-    plt.switch_backend("Agg")
-    ensure_output_dir()
+    start = time.perf_counter()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("Quickstart ETF allocation (concise)")
 
-    start_time = time.perf_counter()
+    def step(msg: str) -> None:
+        elapsed = time.perf_counter() - start
+        print(f"[{elapsed:6.2f}s] {msg}")
 
-    def log(message: str) -> None:
-        elapsed = time.perf_counter() - start_time
-        print(f"[quickstart {elapsed:6.2f}s] {message}")
+    step("Loading weekly data...")
+    weekly_returns, weekly_prices = load_weekly_returns()
 
-    log("Loading and preprocessing price history...")
-    weekly_returns, weekly_prices = load_weekly_data()
-
-    # Moment estimation
-    log("Estimating shrinkage moments (James-Stein + OAS)...")
-    mu_shrink, sigma_oas = estimate_moments(
-        weekly_returns,
-        mean_estimator="james_stein",
-        cov_estimator="oas",
-    )
-    log("Estimating robust moments (Huber + Tyler)...")
-    mu_huber, sigma_tyler = estimate_moments(
+    step("Estimating base and robust moments...")
+    mu_js, cov_oas = estimate_moments(weekly_returns, mean_estimator="james_stein", cov_estimator="oas")
+    mu_nls, cov_nls = estimate_moments(weekly_returns, mean_estimator="james_stein", cov_estimator="nls")
+    mu_huber, cov_tyler = estimate_moments(
         weekly_returns,
         mean_estimator="huber",
         cov_estimator="tyler",
         cov_kwargs={"shrinkage": 0.1},
     )
-    log("Computing Robust Bayesian (NIW) posterior...")
-    n_obs = weekly_returns.shape[0]
-    n_assets = weekly_returns.shape[1]
-    # Use shrinkage (JS+OAS) as prior and robust (Huber+Tyler) as sample evidence
-    mu_rb, sigma_rb = posterior_moments_niw(
-        prior_mu=mu_shrink,
-        prior_sigma=sigma_oas,
-        t0=8,                 # prior pseudo-observations (~two months)
-        nu0=max(n_assets + 2, 6),  # prior df, weakly-informative
+    mu_rb, cov_rb = posterior_moments_niw(
+        prior_mu=mu_js,
+        prior_sigma=cov_oas,
+        t0=8,
+        nu0=max(len(mu_js) + 2, 6),
         sample_mu=mu_huber,
-        sample_sigma=sigma_tyler,
-        n_obs=n_obs,
+        sample_sigma=cov_tyler,
+        n_obs=weekly_returns.shape[0],
     )
-    log("Building Black-Litterman posterior with macro view...")
-    mu_bl, sigma_bl = build_black_litterman(mu_shrink, sigma_oas)
-    log("Opinion pooling via entropy pooling (Flexible Views)...")
-    mu_ep, sigma_ep, q_ep = build_opinion_pooling(weekly_returns)
-    # Project EP posterior to 1Y and convert to simple returns for consistency
-    ep_mu_1y, ep_sigma_1y = log2simple(*project_mean_covariance(mu_ep, sigma_ep, annualization_factor=52))
 
-    # Projection
-    log("Projecting moments to the 1-year horizon...")
-    horizon_mu: Dict[str, pd.Series] = {}
-    horizon_sigma: Dict[str, pd.DataFrame] = {}
-    for label, (mu, sigma) in {
-        "Shrinkage": (mu_shrink, sigma_oas),
-        "Robust": (mu_huber, sigma_tyler),
-        "RobustBayes": (mu_rb, sigma_rb),
-        "BL": (mu_bl, sigma_bl),
+    step("Applying macro views (BL & EP)...")
+    mu_bl, cov_bl = scaled_black_litterman(mu_js, cov_oas)
+    mu_ep, cov_ep, q_ep = entropy_pool_posterior(weekly_returns)
+    ep_mu_1y, ep_cov_1y = project_one_year(mu_ep, cov_ep)
+
+    step("Projecting all moments to 1-year simple returns...")
+    annual_mu: Dict[str, pd.Series] = {}
+    annual_cov: Dict[str, pd.DataFrame] = {}
+    for label, (mu, cov) in {
+        "Shrinkage": (mu_js, cov_oas),
+        "NLS": (mu_nls, cov_nls),
+        "Robust": (mu_huber, cov_tyler),
+        "RobustBayes": (mu_rb, cov_rb),
+        "BL": (mu_bl, cov_bl),
     }.items():
-        horizon_mu[label], horizon_sigma[label] = project_to_horizon(mu, sigma, annualisation=52)
+        mu_1y, cov_1y = project_one_year(mu, cov)
+        annual_mu[label] = mu_1y
+        annual_cov[label] = cov_1y
 
-    # Ensemble specifications
-    # Long-only, fully-invested with an upper cap to avoid degeneracy
-    long_only = {"long_only": True, "total_weight": 1.0, "bounds": (None, 0.6)}
-    projection = {"annualization_factor": 52, "log_to_simple": True}
-    log("Configuring ensemble specifications...")
-    specs = [
-        make_portfolio_spec(
-            name="Shrinkage_MV",
-            returns=weekly_returns,
-            mean_estimator="james_stein",
-            cov_estimator="oas",
-            projection=projection,
-            optimiser="mean_variance",
-            optimiser_kwargs={"num_portfolios": 21, "constraints": long_only},
-            selector="risk_target",
-            selector_kwargs={"max_risk": 0.12},
-            metadata={"model": "Shrinkage", "horizon": "1Y"},
-        ),
-        make_portfolio_spec(
-            name="NLS_MV",
-            returns=weekly_returns,
-            mean_estimator="james_stein",
-            cov_estimator="nls",
-            projection=projection,
-            optimiser="mean_variance",
-            optimiser_kwargs={"num_portfolios": 21, "constraints": long_only},
-            selector="risk_target",
-            selector_kwargs={"max_risk": 0.12},
-            metadata={"model": "NLS", "horizon": "1Y"},
-        ),
-        make_portfolio_spec(
-            name="Robust_RRP",
-            returns=weekly_returns,
-            mean_estimator="huber",
-            cov_estimator="tyler",
-            cov_kwargs={"shrinkage": 0.1},
-            projection=projection,
-            optimiser="rrp",
-            optimiser_kwargs={
-                "num_portfolios": 9,
-                "max_multiplier": 1.5,
-                "lambda_reg": 0.2,
-                "constraints": long_only,
-            },
-            selector="risk_target",
-            selector_kwargs={"max_risk": 0.12},
-            metadata={"model": "Robust", "horizon": "1Y"},
-        ),
-        make_portfolio_spec(
-            name="Robust_Bayes_MV",
-            distribution=AssetsDistribution(mu=horizon_mu["RobustBayes"], cov=horizon_sigma["RobustBayes"]),
-            optimiser="mean_variance",
-            optimiser_kwargs={"num_portfolios": 21, "constraints": long_only},
-            selector="risk_target",
-            selector_kwargs={"max_risk": 0.12},
-            metadata={"model": "Robust-Bayes (NIW)", "horizon": "1Y"},
-        ),
-        make_portfolio_spec(
-            name="BL_MV",
-            distribution=AssetsDistribution(mu=horizon_mu["BL"], cov=horizon_sigma["BL"]),
-            optimiser="mean_variance",
-            optimiser_kwargs={"num_portfolios": 21, "constraints": long_only},
-            selector="risk_target",
-            selector_kwargs={"max_risk": 0.12},
-            metadata={"model": "Black-Litterman", "horizon": "1Y"},
-        ),
-        make_portfolio_spec(
-            name="EP_MV",
-            distribution=AssetsDistribution(mu=ep_mu_1y, cov=ep_sigma_1y),
-            optimiser="mean_variance",
-            optimiser_kwargs={"num_portfolios": 21, "constraints": long_only},
-            selector="risk_target",
-            selector_kwargs={"max_risk": 0.12},
-            metadata={"model": "Entropy Pooling", "horizon": "1Y"},
-        ),
-        # Annual-horizon CVaR using EP posterior probabilities to generate scenarios
-        make_portfolio_spec(
-            name="EP_CVaR",
-            distribution=AssetsDistribution(
-                scenarios=build_annual_simple_scenarios(weekly_returns, q_ep),
-            ),
-            use_scenarios=True,
-            optimiser="cvar",
-            optimiser_kwargs={"num_portfolios": 21, "alpha": 0.05, "constraints": long_only},
-            selector="tangency",
-            selector_kwargs={"risk_free_rate": 0.01},
-            metadata={"model": "CVaR (EP)", "horizon": "1Y"},
-        ),
-    ]
+    step("Building annual scenarios for CVaR...")
+    ep_scenarios = annual_scenarios(weekly_returns, q_ep)
 
-    log("Solving frontiers and assembling ensemble portfolios...")
-    ensemble = assemble_portfolio_ensemble(
-        specs,
-        ensemble=("average", "stack"),
-        stack_folds=3,
+    step("Configuring optimisation specs...")
+    specs = build_specs(
+        weekly_returns=weekly_returns,
+        annual_covariances=annual_cov,
+        annual_mu=annual_mu,
+        ep_cov_1y=ep_cov_1y,
+        ep_mu_1y=ep_mu_1y,
+        ep_scenarios=ep_scenarios,
     )
 
-    # Ensure CVaR frontiers are convex (guard against numerical kinks)
-    def _lower_convex_envelope(x: np.ndarray, y: np.ndarray, eps: float = 1e-10) -> np.ndarray:
-        order = np.argsort(x)
-        x, y = x[order], y[order]
-        stack: list[int] = []
-        for i in range(len(x)):
-            while len(stack) >= 2:
-                i1, i2 = stack[-2], stack[-1]
-                cross = (x[i2] - x[i1]) * (y[i] - y[i1]) - (y[i2] - y[i1]) * (x[i] - x[i1])
-                if cross <= eps:
-                    stack.pop()
-                else:
-                    break
-            stack.append(i)
-        # Map back to original indices
-        return order[stack]
+    step("Solving frontiers and assembling ensembles...")
+    ensemble = assemble_portfolio_ensemble(specs, ensemble=("average", "stack"), stack_folds=3)
+    ensemble.frontiers = {k: enforce_cvar_convexity(v) for k, v in ensemble.frontiers.items()}
 
-    fixed_frontiers: Dict[str, PortfolioFrontier] = {}
-    for name, f in ensemble.frontiers.items():
-        if "CVaR" not in f.risk_measure:
-            fixed_frontiers[name] = f
-            continue
-        idx = _lower_convex_envelope(np.asarray(f.returns, float), np.asarray(f.risks, float))
-        if idx.size < f.returns.size:
-            fixed_frontiers[name] = PortfolioFrontier(
-                weights=f.weights[:, idx],
-                returns=f.returns[idx],
-                risks=f.risks[idx],
-                risk_measure=f.risk_measure,
-                asset_names=f.asset_names,
-            )
-        else:
-            fixed_frontiers[name] = f
-    ensemble.frontiers = fixed_frontiers
+    selected = ensemble.selections.round(4)
+    print("\nRepresentative portfolios (vol-capped):")
+    print(selected)
 
-    print("Selected portfolios (per model):")
-    print(ensemble.selections.round(4))
-    print("\nStacked allocation (top 5 holdings):")
-    print(ensemble.stacked.sort_values(ascending=False).head())
+    stacked = ensemble.stacked
+    if stacked is None:
+        raise RuntimeError("Stacked ensemble unavailable.")
+    stacked = stacked.rename("Stacked")
+    print("\nStacked allocation (top 5):")
+    print(stacked.sort_values(ascending=False).head())
 
-    # For trailing metrics we compute on simple returns to aid interpretation.
+    step("Evaluating trailing metrics...")
     weekly_simple = weekly_prices.pct_change().dropna()
-    stacked_weights = ensemble.stacked.reindex(weekly_simple.columns, fill_value=0.0)
-    portfolio_weekly = weekly_simple.dot(stacked_weights)
-    annualised_return = (1.0 + portfolio_weekly.mean()) ** 52 - 1.0
-    annualised_vol = portfolio_weekly.std(ddof=0) * np.sqrt(52)
-    sharpe = (annualised_return - 0.01) / annualised_vol if annualised_vol > 0 else np.nan
-    print(
-        f"\nStacked portfolio trailing metrics: "
-        f"return={annualised_return:.2%}, vol={annualised_vol:.2%}, Sharpe~{sharpe:.2f} (rf=1%)"
+    aligned = stacked.reindex(weekly_simple.columns, fill_value=0.0)
+    portfolio_weekly = weekly_simple.dot(aligned)
+    annual_return = (1 + portfolio_weekly.mean()) ** 52 - 1
+    annual_vol = portfolio_weekly.std(ddof=0) * np.sqrt(52)
+    sharpe = (annual_return - RISK_FREE) / annual_vol if annual_vol > 0 else np.nan
+    print(f"\nStacked trailing metrics: return={annual_return:.2%}, vol={annual_vol:.2%}, Sharpe≈{sharpe:.2f} (rf={RISK_FREE:.0%})")
+
+    step("Drawing combined frontier plot...")
+    fig, _ = plot_frontiers_grid(
+        ensemble.frontiers,
+        by=lambda _label, frontier: "CVaR (alpha=5%)" if "CVaR" in (frontier.risk_measure or "") else "Volatility",
+        highlight=("min_risk", "max_return"),
+        risk_free_rate=RISK_FREE,
+        legend=True,
+        figsize=(13, 5),
     )
-
-    # Plot the frontiers together
-    log("Plotting frontier comparison...")
-    fig, ax = plt.subplots(figsize=(8, 5))
-    from pyvallocation.plotting import plot_frontiers
-
-    # Plot MV/BL/Robust frontiers together (same risk metric)
-    mv_names = [k for k in ensemble.frontiers.keys() if "CVaR" not in k]
-    mv_frontiers = {k: ensemble.frontiers[k] for k in mv_names}
-    # Merge EP_CVaR into volatility plot by recomputing risk under ep_sigma_1y
-    if "EP_CVaR" in ensemble.frontiers:
-        f_ep_cvar = ensemble.frontiers["EP_CVaR"]
-        W = np.asarray(f_ep_cvar.weights, dtype=float)
-        if W.ndim == 2 and W.shape[1] > 0:
-            Sigma = np.asarray(ep_sigma_1y, float)
-            risks_vol = np.sqrt(np.sum((W.T @ Sigma) * W.T, axis=1))
-            mv_frontiers["EP_CVaR (vol)"] = PortfolioFrontier(
-                weights=W,
-                returns=f_ep_cvar.returns,
-                risks=risks_vol,
-                risk_measure="Volatility",
-                asset_names=f_ep_cvar.asset_names,
-            )
-    plot_frontiers(mv_frontiers, ax=ax, highlight=())
-    ax.set_title("ETF Frontier Comparison - 1Y Horizon (Volatility)")
-    ax.set_xlabel("Risk")
-    ax.set_ylabel("Expected Return")
-    fig.tight_layout()
-    fig.savefig(OUTPUT_DIR / "frontiers_vol.png", dpi=150)
+    fig.savefig(OUTPUT_DIR / "frontiers.png", dpi=150)
     plt.close(fig)
 
-    # Plot CVaR frontiers separately due to different risk units
-    if any("CVaR" in k for k in ensemble.frontiers.keys()):
-        fig2, ax2 = plt.subplots(figsize=(8, 5))
-        cvar_frontiers = {k: v for k, v in ensemble.frontiers.items() if "CVaR" in k}
-        plot_frontiers(cvar_frontiers, ax=ax2, highlight=())
-        ax2.set_title("ETF Frontier - 1Y Horizon (CVaR)")
-        ax2.set_xlabel("CVaR Risk")
-        ax2.set_ylabel("Expected Return")
-        fig2.tight_layout()
-        fig2.savefig(OUTPUT_DIR / "frontiers_cvar.png", dpi=150)
-        plt.close(fig2)
-
-        # Backward-compatible composite saved as frontiers.png
-        fig3, (axA, axB) = plt.subplots(ncols=2, figsize=(14, 5))
-        plot_frontiers(mv_frontiers, ax=axA, highlight=())
-        axA.set_title("Volatility")
-        axA.set_xlabel("Risk")
-        axA.set_ylabel("Expected Return")
-        plot_frontiers(cvar_frontiers, ax=axB, highlight=())
-        axB.set_title("CVaR (alpha=0.05)")
-        axB.set_xlabel("Risk")
-        axB.set_ylabel("Expected Return")
-        fig3.suptitle("ETF Frontier Comparison - 1Y Horizon")
-        fig3.tight_layout()
-        fig3.savefig(OUTPUT_DIR / "frontiers.png", dpi=150)
-        plt.close(fig3)
-
-    # Plot frontier weights for a subset of specs
-    plot_frontier_weights(ensemble.frontiers, outfile=OUTPUT_DIR / "frontier_weights.png", max_specs=4)
-
-    # Discretise to trades
-    log("Converting stacked allocation to discrete share counts...")
-    latest_prices = weekly_prices.iloc[-1]
-    from pyvallocation.discrete_allocation import discretize_weights
-
+    step("Converting to discrete trades...")
     allocation = discretize_weights(
-        weights=ensemble.stacked,
-        latest_prices=latest_prices,
+        weights=stacked,
+        latest_prices=weekly_prices.iloc[-1],
         total_value=10_000_000,
     )
-
-    print("\nDiscrete allocation (share counts):")
-    shares = pd.Series(allocation.shares, dtype=int).reindex(ensemble.stacked.index, fill_value=0)
-    summary = pd.DataFrame(
+    trade_summary = pd.DataFrame(
         {
-            "Target Weight": ensemble.stacked.round(4),
-            "Achieved Weight": allocation.achieved_weights.reindex(ensemble.stacked.index).round(4),
-            "Shares": shares.astype(int),
-            "Market Value": (shares * latest_prices).round(2),
+            "Target Weight": stacked.round(4),
+            "Achieved Weight": allocation.achieved_weights.reindex(stacked.index).round(4),
+            "Shares": pd.Series(allocation.shares, dtype=int),
+            "Market Value": pd.Series(allocation.shares) * weekly_prices.iloc[-1],
         }
     )
-    print(summary[summary["Shares"] > 0].sort_values("Market Value", ascending=False))
-    print(f"Residual cash: {allocation.leftover_cash:,.2f}")
-    print(f"Tracking error (RMSE): {allocation.tracking_error:.6f}")
+    print("\nDiscrete allocation (>0 shares):")
+    print(trade_summary[trade_summary["Shares"] > 0].sort_values("Market Value", ascending=False))
+    print(f"Residual cash: {allocation.leftover_cash:,.2f} | Tracking error RMSE: {allocation.tracking_error:.6f}")
 
-    # Persist artefacts
-    log("Saving artefacts to the output directory...")
-    ensemble.selections.to_csv(OUTPUT_DIR / "selected_weights.csv")
-    ensemble.stacked.to_csv(OUTPUT_DIR / "stacked_weights.csv")
+    step("Persisting key artefacts...")
+    OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+    selected.to_csv(OUTPUT_DIR / "selected_weights.csv")
+    stacked.to_csv(OUTPUT_DIR / "stacked_weights.csv")
     if ensemble.average is not None:
         ensemble.average.to_csv(OUTPUT_DIR / "average_weights.csv")
-    pd.DataFrame.from_dict(ensemble.metadata, orient="index").to_csv(
-        OUTPUT_DIR / "ensemble_metadata.csv"
+
+    step("Stress-testing with adverse flexible views...")
+    stress_processor = FlexibleViewsProcessor(
+        prior_returns=weekly_returns,
+        mean_views={"SPY": ("<=", -0.0002)},
+        corr_views={("SPY", "TLT"): (">=", -0.02)},
+        sequential=True,
+        random_state=7,
     )
+    mu_stress, sigma_stress = stress_processor.get_posterior()
+    mu_stress_1y, sigma_stress_1y = project_one_year(
+        pd.Series(mu_stress, index=weekly_returns.columns),
+        pd.DataFrame(sigma_stress, index=weekly_returns.columns, columns=weekly_returns.columns),
+    )
+    stress_cov = sigma_stress_1y.reindex(stacked.index, axis=0).reindex(stacked.index, axis=1)
+    stress_return = stacked.values @ mu_stress_1y.reindex(stacked.index).values
+    stress_vol = np.sqrt(stacked.values @ stress_cov.to_numpy(dtype=float) @ stacked.values)
+    print(f"Stress-case (weaker hedges) annual return={stress_return:.2%}, vol={stress_vol:.2%}")
 
-    # Stress-test with flexible views: adverse equity drift and weaker hedging
-    log("Stress-testing with adverse flexible views...")
-    try:
-        stress_processor = FlexibleViewsProcessor(
-            prior_returns=weekly_returns,
-            mean_views={"SPY": ("<=", -0.0002)},  # soft negative drift
-            corr_views={("SPY", "TLT"): (">=", -0.02)},  # weaker negative correlation
-            sequential=True,
-            random_state=7,
-        )
-        mu_stress, sigma_stress = stress_processor.get_posterior()
-        mu_stress_1y, sigma_stress_1y = log2simple(*project_mean_covariance(
-            pd.Series(mu_stress, index=weekly_returns.columns),
-            pd.DataFrame(sigma_stress, index=weekly_returns.columns, columns=weekly_returns.columns),
-            annualization_factor=52,
-        ))
-        from pyvallocation.portfolioapi import PortfolioWrapper
-        stress_frontier = PortfolioWrapper(AssetsDistribution(mu=mu_stress_1y, cov=sigma_stress_1y))
-        stress_frontier.set_constraints(long_only)
-        stress_mv = stress_frontier.mean_variance_frontier(num_portfolios=21)
-        stress_weights, *_ = stress_mv.portfolio_at_risk_target(max_risk=0.12)
-        drift = (stress_weights - ensemble.stacked).dropna()
-        print("\nStress-test change vs baseline (top 5 by abs delta):")
-        print(drift.reindex(drift.abs().sort_values(ascending=False).head().index))
-    except RuntimeError as exc:
-        log(f"Flexible view stress-test failed ({exc}); skipping stress comparison.")
-
-    log("Quickstart completed successfully.")
+    step("Quickstart completed.")
 
 
 if __name__ == "__main__":

@@ -66,7 +66,8 @@ End-to-end ensemble construction typically follows these steps:
 4. **Report and trade.** The outputs are pandas-aware vectors, so they can be
    fed straight into stress testing, discrete allocation, or attribution.
 
-When you work with pre-built frontiers the API stays consistent:
+When you work with pre-built frontiers the API stays consistent and now exposes
+handy shortcuts:
 
 .. code-block:: python
 
@@ -81,6 +82,24 @@ When you work with pre-built frontiers the API stays consistent:
    stacked_portfolio = exposure_stack_frontiers([frontier, another], L=3)
 
    avg_portfolio.plot.bar(title="Average ensemble weights")
+
+You can also stay on the `PortfolioFrontier` itself::
+
+   frontier.ensemble_average(columns=[0, -1])
+
+Or blend several frontiers/single portfolios directly::
+
+   from pyvallocation.ensembles import stack_portfolios
+   stack_portfolios([frontier, other_frontier], selections=[range(0, 11, 5), [2, 4, 6]])
+
+And build specs straight from an existing `PortfolioWrapper`::
+
+   spec = wrapper.make_ensemble_spec(
+       "MV",
+       optimiser_kwargs={"num_portfolios": 11, "constraints": {"long_only": True, "total_weight": 1.0}},
+       selector="tangency",
+   )
+   result = wrapper.assemble_ensembles([spec], ensemble=("average", "stack"))
 
 Tips
 ----

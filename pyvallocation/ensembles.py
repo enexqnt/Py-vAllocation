@@ -56,13 +56,21 @@ import numpy as np
 import pandas as pd
 from cvxopt import matrix, solvers
 
-ArrayLike = Union[np.ndarray, pd.DataFrame, pd.Series]
+from .probabilities import resolve_probabilities
+from .utils.weights import (
+    ArrayLike,
+    ensure_samples_matrix,
+    normalize_weights,
+    wrap_exposure_vector,
+)
+
 if TYPE_CHECKING:  # pragma: no cover - typing helper
     from .portfolioapi import PortfolioFrontier
 
 __all__ = [
     "average_exposures",
     "exposure_stacking",
+    "stack_portfolios",
     "average_frontiers",
     "exposure_stack_frontiers",
     "EnsembleSpec",
@@ -70,76 +78,6 @@ __all__ = [
     "assemble_portfolio_ensemble",
     "make_portfolio_spec",
 ]
-
-
-def _to_2d_array(
-    sample_portfolios: ArrayLike,
-) -> Tuple[np.ndarray, Optional[List[str]], Optional[List[str]]]:
-    """
-    Convert sample portfolios into a ``(n_assets, n_samples)`` float array.
-
-    Returns both asset names (row labels) and sample identifiers (column labels)
-    when available to keep downstream I/O consistent.
-    """
-    asset_names: Optional[List[str]] = None
-    sample_names: Optional[List[str]] = None
-
-    if isinstance(sample_portfolios, pd.DataFrame):
-        asset_names = list(sample_portfolios.index)
-        sample_names = list(sample_portfolios.columns)
-        arr = sample_portfolios.to_numpy(dtype=float)
-    elif isinstance(sample_portfolios, pd.Series):
-        asset_names = list(sample_portfolios.index)
-        sample_names = [sample_portfolios.name or "portfolio_0"]
-        arr = sample_portfolios.to_numpy(dtype=float).reshape(-1, 1)
-    else:
-        arr = np.asarray(sample_portfolios, dtype=float)
-        if arr.ndim == 1:
-            arr = arr.reshape(-1, 1)
-
-    if arr.ndim != 2:
-        raise ValueError("Sample portfolios must broadcast to a 2D array (assets x portfolios).")
-    return arr, asset_names, sample_names
-
-
-def _wrap_exposure(vector: np.ndarray, asset_names: Optional[List[str]], *, label: Optional[str]) -> ArrayLike:
-    """Return a pandas Series when asset names are provided, else fall back to ndarray."""
-    vector = np.asarray(vector, dtype=float).reshape(-1)
-    if asset_names is None:
-        return vector
-    return pd.Series(vector, index=asset_names, name=label)
-
-
-def _prepare_weights(
-    weights: Optional[Sequence[float] | pd.Series],
-    num_samples: int,
-    sample_names: Optional[List[str]],
-) -> np.ndarray:
-    """Normalise weight vector while supporting pandas-labelled inputs."""
-    if weights is None:
-        if num_samples == 0:
-            raise ValueError("No sample portfolios provided.")
-        return np.full(num_samples, 1.0 / num_samples, dtype=float)
-
-    if isinstance(weights, pd.Series):
-        if sample_names is None:
-            weights_vector = weights.to_numpy(dtype=float)
-        else:
-            reindexed = weights.reindex(sample_names)
-            if reindexed.isna().any():
-                missing = [name for name, val in zip(sample_names, reindexed) if pd.isna(val)]
-                raise ValueError(f"Missing weights for samples: {missing}.")
-            weights_vector = reindexed.to_numpy(dtype=float)
-    else:
-        weights_vector = np.asarray(weights, dtype=float)
-
-    weights_vector = weights_vector.reshape(-1)
-    if weights_vector.shape[0] != num_samples:
-        raise ValueError("`weights` must have length equal to the number of sample portfolios.")
-    total = float(np.sum(weights_vector))
-    if not np.isfinite(total) or total <= 0.0:
-        raise ValueError("`weights` must sum to a positive finite value.")
-    return weights_vector / total
 
 
 def average_exposures(
@@ -178,11 +116,11 @@ def average_exposures(
     >>> average_exposures(samples, weights=[1.0, 3.0])
     array([0.375, 0.625])
     """
-    exposures, asset_names, sample_names = _to_2d_array(sample_portfolios)
+    exposures, asset_names, sample_names = ensure_samples_matrix(sample_portfolios)
     num_samples = exposures.shape[1]
-    weights_vector = _prepare_weights(weights, num_samples, sample_names)
+    weights_vector = normalize_weights(weights, num_samples, sample_names)
     averaged = exposures @ weights_vector
-    return _wrap_exposure(averaged, asset_names, label="Average Exposure")
+    return wrap_exposure_vector(averaged, asset_names, label="Average Exposure")
 
 
 @contextmanager
@@ -239,7 +177,7 @@ def exposure_stacking(
         If the underlying quadratic programme does not terminate with status
         ``'optimal'``.
     """
-    exposures, asset_names, _ = _to_2d_array(sample_portfolios)
+    exposures, asset_names, _ = ensure_samples_matrix(sample_portfolios)
     _, num_samples = exposures.shape
     if L <= 0:
         raise ValueError("`L` must be a positive integer.")
@@ -287,67 +225,87 @@ def exposure_stacking(
 
     weights = np.squeeze(np.array(solution["x"]))
     stacked = exposures @ weights
-    return _wrap_exposure(stacked, asset_names, label=f"Exposure Stacking (L={L})")
+    return wrap_exposure_vector(stacked, asset_names, label=f"Exposure Stacking (L={L})")
 
 
-def _stack_frontiers(
-    frontiers: Sequence[object],
+def stack_portfolios(
+    portfolios: Sequence[Any],
+    *,
+    selections: Optional[Sequence[Optional[Iterable[int]]]] = None,
+    L: int = 3,
+    solver_options: Optional[dict] = None,
+) -> pd.Series:
+    """
+    Stack a mixture of individual portfolios and/or frontiers.
+
+    Each entry can be a pandas Series/NumPy vector (single portfolio) or a
+    :class:`~pyvallocation.portfolioapi.PortfolioFrontier` (optionally paired with
+    a selection of frontier columns via ``selections``).
+    """
+    matrix, asset_names = _collect_samples(portfolios, selections)
+    if asset_names:
+        samples = pd.DataFrame(matrix, index=asset_names)
+    else:
+        samples = matrix
+    return exposure_stacking(samples, L=L, solver_options=solver_options)
+
+
+def _merge_asset_names(
+    existing: Optional[List[str]],
+    candidate: Optional[Sequence[str]],
+    dimension: int,
+) -> Optional[List[str]]:
+    candidate_list = list(candidate) if candidate else None
+    if candidate_list:
+        if existing is None:
+            return candidate_list
+        if existing != candidate_list:
+            raise ValueError("All portfolios must share identical asset ordering.")
+        return existing
+    if existing is not None and len(existing) != dimension:
+        raise ValueError("Portfolios without labels must match the established asset dimension.")
+    return existing
+
+
+def _collect_samples(
+    entries: Sequence[Any],
     selections: Optional[Sequence[Optional[Iterable[int]]]] = None,
 ) -> Tuple[np.ndarray, Optional[List[str]]]:
-    """
-    Extract portfolio samples from :class:`~pyvallocation.portfolioapi.PortfolioFrontier`.
-
-    Parameters
-    ----------
-    frontiers :
-        Iterable of frontier-like objects exposing a ``weights`` attribute with
-        shape ``(n_assets, n_portfolios)``.
-    selections :
-        Optional sequence selecting a subset of columns per frontier. ``None``
-        implies all portfolios.
-
-    Returns
-    -------
-    tuple
-        ``(samples, asset_names)`` where ``samples`` is a stacked 2-D array and
-        ``asset_names`` propagates the first non-empty asset-name list, if any.
-    """
-    if not frontiers:
-        raise ValueError("`frontiers` must contain at least one frontier.")
+    if not entries:
+        raise ValueError("At least one portfolio/frontier must be provided.")
 
     if selections is None:
-        selections = [None] * len(frontiers)
-    if len(selections) != len(frontiers):
-        raise ValueError("`selections` must match the number of frontiers.")
+        selections_iter = [None] * len(entries)
+    else:
+        if len(selections) != len(entries):
+            raise ValueError("`selections` must match the number of entries supplied.")
+        selections_iter = list(selections)
 
     stacked: List[np.ndarray] = []
     asset_names: Optional[List[str]] = None
-    reference_dim: Optional[int] = None
 
-    for frontier, selection in zip(frontiers, selections):
-        if not hasattr(frontier, "weights"):
-            raise TypeError("Frontier-like objects must expose a `weights` attribute.")
-        weights = np.asarray(frontier.weights, dtype=float)
-        if weights.ndim != 2:
-            raise ValueError("Frontier `weights` must be a 2D array.")
-        if selection is not None:
-            selection_indices = np.array(list(selection), dtype=int)
-            weights = weights[:, selection_indices]
-        stacked.append(weights)
+    for entry, selection in zip(entries, selections_iter):
+        if hasattr(entry, "to_samples"):
+            matrix, names = entry.to_samples(columns=selection, as_frame=False)
+            asset_names = _merge_asset_names(asset_names, names, matrix.shape[0])
+            stacked.append(matrix)
+            continue
 
-        current_names = list(getattr(frontier, "asset_names", []) or [])
-        if asset_names is None:
-            asset_names = current_names if current_names else None
-            reference_dim = weights.shape[0]
-        else:
-            if current_names:
-                if current_names != asset_names:
-                    raise ValueError("All frontiers must share identical asset ordering.")
-            elif reference_dim is not None and weights.shape[0] != reference_dim:
-                raise ValueError("Frontiers without names must have matching asset counts.")
+        matrix, names, _ = ensure_samples_matrix(entry)
+        asset_names = _merge_asset_names(asset_names, names, matrix.shape[0])
+        stacked.append(matrix)
 
     combined = np.hstack(stacked)
+    if combined.size == 0:
+        raise ValueError("No portfolio samples available for stacking.")
     return combined, asset_names
+
+
+def _stack_frontiers(
+    frontiers: Sequence[Any],
+    selections: Optional[Sequence[Optional[Iterable[int]]]] = None,
+) -> Tuple[np.ndarray, Optional[List[str]]]:
+    return _collect_samples(frontiers, selections)
 
 
 def _series_from_vector(weights: np.ndarray, names: Optional[List[str]], label: str) -> pd.Series:
@@ -890,7 +848,27 @@ def _build_distribution(
     if preprocess is not None:
         data = preprocess(data)
 
-    probs_series = _normalise_probabilities(probabilities, data.index) if probabilities is not None else None
+    if probabilities is not None:
+        if isinstance(probabilities, pd.Series):
+            probs_series_aligned = probabilities.reindex(data.index)
+            if probs_series_aligned.isna().any():
+                missing = probs_series_aligned[probs_series_aligned.isna()].index.tolist()
+                raise ValueError(f"Probabilities missing for scenarios: {missing}.")
+            probs_array = resolve_probabilities(
+                probs_series_aligned.to_numpy(dtype=float),
+                len(data),
+                name="probabilities",
+            )
+            probs_series = pd.Series(probs_array, index=data.index)
+        else:
+            probs_array = resolve_probabilities(
+                probabilities,
+                len(data),
+                name="probabilities",
+            )
+            probs_series = pd.Series(probs_array, index=data.index)
+    else:
+        probs_series = None
 
     if use_scenarios:
         return AssetsDistribution(
@@ -915,22 +893,6 @@ def _build_distribution(
     else:
         sigma = sigma_psd
     return AssetsDistribution(mu=mu, cov=sigma)
-
-
-def _normalise_probabilities(
-    probabilities: Union[pd.Series, Sequence[float], np.ndarray],
-    index: pd.Index,
-) -> pd.Series:
-    if isinstance(probabilities, pd.Series):
-        probs = probabilities.reindex(index)
-        if probs.isna().any():
-            missing = probs[probs.isna()].index.tolist()
-            raise ValueError(f"Probabilities missing for scenarios: {missing}.")
-        return probs
-    probs_arr = np.asarray(probabilities, dtype=float).reshape(-1)
-    if probs_arr.shape[0] != len(index):
-        raise ValueError("`probabilities` length must match number of scenarios.")
-    return pd.Series(probs_arr, index=index)
 
 
 def _apply_projection(

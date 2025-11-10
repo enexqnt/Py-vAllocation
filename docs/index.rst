@@ -75,6 +75,7 @@ Install & quickstart
    pyvallocation.moments
    pyvallocation.ensembles
    pyvallocation.discrete_allocation
+   pyvallocation.stress
    pyvallocation.plotting
    pyvallocation.utils
 

@@ -9,8 +9,9 @@ from pyvallocation import (
     exposure_stacking,
     assemble_portfolio_ensemble,
     make_portfolio_spec,
+    stack_portfolios,
 )
-from pyvallocation.portfolioapi import PortfolioFrontier
+from pyvallocation.portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper
 
 
 class TestEnsembleUtilities(unittest.TestCase):
@@ -107,6 +108,26 @@ class TestEnsembleUtilities(unittest.TestCase):
         self.assertTrue(np.allclose(stacked.values, expected))
         self.assertEqual(stacked.name, "Exposure Stacking (L=2)")
 
+    def test_stack_portfolios_with_frontiers(self):
+        weights1 = np.array([[0.6, 0.5], [0.4, 0.5]])
+        weights2 = np.array([[0.3, 0.2], [0.7, 0.8]])
+        returns = np.array([0.1, 0.11])
+        risks = np.array([0.15, 0.16])
+        f1 = PortfolioFrontier(weights=weights1, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
+        f2 = PortfolioFrontier(weights=weights2, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
+        stacked = stack_portfolios([f1, f2], L=2)
+        expected = exposure_stacking(np.hstack([weights1, weights2]), L=2)
+        self.assertTrue(np.allclose(stacked.values, expected))
+        self.assertEqual(stacked.name, "Exposure Stacking (L=2)")
+
+    def test_stack_portfolios(self):
+        p1 = pd.Series({"A": 0.6, "B": 0.4})
+        p2 = pd.Series({"A": 0.3, "B": 0.7})
+        result = stack_portfolios([p1, p2], L=2)
+        expected = exposure_stacking(np.column_stack([p1.values, p2.values]), L=2)
+        self.assertTrue(np.allclose(result.values, expected))
+        self.assertEqual(list(result.index), ["A", "B"])
+
     def test_assemble_portfolio_ensemble_selected_workflow(self):
         rng = np.random.default_rng(42)
         returns = pd.DataFrame(rng.normal(0.001, 0.02, size=(120, 4)), columns=list("ABCD"))
@@ -198,7 +219,24 @@ class TestEnsembleUtilities(unittest.TestCase):
         )
 
         self.assertIn("stack", result.ensembles)
-        self.assertTrue(isinstance(result.stacked, pd.Series))
+
+    def test_portfolio_wrapper_make_ensemble_spec(self):
+        mu = pd.Series([0.01, 0.015, 0.02], index=["A", "B", "C"])
+        cov = pd.DataFrame(
+            [[0.04, 0.01, 0.0], [0.01, 0.09, 0.02], [0.0, 0.02, 0.16]],
+            index=mu.index,
+            columns=mu.index,
+        )
+        wrapper = PortfolioWrapper(AssetsDistribution(mu=mu, cov=cov))
+        spec = wrapper.make_ensemble_spec(
+            "MV",
+            optimiser_kwargs={"num_portfolios": 5, "constraints": {"long_only": True, "total_weight": 1.0}},
+            selector="min_risk",
+        )
+        result = wrapper.assemble_ensembles([spec], ensemble="average")
+        self.assertIn("average", result.ensembles)
+        self.assertEqual(list(result.ensembles["average"].index), ["A", "B", "C"])
+        self.assertIsNone(result.stacked)
 
 
 if __name__ == "__main__":

@@ -12,3 +12,9 @@ from .validation import (
     ensure_psd_matrix,
     is_psd,
 )
+from .weights import (
+    ArrayLike,
+    ensure_samples_matrix,
+    normalize_weights,
+    wrap_exposure_vector,
+)

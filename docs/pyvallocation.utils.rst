@@ -10,9 +10,10 @@ Submodules
    pyvallocation.utils.constraints
    pyvallocation.utils.data_helpers
    pyvallocation.utils.functions
+   pyvallocation.utils.performance
    pyvallocation.utils.projection
    pyvallocation.utils.validation
-   pyvallocation.utils.performance
+   pyvallocation.utils.weights
 
 Module contents
 ---------------

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+import copy
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
@@ -21,6 +23,10 @@ from .optimization import (
 from .probabilities import generate_uniform_probabilities
 from .utils.constraints import build_G_h_A_b
 from .utils.functions import portfolio_cvar
+from .utils.weights import wrap_exposure_vector
+
+if TYPE_CHECKING:
+    from .ensembles import EnsembleResult, EnsembleSpec
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +201,7 @@ class PortfolioFrontier:
             number of assets and M is the number of portfolios on the frontier. Each column represents the weights of an optimal portfolio.
         returns (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the expected returns for each portfolio on the frontier.
         risks (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the risk values for each portfolio on the frontier. The specific risk measure (e.g., volatility, CVaR, uncertainty budget) is indicated by `risk_measure`.
-        risk_measure (str): A string describing the risk measure used to construct this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)', 'Estimation Risk (||\Sigma'^1/^2w||_2)').
+        risk_measure (str): A string describing the risk measure used to construct this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)', 'Estimation Risk (||\\Sigma'^1/^2w||_2)').
         asset_names (Optional[List[str]]): An optional list of names for the assets. If provided, enables pandas Series/DataFrame output for portfolio weights.
         metadata (Optional[List[Dict[str, Any]]]): Optional per-portfolio diagnostics. Each entry
             maps diagnostic field names (e.g., ``target_multiplier``) to their values.
@@ -208,8 +214,10 @@ class PortfolioFrontier:
     metadata: Optional[List[Dict[str, Any]]] = None
 
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
-        index = self.asset_names if self.asset_names is not None else None
-        return pd.Series(w, index=index, name=name)
+        wrapped = wrap_exposure_vector(w, self.asset_names, label=name)
+        if isinstance(wrapped, np.ndarray):
+            return pd.Series(wrapped, name=name)
+        return wrapped
 
     def _select_weights(self, columns: Optional[Iterable[int]]) -> np.ndarray:
         if columns is None:
@@ -254,6 +262,30 @@ class PortfolioFrontier:
 
         index = self.asset_names if self.asset_names is not None else None
         return pd.DataFrame(matrix, index=index, columns=labels)
+
+    def to_samples(
+        self,
+        columns: Optional[Iterable[int]] = None,
+        *,
+        as_frame: bool = True,
+    ) -> Union[pd.DataFrame, Tuple[np.ndarray, Optional[List[str]]]]:
+        """
+        Return the frontier weights as either a DataFrame or raw NumPy samples.
+
+        Parameters
+        ----------
+        columns
+            Optional iterable selecting specific portfolio indices.
+        as_frame
+            When ``True`` (default) return a pandas DataFrame. When ``False``
+            return ``(matrix, asset_names)`` suitable for downstream NumPy
+            consumption.
+        """
+        if as_frame:
+            return self.to_frame(columns=columns)
+        matrix = self._select_weights(columns)
+        names = list(self.asset_names) if self.asset_names is not None else None
+        return matrix.copy(), names
 
     def get_min_risk_portfolio(self) -> Tuple[pd.Series, float, float]:
         """
@@ -788,9 +820,9 @@ class PortfolioWrapper:
             A :class:`PortfolioFrontier` object.
         """
         if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError("Robust optimization requires `mu` (\mu_1) and `cov` (\Sigma_1).")
+            raise ValueError(r"Robust optimization requires `mu` (\mu_1) and `cov` (\Sigma_1).")
         logger.info(
-            "Computing robust \lambda-frontier. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
+            r"Computing robust \lambda-frontier. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
         )
         self._ensure_default_constraints()
         if self.initial_weights is not None and self.proportional_costs is not None:
@@ -825,12 +857,12 @@ class PortfolioWrapper:
         lambda_list = lambda_grid.tolist()
         returns, risks, weights = optimizer.efficient_frontier(lambda_list)
 
-        logger.info(f"Successfully computed Robust \lambda-frontier with {weights.shape[1]} portfolios.")
+        logger.info(f"Successfully computed Robust \\lambda-frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
             weights=np.asarray(weights, dtype=float),
             returns=np.asarray(returns, dtype=float),
             risks=np.asarray(risks, dtype=float),
-            risk_measure="Estimation Risk (||\Sigma'^1/^2w||_2)", asset_names=self.dist.asset_names
+            risk_measure="Estimation Risk (||\\Sigma'^1/^2w||_2)", asset_names=self.dist.asset_names
         )
 
     def mean_variance_portfolio_at_return(self, return_target: float) -> Tuple[pd.Series, float, float]:
@@ -1025,7 +1057,7 @@ class PortfolioWrapper:
 
         weights = np.asarray(solution.weights, dtype=float)
         asset_names = self.dist.asset_names
-        name = "Relaxed Risk Parity" if solution.target_return is None else f"Relaxed Risk Parity (\lambda={lambda_reg:.3f})"
+        name = "Relaxed Risk Parity" if solution.target_return is None else f"Relaxed Risk Parity (\\lambda={lambda_reg:.3f})"
         w_series = pd.Series(weights, index=asset_names, name=name)
 
         achieved_return = float(self.dist.mu @ weights)
@@ -1200,7 +1232,7 @@ class PortfolioWrapper:
         risks_array = np.array(risks_list, dtype=float)
 
         logger.info(
-            "Computed relaxed risk parity frontier with %d portfolios (\lambda=%s).",
+            r"Computed relaxed risk parity frontier with %d portfolios (\lambda=%s).",
             weight_matrix.shape[1],
             lambda_reg,
         )
@@ -1224,13 +1256,13 @@ class PortfolioWrapper:
             A tuple containing the portfolio weights, return, and risk.
         """
         if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError("Robust optimization requires `mu` (\mu_1) and `cov` (\Sigma_1).")
+            raise ValueError(r"Robust optimization requires `mu` (\mu_1) and `cov` (\Sigma_1).")
         logger.info(
-            "Solving robust \gamma-portfolio. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
+            r"Solving robust \gamma-portfolio. Critical Assumption: `dist.mu` is interpreted as the posterior mean and `dist.cov` as the uncertainty covariance matrix."
         )
         self._ensure_default_constraints()
         if self.initial_weights is not None and self.proportional_costs is not None:
-            logger.info("Including proportional transaction costs in robust \gamma-portfolio optimization.")
+            logger.info(r"Including proportional transaction costs in robust \gamma-portfolio optimization.")
 
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
@@ -1245,7 +1277,60 @@ class PortfolioWrapper:
         w_series = pd.Series(result.weights, index=self.dist.asset_names, name="Robust Gamma Portfolio")
             
         logger.info(
-            f"Successfully solved for robust \gamma-portfolio. "
+            f"Successfully solved for robust \\gamma-portfolio. "
             f"Nominal Return: {result.nominal_return:.4f}, Estimation Risk: {result.risk:.4f}"
         )
         return w_series, result.nominal_return, result.risk
+
+    def make_ensemble_spec(
+        self,
+        name: str,
+        *,
+        optimiser: Union[
+            str,
+            Callable[["PortfolioWrapper"], "PortfolioFrontier"],
+            Callable[..., "PortfolioFrontier"],
+        ] = "mean_variance",
+        optimiser_kwargs: Optional[Dict[str, Any]] = None,
+        selector: Union[
+            str,
+            Callable[["PortfolioFrontier"], Union[pd.Series, Tuple[Any, ...], np.ndarray]],
+        ] = "tangency",
+        selector_kwargs: Optional[Dict[str, Any]] = None,
+        frontier_selection: Optional[Sequence[int]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> "EnsembleSpec":
+        """
+        Convenience wrapper around :func:`pyvallocation.ensembles.make_portfolio_spec`
+        that reuses the wrapper's distribution.
+        """
+        from .ensembles import make_portfolio_spec
+
+        use_scenarios = self.dist.scenarios is not None
+
+        def _distribution_factory() -> AssetsDistribution:
+            return copy.deepcopy(self.dist)
+
+        return make_portfolio_spec(
+            name=name,
+            distribution_factory=_distribution_factory,
+            use_scenarios=use_scenarios,
+            optimiser=optimiser,
+            optimiser_kwargs=optimiser_kwargs,
+            selector=selector,
+            selector_kwargs=selector_kwargs,
+            frontier_selection=frontier_selection,
+            metadata=metadata,
+        )
+
+    def assemble_ensembles(
+        self,
+        specs: Sequence["EnsembleSpec"],
+        **kwargs: Any,
+    ) -> "EnsembleResult":
+        """
+        Proxy to :func:`pyvallocation.ensembles.assemble_portfolio_ensemble`.
+        """
+        from .ensembles import assemble_portfolio_ensemble
+
+        return assemble_portfolio_ensemble(specs, **kwargs)

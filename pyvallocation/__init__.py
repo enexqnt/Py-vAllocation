@@ -43,6 +43,7 @@ __all__ = [
     "exposure_stack_frontiers",
     "assemble_portfolio_ensemble",
     "make_portfolio_spec",
+    "stack_portfolios",
     "plot_frontiers",
     "stress_test",
     "exp_decay_stress",
@@ -92,6 +93,7 @@ from .ensembles import (
     assemble_portfolio_ensemble,
     exposure_stack_frontiers,
     exposure_stacking,
+    stack_portfolios,
     make_portfolio_spec,
 )
 from .plotting import plot_frontiers

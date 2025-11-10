@@ -408,7 +408,7 @@ class NIWPosterior:
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
         if self._posterior.nu1 <= 2:
-            raise ValueError("Posterior degrees of freedom \nu_1 must be greater than 2 to compute S_\mu.")
+            raise ValueError(r"Posterior degrees of freedom \nu_1 must be greater than 2 to compute S_\mu.")
         factor = self._posterior.nu1 / (self._posterior.T1 * (self._posterior.nu1 - 2.0))
         # Ensure underlying data is array for multiplication
         sigma1_array = self._posterior.sigma1
@@ -445,7 +445,7 @@ class NIWPosterior:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
         denom = self._posterior.nu1 + self.N + 1.0
         if denom == 0:
-            raise ValueError("Denominator (\nu_1 + N + 1) for \Sigma_ce is zero.")
+            raise ValueError(r"Denominator (\nu_1 + N + 1) for \Sigma_ce is zero.")
         factor = self._posterior.nu1 / denom
 
         sigma1_array = self._posterior.sigma1
@@ -485,7 +485,7 @@ class NIWPosterior:
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
         if self._posterior.nu1 <= 2:
-            raise ValueError("Posterior \nu_1 must be greater than 2 for \gamma_\mu calculation.")
+            raise ValueError(r"Posterior \nu_1 must be greater than 2 for \gamma_\mu calculation.")
         if not (0.0 < p_mu < 1.0):
             raise ValueError("Confidence level p_mu must be between 0 and 1 (exclusive).")
         q_mu_squared = chi2_quantile(p_mu, self.N, sqrt=False)
@@ -529,7 +529,7 @@ class NIWPosterior:
         nu1 = self._posterior.nu1
         denom_cubed_base = nu1 + self.N + 1.0
         if denom_cubed_base <= 0:
-            raise ValueError("Term (\nu_1 + N + 1) must be positive for C_\Sigma calculation.")
+            raise ValueError(r"Term (\nu_1 + N + 1) must be positive for C_\Sigma calculation.")
 
         dof = self.N * (self.N + 1) // 2
         q_sigma_squared_val = chi2_quantile(p_sigma, dof, sqrt=False)
@@ -538,12 +538,12 @@ class NIWPosterior:
         numerator_term2 = 2.0 * nu1**2 * q_sigma_squared_val
         denominator_term2 = denom_cubed_base**3
         if denominator_term2 == 0:
-            raise ValueError("Denominator for sqrt term in C_\Sigma is zero.")
+            raise ValueError(r"Denominator for sqrt term in C_\Sigma is zero.")
         term2_arg = numerator_term2 / denominator_term2
         if term2_arg < 0:
             # This should not happen with valid inputs but good to check
             warnings.warn(
-                f"Argument for sqrt in C_\Sigma calculation is negative ({term2_arg:f}); result may be NaN.",
+                f"Argument for sqrt in C_\\Sigma calculation is negative ({term2_arg:f}); result may be NaN.",
                 RuntimeWarning
             )
         term2 = np.sqrt(term2_arg)

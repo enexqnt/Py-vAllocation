@@ -49,7 +49,7 @@ def _wrap_matrix(x_np, template):
 
 
 def log2simple(mu_g, cov_g):
-    """\mu,\Sigma of log-returns -> \mu,\Sigma of simple returns (vectorised, pandas-aware)."""
+    r"""\mu,\Sigma of log-returns -> \mu,\Sigma of simple returns (vectorised, pandas-aware)."""
     mu_g_np = _to_numpy(mu_g)
     cov_g_np = _to_numpy(cov_g)
 
@@ -66,7 +66,7 @@ def log2simple(mu_g, cov_g):
 
 
 def simple2log(mu_r, cov_r):
-    """\mu,\Sigma of simple returns -> \mu,\Sigma of log-returns (log-normal assumption)."""
+    r"""\mu,\Sigma of simple returns -> \mu,\Sigma of log-returns (log-normal assumption)."""
     mu_r_np = _to_numpy(mu_r)
     cov_r_np = _to_numpy(cov_r)
 

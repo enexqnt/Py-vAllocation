@@ -1,4 +1,4 @@
-"""
+r"""
 High-quality estimators for the first two moments (mean vector ``\mu`` and
 covariance matrix ``\Sigma``) of asset returns, including classical and robust
 shrinkage techniques. The implementations follow well-established statistical

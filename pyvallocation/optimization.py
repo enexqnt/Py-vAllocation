@@ -241,7 +241,7 @@ class _BaseOptimization(ABC):
         self._b = matrix(b) if b is not None else None
 
     def _finalise_expected_row(self, extra: int) -> None:
-        """Pad ``-\mu`` with *extra* zeros for later frontier sweeps."""
+        r"""Pad ``-\mu`` with *extra* zeros for later frontier sweeps."""
         self._expected_row = -matrix(
             np.hstack((self._mean, np.zeros(extra, float)))
         ).T
@@ -654,7 +654,7 @@ class RobustOptimizer(_BaseOptimization):
            t \ge -\hat\mu^{\top}w,\;\ldots
         """
         if lam < 0:
-            raise ValueError("\lambda must be non-negative.")
+            raise ValueError(r"\lambda must be non-negative.")
         return self._solve_socp(lam=lam)
 
     def solve_gamma_variant(self, gamma_mu: float, gamma_sigma_sq: float) -> OptimizationResult:
@@ -666,7 +666,7 @@ class RobustOptimizer(_BaseOptimization):
            t\;\le\;\sqrt{\gamma_{\sigma}^{2}}.
         """
         if gamma_mu < 0 or gamma_sigma_sq < 0:
-            raise ValueError("\gamma must be non-negative.")
+            raise ValueError(r"\gamma must be non-negative.")
         return self._solve_socp(gamma_mu=gamma_mu, gamma_sigma_sq=gamma_sigma_sq)
 
     def efficient_frontier(

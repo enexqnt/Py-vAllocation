@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Callable, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
@@ -245,4 +246,56 @@ def plot_frontiers(
     return ax
 
 
-__all__ = ["plot_frontiers"]
+def plot_frontiers_grid(
+    frontiers: Union[PortfolioFrontier, Sequence[PortfolioFrontier], Mapping[str, PortfolioFrontier]],
+    *,
+    by: Optional[Callable[[Optional[str], PortfolioFrontier], str]] = None,
+    labels: Optional[Sequence[str]] = None,
+    cols: Optional[int] = None,
+    figsize: Tuple[float, float] = (12.0, 4.5),
+    sharex: bool = False,
+    sharey: bool = False,
+    highlight: Iterable[str] = ("min_risk", "max_return"),
+    risk_free_rate: Optional[float] = None,
+    legend: bool = True,
+    **kwargs,
+):
+    """Plot groups of efficient frontiers on a grid."""
+
+    plt = _require_matplotlib()
+    normalized = _normalize_frontiers(frontiers, labels)
+    grouper = by or (lambda supplied, fr: fr.risk_measure or "Risk")
+
+    grouped: "OrderedDict[str, OrderedDict[str, PortfolioFrontier]]" = OrderedDict()
+    for supplied_label, frontier in normalized:
+        key = str(grouper(supplied_label, frontier))
+        bucket = grouped.setdefault(key, OrderedDict())
+        bucket[supplied_label or frontier.risk_measure] = frontier
+
+    if not grouped:
+        raise ValueError("No frontiers supplied.")
+
+    cols = cols or len(grouped)
+    rows = (len(grouped) + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=figsize, sharex=sharex, sharey=sharey)
+    axes_flat = np.atleast_1d(axes).ravel()
+
+    for ax, (group_name, mapping) in zip(axes_flat, grouped.items()):
+        plot_frontiers(
+            mapping,
+            ax=ax,
+            highlight=highlight,
+            risk_free_rate=risk_free_rate,
+            legend=legend and len(grouped) == 1,
+            **kwargs,
+        )
+        ax.set_title(group_name)
+
+    for ax in axes_flat[len(grouped) :]:
+        ax.axis("off")
+
+    fig.tight_layout()
+    return fig, axes_flat
+
+
+__all__ = ["plot_frontiers", "plot_frontiers_grid"]
