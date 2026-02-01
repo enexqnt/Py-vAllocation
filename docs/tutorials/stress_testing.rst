@@ -24,7 +24,7 @@ Set up data & tangency portfolio
 
    wrapper = PortfolioWrapper(AssetsDistribution(scenarios=np.log1p(returns)))
    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
-   frontier = wrapper.mean_variance_frontier(num_portfolios=21)
+   frontier = wrapper.variance_frontier(num_portfolios=21)
    weights, *_ = frontier.get_tangency_portfolio(risk_free_rate=0.01)
 
    nominal_perf = performance_report(weights, returns.values, alpha=0.95)

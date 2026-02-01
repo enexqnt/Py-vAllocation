@@ -12,37 +12,25 @@ performance utilities:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
-from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
-from pyvallocation.stress import (
-    exp_decay_stress,
-    kernel_focus_stress,
-    linear_map,
-    stress_test,
-)
+from data_utils import load_prices
+from example_utils import build_wrapper_from_moments
+from pyvallocation.stress import exp_decay_stress, kernel_focus_stress, linear_map, stress_test
 from pyvallocation.utils.performance import performance_report
-
-DATA_PATH = Path(__file__).resolve().parents[1] / "examples" / "ETF_prices.csv"
 
 
 def load_weekly_returns() -> pd.DataFrame:
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(f"Sample data not found at {DATA_PATH}")
-    prices = pd.read_csv(DATA_PATH, index_col="Date", parse_dates=True).ffill()
+    prices = load_prices().dropna(how="all")
     weekly = prices.resample("W-FRI").last().dropna(how="all")
     returns = weekly.pct_change().dropna()
     return returns.rename(columns=lambda c: c.replace(" ", "_"))
 
 
 def build_tangency_portfolio(returns: pd.DataFrame) -> pd.Series:
-    dist = AssetsDistribution(scenarios=np.log1p(returns))
-    wrapper = PortfolioWrapper(dist)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
-    frontier = wrapper.mean_variance_frontier(num_portfolios=25)
+    wrapper = build_wrapper_from_moments(returns.mean(), returns.cov())
+    frontier = wrapper.variance_frontier(num_portfolios=25)
     weights, *_ = frontier.get_tangency_portfolio(risk_free_rate=0.01)
     return weights
 

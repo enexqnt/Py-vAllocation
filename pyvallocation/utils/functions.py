@@ -1,8 +1,53 @@
-"""Portfolio Value-at-Risk (VaR) and Conditional VaR (CVaR) functions."""
+"""Portfolio risk utilities (VaR, CVaR, variance, volatility)."""
 
 from __future__ import annotations
 import numpy as np
 import pandas as pd
+
+def _ensure_weights_matrix(w: np.ndarray | pd.Series | pd.DataFrame) -> np.ndarray:
+    """Accept vector or matrix weights and return an ``(N, M)`` ndarray.
+
+    Args:
+        w: Weights vector or matrix.
+
+    Returns:
+        np.ndarray: Weights as a 2D array with shape ``(N, M)``.
+    """
+    arr = np.asarray(w, dtype=float)
+    return arr.reshape(-1, 1) if arr.ndim == 1 else arr
+
+def portfolio_variance(
+    w: np.ndarray | pd.Series,
+    cov: np.ndarray | pd.DataFrame,
+) -> float | np.ndarray:
+    """
+    Compute portfolio variance for one or many portfolios.
+
+    Args:
+        w: Weights vector ``(N,)`` or matrix ``(N, M)``.
+        cov: Covariance matrix ``(N, N)``.
+
+    Returns:
+        Scalar variance (single portfolio) or ``(M,)`` array for multiple portfolios.
+    """
+    W = _ensure_weights_matrix(w)
+    cov_np = np.asarray(cov, dtype=float)
+    quad = np.sum((W.T @ cov_np) * W.T, axis=1)
+    return quad.item() if quad.size == 1 else quad
+
+def portfolio_volatility(
+    w: np.ndarray | pd.Series,
+    cov: np.ndarray | pd.DataFrame,
+) -> float | np.ndarray:
+    """
+    Compute portfolio volatility (standard deviation).
+
+    Args:
+        w: Weights vector ``(N,)`` or matrix ``(N, M)``.
+        cov: Covariance matrix ``(N, N)``.
+    """
+    var = portfolio_variance(w, cov)
+    return float(np.sqrt(var)) if np.isscalar(var) else np.sqrt(var)
 
 def portfolio_cvar(
     w: np.ndarray,
@@ -38,8 +83,9 @@ def portfolio_cvar(
     if demean:
         R_arr -= p.T @ R_arr
 
+    W = _ensure_weights_matrix(w)
     with np.errstate(over='ignore', under='ignore', invalid='ignore', divide='ignore'):
-        pf_pnl = R_arr @ w
+        pf_pnl = R_arr @ W
     if pf_pnl.ndim == 1:
         pf_pnl = pf_pnl.reshape(-1, 1)
 
@@ -55,7 +101,7 @@ def portfolio_cvar(
     cvar = np.full_like(denominator, np.nan)
     np.divide(numerator, denominator, out=cvar, where=denominator != 0)
 
-    risk = -cvar.reshape(1, -1)
+    risk = -cvar.reshape(-1)
     return risk.item() if risk.size == 1 else risk
 
 

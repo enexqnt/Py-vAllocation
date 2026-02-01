@@ -16,21 +16,15 @@ def normalize_probability_vector(
     """
     Validate and normalise a 1-D probability vector.
 
-    Parameters
-    ----------
-    probabilities :
-        Array-like of probabilities. Must be one-dimensional and contain at least
-        one entry.
-    strictly_positive :
-        When ``True`` all entries must be strictly greater than zero. When
-        ``False`` non-negative weights are accepted.
-    name :
-        Identifier used in error messages.
+    Args:
+        probabilities: Array-like of probabilities. Must be one-dimensional and contain
+            at least one entry.
+        strictly_positive: When ``True`` all entries must be strictly greater than zero.
+            When ``False`` non-negative weights are accepted. Defaults to ``False``.
+        name: Identifier used in error messages. Defaults to ``"probabilities"``.
 
-    Returns
-    -------
-    numpy.ndarray
-        Normalised probability vector summing to one.
+    Returns:
+        np.ndarray: Normalised probability vector summing to one.
     """
     probs = np.asarray(probabilities, dtype=float).reshape(-1)
     if probs.ndim != 1 or probs.size == 0:
@@ -61,22 +55,15 @@ def resolve_probabilities(
     """
     Return a normalised probability vector of length ``n_observations``.
 
-    Parameters
-    ----------
-    probabilities :
-        Optional array-like of probabilities. When ``None`` a uniform
-        distribution is generated.
-    n_observations :
-        Expected number of observations (length of scenario set).
-    strictly_positive :
-        Forwarded to :func:`normalize_probability_vector`.
-    name :
-        Identifier used in error messages.
+    Args:
+        probabilities: Optional array-like of probabilities. When ``None`` a uniform
+            distribution is generated.
+        n_observations: Expected number of observations (length of scenario set).
+        strictly_positive: Forwarded to :func:`normalize_probability_vector`. Defaults to ``False``.
+        name: Identifier used in error messages. Defaults to ``"probabilities"``.
 
-    Returns
-    -------
-    numpy.ndarray
-        Probability vector summing to one with shape ``(n_observations,)``.
+    Returns:
+        np.ndarray: Probability vector summing to one with shape ``(n_observations,)``.
     """
     if probabilities is None:
         return generate_uniform_probabilities(n_observations)
@@ -89,7 +76,14 @@ def resolve_probabilities(
 
 
 def generate_uniform_probabilities(num_observations: int) -> np.ndarray:
-    """Return equal probabilities for ``num_observations`` scenarios."""
+    """Return equal probabilities for ``num_observations`` scenarios.
+
+    Args:
+        num_observations: Number of scenarios.
+
+    Returns:
+        np.ndarray: Uniform probability vector summing to one.
+    """
 
     if num_observations <= 0:
         logger.error(
@@ -102,7 +96,15 @@ def generate_uniform_probabilities(num_observations: int) -> np.ndarray:
 def generate_exp_decay_probabilities(
     num_observations: int, half_life: int
 ) -> np.ndarray:
-    """Return exponentially decaying probabilities with the given ``half_life``."""
+    """Return exponentially decaying probabilities with the given ``half_life``.
+
+    Args:
+        num_observations: Number of scenarios.
+        half_life: Half-life (in observations) controlling decay speed.
+
+    Returns:
+        np.ndarray: Exponentially decaying probabilities summing to one.
+    """
 
     if half_life <= 0:
         raise ValueError("half_life must be greater than 0.")
@@ -130,7 +132,17 @@ def generate_gaussian_kernel_probabilities(
     h: Union[float, None] = None,
     x_T: Union[float, None] = None,
 ) -> np.ndarray:
-    """Generate kernel-based probabilities for ``v`` centred on ``x_T``."""
+    """Generate kernel-based probabilities for ``v`` centred on ``x_T``.
+
+    Args:
+        x: Reference data used to estimate the bandwidth when ``h`` is ``None``.
+        v: Values to score. Defaults to ``x``.
+        h: Kernel bandwidth. Defaults to Silverman's rule-of-thumb.
+        x_T: Reference point. Defaults to the last element of ``x``.
+
+    Returns:
+        np.ndarray: Kernel-based probabilities summing to one.
+    """
 
     x = np.asarray(x)
     if v is None:
@@ -152,6 +164,13 @@ def generate_gaussian_kernel_probabilities(
 
 
 def compute_effective_number_scenarios(probabilities: np.ndarray) -> float:
-    """Return the effective number of scenarios given a probability vector."""
+    """Return the effective number of scenarios given a probability vector.
+
+    Args:
+        probabilities: Probability vector.
+
+    Returns:
+        float: Effective number of scenarios ``1 / sum(p^2)``.
+    """
 
     return 1 / np.sum(probabilities**2)

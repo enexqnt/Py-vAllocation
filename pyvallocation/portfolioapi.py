@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import copy
 import logging
+import warnings
 from dataclasses import dataclass, field
-import copy
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
@@ -89,6 +89,15 @@ class AssetsDistribution:
         asset_names = list(self.asset_names) if self.asset_names is not None else None
 
         def _merge_names(existing: Optional[List[str]], candidate: Sequence[str]) -> Optional[List[str]]:
+            """Merge asset names ensuring consistent ordering.
+
+            Args:
+                existing: Existing asset name list (or ``None``).
+                candidate: Candidate asset names.
+
+            Returns:
+                Optional[List[str]]: Consolidated asset names.
+            """
             candidate_list = list(candidate)
             if not candidate_list:
                 return existing
@@ -200,11 +209,17 @@ class PortfolioFrontier:
         weights (npt.NDArray[np.floating]): A 2D NumPy array of shape (N, M), where N is the
             number of assets and M is the number of portfolios on the frontier. Each column represents the weights of an optimal portfolio.
         returns (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the expected returns for each portfolio on the frontier.
-        risks (npt.NDArray[np.floating]): A 1D NumPy array of shape (M,) containing the risk values for each portfolio on the frontier. The specific risk measure (e.g., volatility, CVaR, uncertainty budget) is indicated by `risk_measure`.
-        risk_measure (str): A string describing the risk measure used to construct this efficient frontier (e.g., 'Volatility', 'CVaR (alpha=0.05)', 'Estimation Risk (||\\Sigma'^1/^2w||_2)').
+        risks (npt.NDArray[np.floating]): Primary risk vector of length ``M`` (e.g., volatility, CVaR, estimation risk).
+        risk_measure (str): Label describing the primary risk measure.
         asset_names (Optional[List[str]]): An optional list of names for the assets. If provided, enables pandas Series/DataFrame output for portfolio weights.
         metadata (Optional[List[Dict[str, Any]]]): Optional per-portfolio diagnostics. Each entry
             maps diagnostic field names (e.g., ``target_multiplier``) to their values.
+        alternate_risks (Dict[str, np.ndarray]): Optional auxiliary risk grids keyed by label
+            (e.g., ``\"Volatility\"`` when the frontier is built on CVaR). Shapes must
+            match ``(M,)``. Access via ``risk_label=...`` parameters.
+        alternate_risks (Dict[str, np.ndarray]): Optional auxiliary risk measures
+            keyed by label (e.g., ``\"Volatility\"`` when the frontier was
+            built on CVaR). Each array must have shape ``(M,)``.
     """
     weights: npt.NDArray[np.floating]
     returns: npt.NDArray[np.floating]
@@ -212,14 +227,59 @@ class PortfolioFrontier:
     risk_measure: str
     asset_names: Optional[List[str]] = None
     metadata: Optional[List[Dict[str, Any]]] = None
+    alternate_risks: Dict[str, np.ndarray] = field(default_factory=dict)
+
+    def available_risk_measures(self) -> List[str]:
+        """Return list of risk measure labels carried by this frontier.
+
+        Returns:
+            list[str]: Primary and alternate risk labels.
+        """
+        return [self.risk_measure] + list(self.alternate_risks.keys())
+
+    def _risk_vector(self, risk_label: Optional[str]) -> np.ndarray:
+        """Select the risk vector corresponding to the requested risk label.
+
+        Args:
+            risk_label: Risk label to select. ``None`` selects the primary risk.
+
+        Returns:
+            np.ndarray: Risk vector aligned to the frontier columns.
+        """
+        if risk_label is None or risk_label == self.risk_measure:
+            return self.risks
+        try:
+            return self.alternate_risks[risk_label]
+        except KeyError as exc:  # pragma: no cover - defensive guard
+            available = ", ".join(self.available_risk_measures())
+            raise KeyError(
+                f"Risk measure '{risk_label}' not found. Available: {available}"
+            ) from exc
 
     def _to_pandas(self, w: np.ndarray, name: str) -> pd.Series:
+        """Wrap raw weights into a pandas Series when asset labels are available.
+
+        Args:
+            w: Weight vector.
+            name: Series name.
+
+        Returns:
+            pd.Series: Weight vector wrapped as a Series.
+        """
         wrapped = wrap_exposure_vector(w, self.asset_names, label=name)
         if isinstance(wrapped, np.ndarray):
             return pd.Series(wrapped, name=name)
         return wrapped
 
     def _select_weights(self, columns: Optional[Iterable[int]]) -> np.ndarray:
+        """Return weight columns as a dense NumPy matrix.
+
+        Args:
+            columns: Optional column indices to select.
+
+        Returns:
+            np.ndarray: Weight matrix.
+        """
         if columns is None:
             return self.weights.copy()
         indices = np.array(list(columns), dtype=int)
@@ -272,14 +332,10 @@ class PortfolioFrontier:
         """
         Return the frontier weights as either a DataFrame or raw NumPy samples.
 
-        Parameters
-        ----------
-        columns
-            Optional iterable selecting specific portfolio indices.
-        as_frame
-            When ``True`` (default) return a pandas DataFrame. When ``False``
-            return ``(matrix, asset_names)`` suitable for downstream NumPy
-            consumption.
+        Args:
+            columns: Optional iterable selecting specific portfolio indices.
+            as_frame: When ``True`` (default) return a pandas DataFrame. When ``False``
+                return ``(matrix, asset_names)`` suitable for downstream NumPy consumption.
         """
         if as_frame:
             return self.to_frame(columns=columns)
@@ -287,9 +343,17 @@ class PortfolioFrontier:
         names = list(self.asset_names) if self.asset_names is not None else None
         return matrix.copy(), names
 
-    def get_min_risk_portfolio(self) -> Tuple[pd.Series, float, float]:
+    def get_min_risk_portfolio(
+        self,
+        *,
+        risk_label: Optional[str] = None,
+    ) -> Tuple[pd.Series, float, float]:
         """
         Finds the portfolio with the minimum risk on the efficient frontier.
+
+        Args:
+            risk_label: Optional alternate risk measure name (see
+                :meth:`available_risk_measures`). Defaults to the primary risk.
 
         Returns:
             Tuple[pd.Series, float, float]: A tuple containing:
@@ -297,10 +361,12 @@ class PortfolioFrontier:
                 -   **returns** (float): The expected return of the minimum risk portfolio.
                 -   **risk** (float): The risk of the minimum risk portfolio.
         """
-        min_risk_idx = np.argmin(self.risks)
+        risks = self._risk_vector(risk_label)
+        min_risk_idx = np.argmin(risks)
         w = self.weights[:, min_risk_idx]
-        ret, risk = self.returns[min_risk_idx], self.risks[min_risk_idx]
-        return self._to_pandas(w, "Min Risk Portfolio"), ret, risk
+        ret, risk = self.returns[min_risk_idx], risks[min_risk_idx]
+        label = "Min Risk Portfolio" if risk_label is None else f"Min {risk_label}"
+        return self._to_pandas(w, label), ret, risk
 
     def get_max_return_portfolio(self) -> Tuple[pd.Series, float, float]:
         """
@@ -345,7 +411,12 @@ class PortfolioFrontier:
         w, ret, risk = self.weights[:, tangency_idx], self.returns[tangency_idx], self.risks[tangency_idx]
         return self._to_pandas(w, f"Tangency Portfolio (rf={risk_free_rate:.2%})"), ret, risk
 
-    def portfolio_at_risk_target(self, max_risk: float) -> Tuple[pd.Series, float, float]:
+    def portfolio_at_risk_target(
+        self,
+        max_risk: float,
+        *,
+        risk_label: Optional[str] = None,
+    ) -> Tuple[pd.Series, float, float]:
         """
         Finds the portfolio that maximizes return for a given risk tolerance.
 
@@ -354,6 +425,8 @@ class PortfolioFrontier:
 
         Args:
             max_risk (float): The maximum allowable risk.
+            risk_label: Optional alternate risk measure name (see
+                :meth:`available_risk_measures`). Defaults to the primary risk.
 
         Returns:
             Tuple[pd.Series, float, float]: A tuple containing:
@@ -361,16 +434,44 @@ class PortfolioFrontier:
                 -   **returns** (float): The expected return of the portfolio.
                 -   **risk** (float): The risk of the portfolio.
         """
-        feasible_indices = np.where(self.risks <= max_risk)[0]
+        risks = self._risk_vector(risk_label)
+        feasible_indices = np.where(risks <= max_risk)[0]
         if feasible_indices.size == 0:
             nan_weights = np.full(self.weights.shape[0], np.nan)
             return self._to_pandas(nan_weights, "Infeasible"), np.nan, np.nan
         
         optimal_idx = feasible_indices[np.argmax(self.returns[feasible_indices])]
-        w, ret, risk = self.weights[:, optimal_idx], self.returns[optimal_idx], self.risks[optimal_idx]
-        return self._to_pandas(w, f"Portfolio (Risk <= {max_risk:.4f})"), ret, risk
+        w, ret, risk_value = (
+            self.weights[:, optimal_idx],
+            self.returns[optimal_idx],
+            risks[optimal_idx],
+        )
+        label = f"Portfolio ({risk_label or self.risk_measure} <= {max_risk:.4f})"
+        return self._to_pandas(w, label), ret, risk_value
 
-    def portfolio_at_return_target(self, min_return: float) -> Tuple[pd.Series, float, float]:
+    def max_return_at_risk(
+        self,
+        max_risk: float,
+        *,
+        risk_label: Optional[str] = None,
+    ) -> Tuple[pd.Series, float, float]:
+        """Alias for :meth:`portfolio_at_risk_target` for clearer naming.
+
+        Args:
+            max_risk: Risk upper bound.
+            risk_label: Optional risk label override.
+
+        Returns:
+            Tuple[pd.Series, float, float]: Weights, return, and risk value.
+        """
+        return self.portfolio_at_risk_target(max_risk, risk_label=risk_label)
+
+    def portfolio_at_return_target(
+        self,
+        min_return: float,
+        *,
+        risk_label: Optional[str] = None,
+    ) -> Tuple[pd.Series, float, float]:
         """
         Finds the portfolio that minimizes risk for a given expected return target.
 
@@ -379,6 +480,7 @@ class PortfolioFrontier:
 
         Args:
             min_return (float): The minimum required expected return.
+            risk_label: Optional alternate risk measure used for the minimisation.
 
         Returns:
             Tuple[pd.Series, float, float]: A tuple containing:
@@ -391,9 +493,131 @@ class PortfolioFrontier:
             nan_weights = np.full(self.weights.shape[0], np.nan)
             return self._to_pandas(nan_weights, "Infeasible"), np.nan, np.nan
 
-        optimal_idx = feasible_indices[np.argmin(self.risks[feasible_indices])]
-        w, ret, risk = self.weights[:, optimal_idx], self.returns[optimal_idx], self.risks[optimal_idx]
-        return self._to_pandas(w, f"Portfolio (Return >= {min_return:.4f})"), ret, risk
+        risks = self._risk_vector(risk_label)
+        optimal_idx = feasible_indices[np.argmin(risks[feasible_indices])]
+        w, ret, risk_value = (
+            self.weights[:, optimal_idx],
+            self.returns[optimal_idx],
+            risks[optimal_idx],
+        )
+        label = f"Portfolio (Return >= {min_return:.4f})"
+        if risk_label is not None and risk_label != self.risk_measure:
+            label += f" | Risk: {risk_label}"
+        return self._to_pandas(w, label), ret, risk_value
+
+    def min_risk_at_return(
+        self,
+        min_return: float,
+        *,
+        risk_label: Optional[str] = None,
+    ) -> Tuple[pd.Series, float, float]:
+        """Alias for :meth:`portfolio_at_return_target`.
+
+        Args:
+            min_return: Minimum expected return.
+            risk_label: Optional risk label override.
+
+        Returns:
+            Tuple[pd.Series, float, float]: Weights, return, and risk value.
+        """
+        return self.portfolio_at_return_target(min_return, risk_label=risk_label)
+
+    def portfolio_closest_risk(
+        self,
+        target_risk: float,
+        *,
+        risk_label: Optional[str] = None,
+    ) -> Tuple[pd.Series, float, float]:
+        """
+        Select the portfolio whose risk is nearest ``target_risk`` (L1 distance).
+
+        Useful for aligning risk levels across frontiers built with different
+        models.
+        """
+        risks = self._risk_vector(risk_label)
+        idx = int(np.argmin(np.abs(risks - target_risk)))
+        w = self.weights[:, idx]
+        ret, risk_value = self.returns[idx], risks[idx]
+        label = f"Closest to Risk={target_risk:.4f}" if risk_label is None else f"{risk_label}≈{target_risk:.4f}"
+        return self._to_pandas(w, label), ret, risk_value
+
+    def risk_percentiles(self, risk_label: Optional[str] = None) -> np.ndarray:
+        """Return per-portfolio risk percentiles on ``[0, 1]``.
+
+        Args:
+            risk_label: Risk label to use for ranking. Defaults to primary risk.
+
+        Returns:
+            np.ndarray: Percentile ranks in ``[0, 1]``.
+        """
+        risks = np.asarray(self._risk_vector(risk_label), dtype=float)
+        if risks.size == 1:
+            return np.array([0.0])
+        order = np.argsort(risks)
+        ranks = np.empty_like(order, dtype=float)
+        ranks[order] = np.arange(risks.size, dtype=float)
+        return ranks / (risks.size - 1)
+
+    @staticmethod
+    def _normalize_percentile(percentile: float) -> float:
+        """Normalize percentile input to the [0, 1] interval.
+
+        Args:
+            percentile: Percentile in ``[0, 1]`` or ``[0, 100]``.
+
+        Returns:
+            float: Normalized percentile in ``[0, 1]``.
+        """
+        pct = float(percentile)
+        if pct > 1.0:
+            if pct > 100.0:
+                raise ValueError("`percentile` must be within [0, 1] or [0, 100].")
+            pct /= 100.0
+        if pct < 0.0 or pct > 1.0:
+            raise ValueError("`percentile` must be within [0, 1] or [0, 100].")
+        return pct
+
+    def index_at_risk_percentile(
+        self,
+        percentile: float,
+        *,
+        risk_label: Optional[str] = None,
+    ) -> int:
+        """Return the column index closest to a risk percentile.
+
+        Args:
+            percentile: Percentile in ``[0, 1]`` or ``[0, 100]``.
+            risk_label: Risk label to use for ranking.
+
+        Returns:
+            int: Column index on the frontier.
+        """
+        pct = self._normalize_percentile(percentile)
+        percentiles = self.risk_percentiles(risk_label=risk_label)
+        return int(np.argmin(np.abs(percentiles - pct)))
+
+    def portfolio_at_risk_percentile(
+        self,
+        percentile: float,
+        *,
+        risk_label: Optional[str] = None,
+    ) -> Tuple[pd.Series, float, float]:
+        """
+        Select the portfolio closest to a risk percentile (0-1 or 0-100).
+
+        Args:
+            percentile: Percentile in ``[0, 1]`` or ``[0, 100]``.
+            risk_label: Risk label to use for ranking.
+
+        Returns:
+            Tuple[pd.Series, float, float]: Weights, return, and risk value.
+        """
+        pct = self._normalize_percentile(percentile)
+        idx = self.index_at_risk_percentile(pct, risk_label=risk_label)
+        w = self.weights[:, idx]
+        ret, risk_value = self.returns[idx], self._risk_vector(risk_label)[idx]
+        label = f"Risk Percentile {pct:.0%}"
+        return self._to_pandas(w, label), ret, risk_value
 
 
     def as_discrete_allocation(
@@ -406,7 +630,19 @@ class PortfolioFrontier:
         lot_sizes: Optional[Union[pd.Series, Mapping[str, int]]] = None,
         **kwargs,
     ) -> DiscreteAllocationResult:
-        """Converts a selected frontier portfolio into a discrete allocation."""
+        """Convert a selected frontier portfolio into a discrete allocation.
+
+        Args:
+            column: Frontier column index to discretize.
+            latest_prices: Series or mapping of asset prices.
+            total_value: Total portfolio value available.
+            method: Discrete allocation method (default ``"greedy"``).
+            lot_sizes: Optional lot sizes per asset.
+            **kwargs: Extra arguments forwarded to the allocator.
+
+        Returns:
+            DiscreteAllocationResult: Allocation result with share counts.
+        """
 
         if column < 0 or column >= self.weights.shape[1]:
             raise IndexError(
@@ -435,6 +671,15 @@ class PortfolioFrontier:
         *,
         ensemble_weights: Optional[Sequence[float]] = None,
     ) -> pd.Series:
+        """Return the average ensemble across selected frontier columns.
+
+        Args:
+            columns: Optional column indices to include.
+            ensemble_weights: Optional weights for averaging.
+
+        Returns:
+            pd.Series: Averaged portfolio weights.
+        """
         matrix = self._select_weights(columns)
         combined = average_exposures(matrix, weights=ensemble_weights)
         return self._to_pandas(combined, "Average Ensemble")
@@ -453,7 +698,7 @@ class PortfolioWrapper:
     1.  Initialize: ``port = PortfolioWrapper(AssetsDistribution(...))``
     2.  Set Constraints: ``port.set_constraints(...)``
     3.  (Optional) Set Costs: ``port.set_transaction_costs(...)``
-    4.  Compute: ``frontier = port.mean_variance_frontier()`` or ``portfolio = port.mean_variance_portfolio_at_return(0.10)``
+    4.  Compute: ``frontier = port.variance_frontier()`` or ``portfolio = port.min_variance_at_return(0.10)``
     5.  Analyze: Use the returned :class:`PortfolioFrontier` or portfolio objects.
     """
     def __init__(self, distribution: AssetsDistribution):
@@ -512,6 +757,14 @@ class PortfolioWrapper:
         try:
             G, h, A, b = build_G_h_A_b(self.dist.N, **params)
             def _matrix_or_none(value: Optional[np.ndarray]) -> Optional[np.ndarray]:
+                """Normalize matrix inputs, returning ``None`` for empties.
+
+                Args:
+                    value: Input array or ``None``.
+
+                Returns:
+                    Optional[np.ndarray]: Normalized 2D array or ``None``.
+                """
                 if value is None:
                     return None
                 arr = np.asarray(value, dtype=float)
@@ -522,6 +775,14 @@ class PortfolioWrapper:
                 return arr
 
             def _vector_or_none(value: Optional[np.ndarray]) -> Optional[np.ndarray]:
+                """Normalize vector inputs, returning ``None`` for empties.
+
+                Args:
+                    value: Input array or ``None``.
+
+                Returns:
+                    Optional[np.ndarray]: Normalized 1D array or ``None``.
+                """
                 if value is None:
                     return None
                 arr = np.asarray(value, dtype=float).reshape(-1)
@@ -572,7 +833,15 @@ class PortfolioWrapper:
         logger.info("Setting transaction cost parameters.")
         
         def _process_input(data, name):
-            """Helper to convert pandas Series to aligned numpy array."""
+            """Helper to convert pandas Series to aligned numpy array.
+
+            Args:
+                data: Series or array-like input.
+                name: Parameter name for error messages.
+
+            Returns:
+                np.ndarray: Aligned vector of length ``N``.
+            """
             if isinstance(data, pd.Series):
                 if self.dist.asset_names:
                     original_assets = set(data.index)
@@ -599,7 +868,10 @@ class PortfolioWrapper:
             self.proportional_costs = _process_input(proportional_costs, 'proportional_costs')
 
     def _ensure_default_constraints(self):
-        """Applies default constraints if none were explicitly set."""
+        """Applies default constraints if none were explicitly set.
+
+        Defaults to long-only, fully-invested constraints.
+        """
         if self.G is None and self.A is None:
             logger.debug("Injecting default long-only, fully-invested constraints.")
             self.set_constraints({"long_only": True, "total_weight": 1.0})
@@ -609,7 +881,14 @@ class PortfolioWrapper:
         *,
         n_simulations: int = 5000,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return scenarios, probabilities, and an expected-return vector."""
+        """Return scenarios, probabilities, and an expected-return vector.
+
+        Args:
+            n_simulations: Number of simulated scenarios when sampling is required.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: Scenarios, probabilities, and mean vector.
+        """
 
         scenarios = self.dist.scenarios
         probs = self.dist.probabilities
@@ -658,26 +937,20 @@ class PortfolioWrapper:
         r"""
         Solve the relaxed risk parity problem with defensive target fallback.
 
-        Parameters
-        ----------
-        optimizer :
-            Instance of :class:`pyvallocation.optimization.RelaxedRiskParity` configured
-            with the current distribution and constraints.
-        lambda_reg :
-            Regulator coefficient :math:`\\lambda` applied to the diagonal penalty term.
-        requested_target :
-            Desired return level :math:`R`. ``None`` signals an unconstrained solve.
-        lower_bound :
-            Non-negative baseline used for target shrinkage (typically the pure risk
-            parity return).
+        Args:
+            optimizer: Instance of :class:`pyvallocation.optimization.RelaxedRiskParity`
+                configured with the current distribution and constraints.
+            lambda_reg: Regulator coefficient :math:`\\lambda` applied to the diagonal
+                penalty term.
+            requested_target: Desired return level :math:`R`. ``None`` signals an
+                unconstrained solve.
+            lower_bound: Non-negative baseline used for target shrinkage (typically
+                the pure risk parity return).
 
-        Returns
-        -------
-        RelaxedRiskParityResult
-            Optimal solution (possibly obtained after clipping the requested target).
-        Optional[str]
-            Warning message describing why a fallback was required; ``None`` if the
-            requested target proved feasible.
+        Returns:
+            Tuple[RelaxedRiskParityResult, Optional[str]]: Optimal solution (possibly
+            after clipping the requested target) and an optional warning message
+            describing why a fallback was required.
         """
         if requested_target is None:
             result = optimizer.solve(lambda_reg=lambda_reg, return_target=None)
@@ -704,13 +977,31 @@ class PortfolioWrapper:
         return result, warning
 
     def mean_variance_frontier(self, num_portfolios: int = 10) -> PortfolioFrontier:
-        """Computes the classical Mean-Variance efficient frontier.
+        """Deprecated. Use :meth:`variance_frontier`.
 
         Args:
-            num_portfolios: The number of portfolios to compute. Defaults to 20.
+            num_portfolios: Number of portfolios to compute.
 
         Returns:
-            A `PortfolioFrontier` object.
+            PortfolioFrontier: Mean-variance frontier.
+        """
+        warnings.warn(
+            "`mean_variance_frontier` is deprecated; use `variance_frontier`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.variance_frontier(num_portfolios=num_portfolios)
+
+    def variance_frontier(self, num_portfolios: int = 10) -> PortfolioFrontier:
+        """Compute the classical mean-variance efficient frontier.
+
+        Args:
+            num_portfolios: The number of portfolios to compute. Defaults to 10.
+
+        Returns:
+            A `PortfolioFrontier` object. When scenarios are available on the
+            distribution, a CVaR overlay is added to ``alternate_risks`` to
+            allow CVaR-based selection on the same weights.
         """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Mean-Variance optimization requires `mu` and `cov`.")
@@ -727,15 +1018,48 @@ class PortfolioWrapper:
         weights = optimizer.efficient_frontier(num_portfolios)
         returns = self.dist.mu @ weights
         risks = np.sqrt(np.sum((weights.T @ self.dist.cov) * weights.T, axis=1))
+
+        alternate_risks: Dict[str, np.ndarray] = {}
+        if self.dist.scenarios is not None:
+            try:
+                scen = np.asarray(self.dist.scenarios, dtype=float)
+                probs = (
+                    np.asarray(self.dist.probabilities, dtype=float).reshape(-1)
+                    if self.dist.probabilities is not None
+                    else generate_uniform_probabilities(scen.shape[0])
+                )
+                alt_cvar = np.abs(np.asarray(portfolio_cvar(weights, scen, probs, 0.05))).reshape(-1)
+                alternate_risks[f"CVaR (alpha={0.05:.2f})"] = alt_cvar
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Skipping CVaR overlay for MV frontier: %s", exc)
         
         logger.info(f"Successfully computed Mean-Variance frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
             weights=weights, returns=returns, risks=risks,
-            risk_measure='Volatility', asset_names=self.dist.asset_names
+            risk_measure='Volatility',
+            asset_names=self.dist.asset_names,
+            alternate_risks=alternate_risks,
         )
         
     def mean_cvar_frontier(self, num_portfolios: int = 10, alpha: float = 0.05) -> PortfolioFrontier:
-        r"""Computes the Mean-CVaR efficient frontier.
+        """Deprecated. Use :meth:`cvar_frontier`.
+
+        Args:
+            num_portfolios: Number of portfolios to compute.
+            alpha: CVaR tail probability.
+
+        Returns:
+            PortfolioFrontier: Mean-CVaR frontier.
+        """
+        warnings.warn(
+            "`mean_cvar_frontier` is deprecated; use `cvar_frontier`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.cvar_frontier(num_portfolios=num_portfolios, alpha=alpha)
+
+    def cvar_frontier(self, num_portfolios: int = 10, alpha: float = 0.05) -> PortfolioFrontier:
+        r"""Compute the Mean-CVaR efficient frontier.
 
         Implementation Notes:
             - This method requires scenarios. If only ``mu`` and ``cov`` are provided,
@@ -743,11 +1067,15 @@ class PortfolioWrapper:
               multivariate normal distribution.
 
         Args:
-            num_portfolios: The number of portfolios to compute. Defaults to 20.
+            num_portfolios: The number of portfolios to compute. Defaults to 10.
             alpha: The tail probability for CVaR. Defaults to 0.05.
 
         Returns:
-            A :class:`PortfolioFrontier` object.
+            A :class:`PortfolioFrontier` object whose columns are sorted by
+            non-decreasing estimation risk so downstream tooling can rely on
+            the usual "left = conservative, right = aggressive" ordering. An
+            auxiliary ``alternate_risks['Volatility']`` is attached for
+            variance-based selection.
         """
         scenarios, probs, mu_for_frontier = self._scenario_inputs()
         self._ensure_default_constraints()
@@ -762,15 +1090,37 @@ class PortfolioWrapper:
         weights = optimizer.efficient_frontier(num_portfolios)
         returns = mu_for_frontier @ weights
         risks = np.abs(np.asarray(portfolio_cvar(weights, scenarios, probs, alpha))).reshape(-1)
+        raw_risks = risks.copy()
+        alternate_risks: Dict[str, np.ndarray] = {}
+        try:
+            cov = np.cov(scenarios.T, aweights=probs, bias=True)
+            vols = np.sqrt(np.sum((weights.T @ cov) * weights.T, axis=1))
+            alternate_risks["Volatility"] = vols
+        except Exception as exc:  # pragma: no cover - defensive convenience
+            logger.debug("Unable to compute volatility proxy for CVaR frontier: %s", exc)
 
         # Numerical guards: enforce non-decreasing, convex CVaR frontier
         order = np.argsort(returns)
         returns, risks, weights = returns[order], risks[order], weights[:, order]
+        raw_risks = raw_risks[order]
+        for key, arr in list(alternate_risks.items()):
+            alternate_risks[key] = np.asarray(arr, dtype=float)[order]
+        alternate_risks[f"CVaR (raw, alpha={alpha:.2f})"] = raw_risks
         # 1) monotone non-decreasing risk w.r.t. return target (feasible set shrinks)
         risks = np.maximum.accumulate(risks)
 
         # 2) convexify via lower convex envelope in (return, risk)
         def _lower_convex_envelope(x: np.ndarray, y: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+            """Return indices of the lower convex envelope of (x, y) points.
+
+            Args:
+                x: X-coordinates (e.g., returns).
+                y: Y-coordinates (e.g., risks).
+                eps: Numerical tolerance for convexity checks.
+
+            Returns:
+                np.ndarray: Indices of points on the lower envelope.
+            """
             idx_stack: list[int] = []
             for i in range(len(x)):
                 while len(idx_stack) >= 2:
@@ -792,7 +1142,9 @@ class PortfolioWrapper:
         logger.info(f"Successfully computed Mean-CVaR frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
             weights=weights, returns=returns, risks=risks,
-            risk_measure=f'CVaR (alpha={alpha:.2f})', asset_names=self.dist.asset_names
+            risk_measure=f'CVaR (alpha={alpha:.2f})',
+            asset_names=self.dist.asset_names,
+            alternate_risks=alternate_risks,
         )
 
     def robust_lambda_frontier(
@@ -801,6 +1153,7 @@ class PortfolioWrapper:
         max_lambda: float = 2.0,
         *,
         lambdas: Optional[Sequence[float]] = None,
+        return_cov: Optional[Union[npt.NDArray[np.floating], pd.DataFrame]] = None,
     ) -> PortfolioFrontier:
         r"""Computes a robust frontier based on uncertainty in expected returns.
 
@@ -815,6 +1168,12 @@ class PortfolioWrapper:
               which controls the trade-off between nominal return and robustness.
             lambdas: Optional explicit sequence of \lambda values. When provided, it takes
               precedence over ``num_portfolios``/``max_lambda``.
+            return_cov: Optional return covariance used to compute a volatility overlay.
+              When provided, the resulting frontier exposes ``alternate_risks["Volatility"]``
+              for risk targeting and plotting.
+            return_cov: Optional covariance matrix of returns used to compute a
+              volatility overlay for risk targeting/plotting. This is distinct from
+              ``dist.cov``, which is treated as the uncertainty covariance.
 
         Returns:
             A :class:`PortfolioFrontier` object.
@@ -856,18 +1215,112 @@ class PortfolioWrapper:
         )
         lambda_list = lambda_grid.tolist()
         returns, risks, weights = optimizer.efficient_frontier(lambda_list)
+        returns_arr = np.asarray(returns, dtype=float)
+        risks_arr = np.asarray(risks, dtype=float)
+        weights_arr = np.asarray(weights, dtype=float)
+        metadata = [{"lambda": float(lam)} for lam in lambda_list]
 
-        logger.info(f"Successfully computed Robust \\lambda-frontier with {weights.shape[1]} portfolios.")
+        alternate_risks: Dict[str, np.ndarray] = {}
+        if return_cov is not None:
+            try:
+                cov_ref = return_cov
+                if isinstance(cov_ref, pd.DataFrame):
+                    if self.dist.asset_names is not None:
+                        cov_ref = cov_ref.loc[self.dist.asset_names, self.dist.asset_names]
+                    cov_ref = cov_ref.to_numpy(dtype=float)
+                else:
+                    cov_ref = np.asarray(cov_ref, dtype=float)
+                if cov_ref.shape != (weights_arr.shape[0], weights_arr.shape[0]):
+                    raise ValueError("`return_cov` must be a square matrix matching asset count.")
+                vols = np.sqrt(np.sum((weights_arr.T @ cov_ref) * weights_arr.T, axis=1))
+                alternate_risks["Volatility"] = vols
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Unable to compute volatility overlay for robust frontier: %s", exc)
+
+        if self.dist.scenarios is not None:
+            try:
+                scen = np.asarray(self.dist.scenarios, dtype=float)
+                probs = (
+                    np.asarray(self.dist.probabilities, dtype=float).reshape(-1)
+                    if self.dist.probabilities is not None
+                    else generate_uniform_probabilities(scen.shape[0])
+                )
+                if "Volatility" not in alternate_risks:
+                    cov = np.cov(scen.T, aweights=probs, bias=True)
+                    vols = np.sqrt(np.sum((weights_arr.T @ cov) * weights_arr.T, axis=1))
+                    alternate_risks["Volatility"] = vols
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Unable to compute volatility overlay for robust frontier: %s", exc)
+            try:
+                alt_cvar = np.abs(np.asarray(portfolio_cvar(weights_arr, scen, probs, 0.05))).reshape(-1)
+                alternate_risks[f"CVaR (alpha={0.05:.2f})"] = alt_cvar
+            except Exception as exc:  # pragma: no cover
+                logger.debug("Unable to compute CVaR overlay for robust frontier: %s", exc)
+
+        if risks_arr.size > 1:
+            order = np.argsort(risks_arr, kind="mergesort")
+            risks_arr = risks_arr[order]
+            returns_arr = returns_arr[order]
+            weights_arr = weights_arr[:, order]
+            for k, arr in list(alternate_risks.items()):
+                alternate_risks[k] = np.asarray(arr, dtype=float)[order]
+            metadata = [metadata[i] for i in order]
+
+        logger.info(f"Successfully computed Robust \\lambda-frontier with {weights_arr.shape[1]} portfolios.")
         return PortfolioFrontier(
-            weights=np.asarray(weights, dtype=float),
-            returns=np.asarray(returns, dtype=float),
-            risks=np.asarray(risks, dtype=float),
-            risk_measure="Estimation Risk (||\\Sigma'^1/^2w||_2)", asset_names=self.dist.asset_names
+            weights=weights_arr,
+            returns=returns_arr,
+            risks=risks_arr,
+            risk_measure="Estimation Risk (||\\Sigma'^1/^2w||_2)",
+            asset_names=self.dist.asset_names,
+            alternate_risks=alternate_risks,
+            metadata=metadata,
+        )
+
+    def robust_frontier(
+        self,
+        num_portfolios: int = 10,
+        max_lambda: float = 2.0,
+        *,
+        lambdas: Optional[Sequence[float]] = None,
+    ) -> PortfolioFrontier:
+        """
+        Backwards-compatible alias for :meth:`robust_lambda_frontier`.
+
+        Many ensemble utilities expect a ``robust_frontier`` attribute; this
+        thin wrapper keeps that contract intact while reusing the main
+        implementation.
+        """
+        warnings.warn(
+            "`robust_frontier` is deprecated; use `robust_lambda_frontier`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.robust_lambda_frontier(
+            num_portfolios=num_portfolios,
+            max_lambda=max_lambda,
+            lambdas=lambdas,
         )
 
     def mean_variance_portfolio_at_return(self, return_target: float) -> Tuple[pd.Series, float, float]:
+        """Deprecated. Use :meth:`min_variance_at_return`.
+
+        Args:
+            return_target: Minimum expected return.
+
+        Returns:
+            Tuple[pd.Series, float, float]: Weights, return, and risk value.
         """
-        Solves for the minimum variance portfolio that achieves a given expected return.
+        warnings.warn(
+            "`mean_variance_portfolio_at_return` is deprecated; use `min_variance_at_return`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.min_variance_at_return(return_target)
+
+    def min_variance_at_return(self, return_target: float) -> Tuple[pd.Series, float, float]:
+        """
+        Solve for the minimum-variance portfolio achieving the target return.
 
         This method directly solves the optimization problem for a specific target
         return, rather than interpolating from a pre-computed frontier. This is more
@@ -917,8 +1370,25 @@ class PortfolioWrapper:
         return w_series, actual_return, risk
 
     def mean_cvar_portfolio_at_return(self, return_target: float, alpha: float = 0.05) -> Tuple[pd.Series, float, float]:
+        """Deprecated. Use :meth:`min_cvar_at_return`.
+
+        Args:
+            return_target: Minimum expected return.
+            alpha: CVaR tail probability.
+
+        Returns:
+            Tuple[pd.Series, float, float]: Weights, return, and risk value.
         """
-        Solves for the minimum CVaR portfolio that achieves a given expected return.
+        warnings.warn(
+            "`mean_cvar_portfolio_at_return` is deprecated; use `min_cvar_at_return`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.min_cvar_at_return(return_target, alpha=alpha)
+
+    def min_cvar_at_return(self, return_target: float, alpha: float = 0.05) -> Tuple[pd.Series, float, float]:
+        """
+        Solve for the minimum CVaR portfolio that achieves a given expected return.
 
         This method directly solves the optimization problem for a specific target
         return, rather than interpolating from a pre-computed frontier.
@@ -984,25 +1454,19 @@ class PortfolioWrapper:
         Infeasible targets are clipped via a backtracking line-search toward the RP
         return before falling back to the unconstrained problem if necessary.
 
-        Parameters
-        ----------
-        lambda_reg :
-            Non-negative regulator coefficient :math:`\lambda`. Setting ``0`` recovers
-            the pure risk parity allocation.
-        target_multiplier :
-            Optional multiplier :math:`m` governing the adaptive target-return rule.
-            Ignored whenever ``return_target`` is provided. Must be ``None`` when
-            pairing with ``lambda_reg == 0`` to avoid redundant relaxation.
-        return_target :
-            Explicit target return :math:`R`. When supplied, overrides the adaptive
-            rule. The method clips :math:`R` down to the feasible region if necessary.
+        Args:
+            lambda_reg: Non-negative regulator coefficient :math:`\\lambda`. Setting
+                ``0`` recovers the pure risk parity allocation. Defaults to ``0.2``.
+            target_multiplier: Optional multiplier :math:`m` governing the adaptive
+                target-return rule. Ignored when ``return_target`` is provided. Must
+                be ``None`` when pairing with ``lambda_reg == 0``. Defaults to ``1.2``.
+            return_target: Explicit target return :math:`R`. When supplied, overrides
+                the adaptive rule. The method clips :math:`R` down to the feasible
+                region if necessary. Defaults to ``None``.
 
-        Returns
-        -------
-        pandas.Series
-            Optimal portfolio weights indexed by asset names (when available).
-        Dict[str, Any]
-            Rich diagnostics including achieved return, variance, marginal risks,
+        Returns:
+            Tuple[pd.Series, Dict[str, Any]]: Optimal portfolio weights (Series) and
+            rich diagnostics including achieved return, variance, marginal risks,
             risk contributions, target information, and any solver warning emitted
             during target clipping.
         """
@@ -1117,29 +1581,21 @@ class PortfolioWrapper:
         per-point diagnostics (effective target after clipping, objective value, cone
         slack variables, solver warnings) in ``PortfolioFrontier.metadata``.
 
-        Parameters
-        ----------
-        num_portfolios :
-            Number of grid points when ``target_multipliers`` is omitted. Must be
-            positive; includes the upper endpoint ``max_multiplier``.
-        max_multiplier :
-            Upper bound for the automatically generated multiplier grid. Ignored if
-            ``target_multipliers`` is supplied.
-        lambda_reg :
-            Regulator coefficient :math:`\lambda`. Applies to every relaxed point; the
-            optional RP anchor always uses :math:`\lambda = 0`.
-        target_multipliers :
-            Explicit iterable of multipliers. When provided the method skips automatic
-            grid generation and uses the supplied values verbatim.
-        include_risk_parity :
-            If ``True`` (default) the frontier prepends the pure risk parity solution so
-            downstream plots can intercept the anchor directly.
+        Args:
+            num_portfolios: Number of grid points when ``target_multipliers`` is omitted.
+                Must be positive; includes the upper endpoint ``max_multiplier``.
+            max_multiplier: Upper bound for the auto-generated multiplier grid.
+                Ignored if ``target_multipliers`` is supplied.
+            lambda_reg: Regulator coefficient :math:`\\lambda`. Applies to every relaxed
+                point; the optional RP anchor always uses :math:`\\lambda = 0`.
+            target_multipliers: Explicit iterable of multipliers. When provided, the
+                method skips automatic grid generation and uses the supplied values verbatim.
+            include_risk_parity: If ``True`` (default) the frontier prepends the pure
+                risk parity solution so downstream plots can intercept the anchor directly.
 
-        Returns
-        -------
-        PortfolioFrontier
-            Object containing weights ``(n, k)``, realised returns, volatility proxy
-            (standard deviation), and diagnostic metadata for each node on the sweep.
+        Returns:
+            PortfolioFrontier: Object containing weights ``(n, k)``, realised returns,
+            volatility proxy (standard deviation), and diagnostic metadata for each node.
         """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Relaxed risk parity frontier requires `mu` and `cov`.")
@@ -1250,10 +1706,11 @@ class PortfolioWrapper:
 
         Args:
             gamma_mu: The penalty for estimation error in the mean.
-            gamma_sigma_sq: The squared upper bound for the total portfolio risk.
+            gamma_sigma_sq: Upper bound on the squared uncertainty radius.
 
         Returns:
-            A tuple containing the portfolio weights, return, and risk.
+            A tuple containing the portfolio weights, nominal return, and
+            squared uncertainty radius.
         """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError(r"Robust optimization requires `mu` (\mu_1) and `cov` (\Sigma_1).")
@@ -1275,12 +1732,20 @@ class PortfolioWrapper:
         result = optimizer.solve_gamma_variant(gamma_mu, gamma_sigma_sq)
         
         w_series = pd.Series(result.weights, index=self.dist.asset_names, name="Robust Gamma Portfolio")
-            
+        risk_value = float(result.risk) ** 2
+        if risk_value > gamma_sigma_sq:
+            logger.debug(
+                "Capping squared estimation risk to gamma_sigma_sq (risk=%.6f, cap=%.6f).",
+                risk_value,
+                gamma_sigma_sq,
+            )
+            risk_value = float(gamma_sigma_sq)
+
         logger.info(
             f"Successfully solved for robust \\gamma-portfolio. "
-            f"Nominal Return: {result.nominal_return:.4f}, Estimation Risk: {result.risk:.4f}"
+            f"Nominal Return: {result.nominal_return:.4f}, Estimation Risk (squared): {risk_value:.4f}"
         )
-        return w_series, result.nominal_return, result.risk
+        return w_series, result.nominal_return, risk_value
 
     def make_ensemble_spec(
         self,
@@ -1309,6 +1774,11 @@ class PortfolioWrapper:
         use_scenarios = self.dist.scenarios is not None
 
         def _distribution_factory() -> AssetsDistribution:
+            """Return a deep copy of the current distribution.
+
+            Returns:
+                AssetsDistribution: Copied distribution instance.
+            """
             return copy.deepcopy(self.dist)
 
         return make_portfolio_spec(
@@ -1328,8 +1798,14 @@ class PortfolioWrapper:
         specs: Sequence["EnsembleSpec"],
         **kwargs: Any,
     ) -> "EnsembleResult":
-        """
-        Proxy to :func:`pyvallocation.ensembles.assemble_portfolio_ensemble`.
+        """Proxy to :func:`pyvallocation.ensembles.assemble_portfolio_ensemble`.
+
+        Args:
+            specs: Sequence of ensemble specifications.
+            **kwargs: Forwarded to :func:`assemble_portfolio_ensemble`.
+
+        Returns:
+            EnsembleResult: Aggregated ensemble output.
         """
         from .ensembles import assemble_portfolio_ensemble
 

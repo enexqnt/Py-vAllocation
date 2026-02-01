@@ -93,7 +93,14 @@ _LOGGER: Final = logging.getLogger(__name__)
 # Helpers
 # ------------------------------------------------------------------ #
 def _check_shapes(**arrays: npt.NDArray[np.floating]) -> None:
-    """Raise ``ValueError`` if any supplied arrays have mismatched shapes."""
+    """Raise ``ValueError`` if any supplied arrays have mismatched shapes.
+
+    Args:
+        **arrays: Named arrays to compare.
+
+    Raises:
+        ValueError: If shapes are not identical.
+    """
     shapes = {k: v.shape for k, v in arrays.items()}
     if len(set(shapes.values())) > 1:
         raise ValueError(f"Shape mismatch: {shapes}")
@@ -233,6 +240,13 @@ class _BaseOptimization(ABC):
         A: Optional[npt.ArrayLike],
         b: Optional[npt.ArrayLike],
     ) -> None:
+        """Store the mean vector and affine constraints as CVXOPT matrices.
+
+        Args:
+            mean: Expected returns vector.
+            G, h: Inequality constraint matrices such that ``G w <= h``.
+            A, b: Equality constraint matrices such that ``A w = b``.
+        """
         self._mean = np.asarray(mean, float)
         self._I = self._mean.size
         self._G = matrix(G) if G is not None else None
@@ -241,7 +255,11 @@ class _BaseOptimization(ABC):
         self._b = matrix(b) if b is not None else None
 
     def _finalise_expected_row(self, extra: int) -> None:
-        r"""Pad ``-\mu`` with *extra* zeros for later frontier sweeps."""
+        r"""Pad ``-\mu`` with *extra* zeros for later frontier sweeps.
+
+        Args:
+            extra: Number of zeros to append.
+        """
         self._expected_row = -matrix(
             np.hstack((self._mean, np.zeros(extra, float)))
         ).T
@@ -249,6 +267,12 @@ class _BaseOptimization(ABC):
     # ---- utilities ------------------------------------------------ #
     @staticmethod
     def _assert_optimal(sol: dict, kind: str) -> None:
+        """Raise when a CVXOPT solve did not terminate optimally.
+
+        Args:
+            sol: Solver output dictionary.
+            kind: Solver label used in error messages.
+        """
         if sol["status"] != "optimal":
             raise RuntimeError(f"{kind} solver failed (status='{sol['status']}').")
 
@@ -282,6 +306,18 @@ class _FrontierMixin:
         mean: np.ndarray,
         max_ret: float,
     ) -> np.ndarray:
+        """Interpolate a frontier between minimum-risk and max-return portfolios.
+
+        Args:
+            first: Minimum-risk portfolio weights.
+            fn: Callable returning weights for a target return.
+            num: Number of portfolios to generate.
+            mean: Mean return vector.
+            max_ret: Maximum attainable return.
+
+        Returns:
+            np.ndarray: Weight matrix with shape ``(N, num)``.
+        """
         min_ret = float(mean @ first)
         if num < 2 or np.isclose(min_ret, max_ret):
             _LOGGER.warning("Frontier collapses to a single point.")
@@ -317,14 +353,11 @@ class MeanVariance(_FrontierMixin, _BaseOptimization):
     The QP is **strictly convex** whenever ``\Sigma`` > 0 or at least one
     positive \lambda_i is present, hence the solution is unique.
 
-    Parameters
-    ----------
-    mean, covariance :
-        Mean vector :math:`\mu` and covariance matrix :math:`\Sigma`.
-    G, h, A, b :
-        Optional affine constraints as defined in the module docstring.
-    initial_weights, market_impact_costs :
-        ``w0`` and diag-elements of ``\Lambda`` - must be passed *together*.
+    Args:
+        mean, covariance: Mean vector :math:`\\mu` and covariance matrix :math:`\\Sigma`.
+        G, h, A, b: Optional affine constraints as defined in the module docstring.
+        initial_weights, market_impact_costs: ``w0`` and diag-elements of
+            :math:`\\Lambda` – must be passed together.
     """
 
     def __init__(
@@ -339,6 +372,16 @@ class MeanVariance(_FrontierMixin, _BaseOptimization):
         initial_weights: Optional[npt.NDArray[np.floating]] = None,
         market_impact_costs: Optional[npt.NDArray[np.floating]] = None,
     ):
+        """Create a mean-variance optimizer instance.
+
+        Args:
+            mean: Expected return vector.
+            covariance: Covariance matrix.
+            G, h: Inequality constraints ``G w <= h``.
+            A, b: Equality constraints ``A w = b``.
+            initial_weights: Optional initial portfolio for quadratic costs.
+            market_impact_costs: Optional diagonal costs (requires ``initial_weights``).
+        """
         self._cov = np.asarray(covariance, float)
         super()._init_constraints(mean, G, h, A, b)
 
@@ -365,6 +408,10 @@ class MeanVariance(_FrontierMixin, _BaseOptimization):
                 np.append(np.asarray(h).ravel(), -return_target)
             )
         sol = solvers.qp(self._P, self._q, G, h, self._A, self._b)
+        if sol["status"] != "optimal":  # mild ridge regularisation fallback
+            ridge = 1e-8
+            P_reg = matrix(np.asarray(self._P)) + matrix(np.eye(self._I) * ridge)
+            sol = solvers.qp(P_reg, self._q, G, h, self._A, self._b)
         self._assert_optimal(sol, "QP")
         return np.asarray(sol["x"]).ravel()
 
@@ -374,6 +421,12 @@ class MeanVariance(_FrontierMixin, _BaseOptimization):
         """
         Return an ``(N, num_portfolios)`` array whose columns trace the Markowitz
         efficient set between the variance minimiser and the return maximiser.
+
+        Args:
+            num_portfolios: Number of portfolios on the frontier.
+
+        Returns:
+            np.ndarray: Weight matrix with shape ``(N, num_portfolios)``.
         """
         first = self._solve_target(None)
         max_ret = self._max_expected_return()
@@ -410,14 +463,11 @@ class MeanCVaR(_FrontierMixin, _BaseOptimization):
            & \mathbf1^{\top}w = 1,\; G w \le h,\; A w = b.
        \end{aligned}
 
-    Parameters
-    ----------
-    R, p :
-        Scenario matrix and probabilities.
-    alpha :
-        Tail probability :math:`\alpha` (e.g. ``0.05`` = 95 % CVaR).
-    initial_weights, proportional_costs :
-        Activate linear turnover frictions *iff* both are given.
+    Args:
+        R, p: Scenario matrix and probabilities.
+        alpha: Tail probability :math:`\\alpha` (e.g. ``0.05`` = 95% CVaR).
+        initial_weights, proportional_costs: Activate linear turnover frictions
+            only when both are provided.
     """
 
     def __init__(
@@ -433,6 +483,17 @@ class MeanCVaR(_FrontierMixin, _BaseOptimization):
         initial_weights: Optional[npt.NDArray[np.floating]] = None,
         proportional_costs: Optional[npt.NDArray[np.floating]] = None,
     ):
+        """Create a mean-CVaR optimizer instance.
+
+        Args:
+            R: Scenario matrix with shape ``(T, N)``.
+            p: Scenario probabilities with shape ``(T,)``.
+            alpha: CVaR tail probability (e.g., ``0.05``).
+            G, h: Inequality constraints ``G w <= h``.
+            A, b: Equality constraints ``A w = b``.
+            initial_weights: Optional initial portfolio for proportional costs.
+            proportional_costs: Optional linear cost vector (requires ``initial_weights``).
+        """
         R, p = np.asarray(R, float), np.asarray(p, float)
         T, N = R.shape
         self._alpha = float(alpha)
@@ -526,6 +587,12 @@ class MeanCVaR(_FrontierMixin, _BaseOptimization):
     def efficient_frontier(self, num_portfolios: int) -> np.ndarray:
         """
         Return the CVaR efficient frontier with ``num_portfolios`` vertices.
+
+        Args:
+            num_portfolios: Number of portfolios on the frontier.
+
+        Returns:
+            np.ndarray: Weight matrix with shape ``(N, num_portfolios)``.
         """
         first = self._solve_target(None)
         max_ret = self._max_expected_return()
@@ -587,17 +654,13 @@ class RobustOptimizer(_BaseOptimization):
     3. Two parameterisations
     ------------------------------------------------------------------------
     ``solve_lambda_variant(lam)``  
-      Direct penalty :math:`\lambda=q`.  Higher \lambda => stronger shrinkage towards
-      the global minimum-variance portfolio.
+      Direct penalty :math:`\lambda`. Higher \lambda => stronger shrinkage
+      toward the minimum-uncertainty portfolio.
 
     ``solve_gamma_variant(gamma_mu, gamma_sigma_sq)``  
-      Chance-constraint form (Ben-Tal & Nemirovski 2001).  For tolerance
-      :math:`\gamma_\mu` and radius cap :math:`\gamma_{\sigma}^{2}` we enforce
-
-      .. math::
-         \Pr(\mu^{\top}w\le -t)\le\gamma_\mu,\quad t^2\le\gamma_{\sigma}^{2},
-
-      implemented as a linear row ``t <= sqrt(gamma_sigma_sq)``.
+      Uses ``gamma_mu`` as the penalty weight and optionally caps the
+      uncertainty radius via ``t^2 \le \gamma_{\sigma}^{2}`` (implemented as
+      ``t <= sqrt(gamma_sigma_sq)``).
 
     Both wrappers feed the same private routine :py:meth:`_solve_socp`.
 
@@ -634,6 +697,16 @@ class RobustOptimizer(_BaseOptimization):
         initial_weights: Optional[npt.NDArray[np.floating]] = None,
         proportional_costs: Optional[npt.NDArray[np.floating]] = None,
     ):
+        """Create a robust mean optimizer instance.
+
+        Args:
+            expected_return: Nominal mean vector.
+            uncertainty_cov: Mean-uncertainty covariance matrix.
+            G, h: Inequality constraints ``G w <= h``.
+            A, b: Equality constraints ``A w = b``.
+            initial_weights: Optional initial portfolio for proportional costs.
+            proportional_costs: Optional linear cost vector (requires ``initial_weights``).
+        """
         super()._init_constraints(expected_return, G, h, A, b)
         self._s_sqrt = _cholesky_pd(np.asarray(uncertainty_cov, float))
         self._w0, self._costs = initial_weights, proportional_costs
@@ -659,11 +732,10 @@ class RobustOptimizer(_BaseOptimization):
 
     def solve_gamma_variant(self, gamma_mu: float, gamma_sigma_sq: float) -> OptimizationResult:
         r"""
-        Solve the *chance-constraint* form (\gamma-variant).  Arguments map onto
+        Solve the \gamma-variant with a penalty weight and an optional radius cap.
 
-        .. math::
-           \Pr\bigl(\mu^{\top}w\le -t\bigr)\;\le\; \gamma_{\mu}, \qquad
-           t\;\le\;\sqrt{\gamma_{\sigma}^{2}}.
+        ``gamma_mu`` acts as the penalty weight on the uncertainty radius and
+        ``gamma_sigma_sq`` caps :math:`t^2` (implemented as ``t <= sqrt(gamma_sigma_sq)``).
         """
         if gamma_mu < 0 or gamma_sigma_sq < 0:
             raise ValueError(r"\gamma must be non-negative.")
@@ -678,6 +750,12 @@ class RobustOptimizer(_BaseOptimization):
         * nominal returns,
         * robust radii (``t*``),
         * and a weight matrix ``(N, len(lambdas))``.
+
+        Args:
+            lambdas: Sequence of penalty parameters.
+
+        Returns:
+            tuple: Returns list, risk radius list, and weight matrix.
         """
         res = [self.solve_lambda_variant(l) for l in lambdas]
         return (
@@ -814,6 +892,14 @@ class RelaxedRiskParity(_BaseOptimization):
         A: Optional[npt.ArrayLike] = None,
         b: Optional[npt.ArrayLike] = None,
     ):
+        """Create a relaxed risk parity optimizer instance.
+
+        Args:
+            mean: Expected return vector.
+            covariance: Covariance matrix.
+            G, h: Inequality constraints ``G w <= h``.
+            A, b: Equality constraints ``A w = b``.
+        """
         cov = np.asarray(covariance, dtype=float)
         if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
             raise ValueError("`covariance` must be a square matrix.")
@@ -1036,7 +1122,11 @@ class RelaxedRiskParity(_BaseOptimization):
         Optional[np.ndarray],
         Optional[np.ndarray],
     ]:
-        """Return user-supplied linear constraint matrices as NumPy arrays."""
+        """Return user-supplied linear constraint matrices as NumPy arrays.
+
+        Returns:
+            tuple: ``(G, h, A, b)`` arrays or ``None`` when missing.
+        """
         n = self._I
         G_user: Optional[np.ndarray] = None
         h_user: Optional[np.ndarray] = None
@@ -1071,7 +1161,15 @@ class RelaxedRiskParity(_BaseOptimization):
         A_user: Optional[np.ndarray],
         b_user: Optional[np.ndarray],
     ) -> float:
-        """Solve a linear program to compute the maximum attainable return."""
+        """Solve a linear program to compute the maximum attainable return.
+
+        Args:
+            G_user, h_user: Optional inequality constraints.
+            A_user, b_user: Optional equality constraints.
+
+        Returns:
+            float: Maximum feasible expected return.
+        """
         n = self._I
         G_lp_rows: list[np.ndarray] = []
         h_lp_vals: list[np.ndarray] = []

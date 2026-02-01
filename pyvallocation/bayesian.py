@@ -11,6 +11,35 @@ from scipy.stats import chi2
 import pandas as pd
 
 
+def _to_numpy(x: Union[npt.NDArray[np.floating], pd.Series, pd.DataFrame]) -> npt.NDArray[np.floating]:
+    """Return ``x`` as a NumPy array with ``float`` dtype.
+
+    Args:
+        x: Array-like input (NumPy, Series, or DataFrame).
+
+    Returns:
+        ndarray: Dense ``float`` array view/copy of ``x``.
+    """
+    return x.to_numpy(dtype=float) if isinstance(x, (pd.Series, pd.DataFrame)) else np.asarray(x, dtype=float)
+
+
+def _wrap_matrix_like(
+    arr: npt.NDArray[np.floating], template: Union[npt.NDArray[np.floating], pd.DataFrame]
+) -> Union[npt.NDArray[np.floating], pd.DataFrame]:
+    """Wrap a matrix to match the pandas/NumPy type of ``template``.
+
+    Args:
+        arr: Matrix to wrap.
+        template: Reference object that determines the return type.
+
+    Returns:
+        ndarray or pd.DataFrame: ``arr`` with the same container type as ``template``.
+    """
+    if isinstance(template, pd.DataFrame):
+        return pd.DataFrame(arr, index=template.index, columns=template.columns)
+    return arr
+
+
 def _cholesky_pd(
     mat: npt.NDArray[np.floating], jitter: float = 1e-12, *, max_attempts: int = 6
 ) -> npt.NDArray[np.floating]:
@@ -549,3 +578,109 @@ class NIWPosterior:
         term2 = np.sqrt(term2_arg)
         C_sigma = term1 + term2
         return C_sigma
+
+
+@dataclass(frozen=True)
+class RobustBayesPosterior:
+    """Bundle NIW posterior moments with mean-uncertainty helpers.
+
+    The Normal-Inverse-Wishart (NIW) posterior implies a covariance of the mean
+    :math:`S_\\mu` given by :cite:p:`meucci2005robust`:
+
+    .. math::
+
+        S_\\mu = \\frac{\\nu_1}{T_1 (\\nu_1 - 2)} \\Sigma_1.
+
+    This object exposes :math:`S_\\mu` and convenience transforms into
+    horizon-scaled log- and simple-return units, which are required by robust
+    optimisation routines that penalise mean uncertainty.
+
+    Key fields:
+        mu: Posterior mean vector (same units as inputs).
+        sigma: Posterior covariance matrix (same units as inputs).
+        s_mu: Posterior covariance of the mean (:math:`S_\\mu`).
+    """
+
+    mu: Union[npt.NDArray[np.floating], pd.Series]
+    sigma: Union[npt.NDArray[np.floating], pd.DataFrame]
+    s_mu: Union[npt.NDArray[np.floating], pd.DataFrame]
+
+    @classmethod
+    def from_niw(
+        cls,
+        *,
+        prior_mu: Union[npt.NDArray[np.floating], pd.Series],
+        prior_sigma: Union[npt.NDArray[np.floating], pd.DataFrame],
+        t0: int,
+        nu0: int,
+        sample_mu: Union[npt.NDArray[np.floating], pd.Series],
+        sample_sigma: Union[npt.NDArray[np.floating], pd.DataFrame],
+        n_obs: int,
+    ) -> "RobustBayesPosterior":
+        """Construct the posterior bundle from NIW inputs.
+
+        Args:
+            prior_mu: Prior mean vector.
+            prior_sigma: Prior covariance matrix.
+            t0: Prior strength for the mean.
+            nu0: Prior degrees of freedom for the covariance.
+            sample_mu: Sample mean vector.
+            sample_sigma: Sample covariance matrix.
+            n_obs: Number of observations.
+
+        Returns:
+            RobustBayesPosterior: Posterior bundle with mean uncertainty.
+        """
+        niw = NIWPosterior(
+            prior_mu=prior_mu,
+            prior_sigma=prior_sigma,
+            t0=int(t0),
+            nu0=int(nu0),
+        )
+        niw.update(sample_mu=sample_mu, sample_sigma=sample_sigma, n_obs=int(n_obs))
+        return cls(
+            mu=niw.get_mu_ce(),
+            sigma=niw.get_sigma_ce(),
+            s_mu=niw.get_S_mu(),
+        )
+
+    def mean_uncertainty_cov_log(
+        self,
+        *,
+        annualization_factor: float = 1.0,
+    ) -> Union[npt.NDArray[np.floating], pd.DataFrame]:
+        """Return mean-uncertainty covariance in log-return units.
+
+        The mean uncertainty scales with the square of the horizon:
+
+        .. math::
+
+           S_{\\mu,\\,h} = h^2\\, S_\\mu.
+        """
+        s_mu_np = _to_numpy(self.s_mu)
+        scaled = s_mu_np * (annualization_factor ** 2)
+        return _wrap_matrix_like(scaled, self.s_mu)
+
+    def mean_uncertainty_cov_simple(
+        self,
+        *,
+        annualization_factor: float = 1.0,
+    ) -> Union[npt.NDArray[np.floating], pd.DataFrame]:
+        """Return mean-uncertainty covariance in simple-return units.
+
+        Assumes ``mu`` and ``s_mu`` are expressed in log-return units. The method
+        annualises and applies a delta approximation to map to simple returns:
+
+        .. math::
+
+           r \\approx \\exp(\\mu_g) - 1, \\quad
+           S_{\\mu,r} \\approx J\\,S_{\\mu,g}\\,J^{\\top}, \\quad
+           J = \\operatorname{diag}(\\exp(\\mu_g)).
+        """
+        mu_np = _to_numpy(self.mu)
+        s_mu_np = _to_numpy(self.s_mu)
+        mu_log = mu_np * annualization_factor
+        s_mu_log = s_mu_np * (annualization_factor ** 2)
+        scale = np.exp(mu_log)
+        cov_simple = (scale[:, None] * s_mu_log) * scale[None, :]
+        return _wrap_matrix_like(cov_simple, self.s_mu)

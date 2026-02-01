@@ -27,34 +27,26 @@ def scenario_pnl(weights: WeightsLike, scenarios: ArrayLike) -> ArrayLike:
     """
     Compute scenario-by-scenario portfolio P&L.
 
-    Parameters
-    ----------
-    weights :
-        Portfolio weights. Accepts numpy arrays, pandas Series/DataFrames, or a
-        mapping ``asset -> weight``.
-    scenarios :
-        Scenario matrix ``R`` of shape ``(T, N)`` (NumPy or pandas). When a
-        pandas object is supplied, the returned object preserves the original
-        index/columns.
+    Args:
+        weights: Portfolio weights. Accepts numpy arrays, pandas Series/DataFrames,
+            or a mapping ``asset -> weight``.
+        scenarios: Scenario matrix ``R`` of shape ``(T, N)`` (NumPy or pandas). When a
+            pandas object is supplied, the returned object preserves the original
+            index/columns.
 
-    Returns
-    -------
-    array-like
-        Scenario P&L with shape ``(T,)`` or ``(T, M)`` depending on the number
-        of portfolios supplied.
+    Returns:
+        ArrayLike: Scenario P&L with shape ``(T,)`` or ``(T, M)`` depending on the
+        number of portfolios supplied.
 
-    Raises
-    ------
-    ValueError
-        If scenario dimensions are inconsistent with the weight vector/matrix.
+    Raises:
+        ValueError: If scenario dimensions are inconsistent with the weight vector/matrix.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from pyvallocation.utils.performance import scenario_pnl
-    >>> scenarios = np.array([[0.02, 0.00], [0.00, 0.02]])
-    >>> scenario_pnl([0.5, 0.5], scenarios)
-    array([0.01, 0.01])
+    Examples:
+        >>> import numpy as np
+        >>> from pyvallocation.utils.performance import scenario_pnl
+        >>> scenarios = np.array([[0.02, 0.00], [0.00, 0.02]])
+        >>> scenario_pnl([0.5, 0.5], scenarios)
+        array([0.01, 0.01])
     """
     if isinstance(scenarios, pd.DataFrame):
         arr = scenarios.to_numpy(dtype=float)
@@ -113,50 +105,38 @@ def performance_report(
     """
     Summarise mean, volatility, VaR, CVaR, and ENS for a single allocation.
 
-    Parameters
-    ----------
-    weights :
-        Allocation vector (numpy array or pandas Series/DataFrame with a single
-        column). Labels are aligned with ``scenarios`` when present.
-    scenarios :
-        Scenario matrix ``R`` with shape ``(T, N)`` (NumPy or pandas).
-    probabilities :
-        Optional scenario weights ``p``. When omitted a uniform distribution is
-        used.
-    alpha :
-        Confidence level used for VaR/CVaR (default 0.95).
-    demean :
-        If ``True`` the scenario P&L is demeaned before VaR/CVaR are computed.
+    Args:
+        weights: Allocation vector (numpy array or pandas Series/DataFrame with a single
+            column). Labels are aligned with ``scenarios`` when present.
+        scenarios: Scenario matrix ``R`` with shape ``(T, N)`` (NumPy or pandas).
+        probabilities: Optional scenario weights ``p``. When omitted a uniform
+            distribution is used.
+        alpha: Confidence level used for VaR/CVaR (default ``0.95``).
+        demean: If ``True`` the scenario P&L is demeaned before VaR/CVaR are computed.
 
-    Returns
-    -------
-    pandas.Series
-        Series containing the portfolio mean, standard deviation, VaR, CVaR, and
-        effective number of scenarios.
+    Returns:
+        pd.Series: Series containing the portfolio mean, standard deviation, VaR, CVaR,
+        and effective number of scenarios.
 
-    Raises
-    ------
-    ValueError
-        If inputs are inconsistent (e.g. mismatched dimensions or invalid
-        probabilities).
+    Raises:
+        ValueError: If inputs are inconsistent (e.g. mismatched dimensions or invalid
+            probabilities).
 
-    Notes
-    -----
-    VaR and CVaR follow the loss convention, so profitable scenarios appear as
-    negative numbers (representing gains) while losses are positive.
+    Notes:
+        VaR and CVaR follow the loss convention: profitable scenarios appear as
+        negative numbers (gains) while losses are positive.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from pyvallocation.utils.performance import performance_report
-    >>> scenarios = np.array([[0.02, 0.00], [0.02, 0.00]])
-    >>> performance_report([0.5, 0.5], scenarios).round(4)
-    mean      0.0100
-    stdev     0.0000
-    VaR95    -0.0100
-    CVaR95   -0.0100
-    ENS       2.0000
-    dtype: float64
+    Examples:
+        >>> import numpy as np
+        >>> from pyvallocation.utils.performance import performance_report
+        >>> scenarios = np.array([[0.02, 0.00], [0.02, 0.00]])
+        >>> performance_report([0.5, 0.5], scenarios).round(4)
+        mean      0.0100
+        stdev     0.0000
+        VaR95    -0.0100
+        CVaR95   -0.0100
+        ENS       2.0000
+        dtype: float64
     """
     if not 0.0 < alpha < 1.0:
         raise ValueError("`alpha` must be in (0, 1).")

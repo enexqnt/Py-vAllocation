@@ -25,9 +25,16 @@ if str(ROOT) not in sys.path:
 
 from pyvallocation.discrete_allocation import discretize_weights
 from pyvallocation.ensembles import assemble_portfolio_ensemble, make_portfolio_spec
-from pyvallocation.moments import estimate_moments, posterior_moments_niw
-from pyvallocation.plotting import plot_frontiers_grid
-from pyvallocation.portfolioapi import AssetsDistribution, PortfolioFrontier
+from pyvallocation.bayesian import RobustBayesPosterior
+from pyvallocation.moments import estimate_moments, estimate_sample_moments
+from pyvallocation.plotting import (
+    plot_frontiers,
+    plot_weights,
+    plot_robust_path,
+    plot_param_impact,
+    plot_assumptions_3d,
+)
+from pyvallocation.portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper
 from pyvallocation.utils.projection import (
     convert_scenarios_compound_to_simple,
     log2simple,
@@ -35,15 +42,15 @@ from pyvallocation.utils.projection import (
     project_scenarios,
 )
 from pyvallocation.views import BlackLittermanProcessor, FlexibleViewsProcessor
-
-DATA_PATH = ROOT / "examples" / "ETF_prices.csv"
+from data_utils import load_prices
 OUTPUT_DIR = ROOT / "output"
 VOL_TARGET = 0.12  # annualised volatility target for selection
 RISK_FREE = 0.01
+OOS_WEEKS = 52
 
 
 def load_weekly_returns() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    prices = pd.read_csv(DATA_PATH, index_col="Date", parse_dates=True).ffill()
+    prices = load_prices()
     weekly_prices = prices.resample("W-FRI").last().dropna(how="all")
     weekly_returns = np.log(weekly_prices).diff().dropna()
     rename = lambda c: c.replace(" ", "_")
@@ -257,29 +264,35 @@ def main() -> None:
 
     step("Loading weekly data...")
     weekly_returns, weekly_prices = load_weekly_returns()
+    if len(weekly_returns) <= OOS_WEEKS:
+        raise RuntimeError("Not enough data for in-sample / out-of-sample split.")
+    in_sample_returns = weekly_returns.iloc[:-OOS_WEEKS]
+    out_sample_returns = weekly_returns.iloc[-OOS_WEEKS:]
 
     step("Estimating base and robust moments...")
-    mu_js, cov_oas = estimate_moments(weekly_returns, mean_estimator="james_stein", cov_estimator="oas")
-    mu_nls, cov_nls = estimate_moments(weekly_returns, mean_estimator="james_stein", cov_estimator="nls")
+    mu_js, cov_oas = estimate_moments(in_sample_returns, mean_estimator="james_stein", cov_estimator="oas")
+    mu_nls, cov_nls = estimate_moments(in_sample_returns, mean_estimator="james_stein", cov_estimator="nls")
     mu_huber, cov_tyler = estimate_moments(
-        weekly_returns,
+        in_sample_returns,
         mean_estimator="huber",
         cov_estimator="tyler",
         cov_kwargs={"shrinkage": 0.1},
     )
-    mu_rb, cov_rb = posterior_moments_niw(
+    rb_posterior = RobustBayesPosterior.from_niw(
         prior_mu=mu_js,
         prior_sigma=cov_oas,
         t0=8,
         nu0=max(len(mu_js) + 2, 6),
         sample_mu=mu_huber,
         sample_sigma=cov_tyler,
-        n_obs=weekly_returns.shape[0],
+        n_obs=in_sample_returns.shape[0],
     )
+    mu_rb = rb_posterior.mu
+    cov_rb = rb_posterior.sigma
 
     step("Applying macro views (BL & EP)...")
     mu_bl, cov_bl = scaled_black_litterman(mu_js, cov_oas)
-    mu_ep, cov_ep, q_ep = entropy_pool_posterior(weekly_returns)
+    mu_ep, cov_ep, q_ep = entropy_pool_posterior(in_sample_returns)
     ep_mu_1y, ep_cov_1y = project_one_year(mu_ep, cov_ep)
 
     step("Projecting all moments to 1-year simple returns...")
@@ -297,11 +310,11 @@ def main() -> None:
         annual_cov[label] = cov_1y
 
     step("Building annual scenarios for CVaR...")
-    ep_scenarios = annual_scenarios(weekly_returns, q_ep)
+    ep_scenarios = annual_scenarios(in_sample_returns, q_ep)
 
     step("Configuring optimisation specs...")
     specs = build_specs(
-        weekly_returns=weekly_returns,
+        weekly_returns=in_sample_returns,
         annual_covariances=annual_cov,
         annual_mu=annual_mu,
         ep_cov_1y=ep_cov_1y,
@@ -324,6 +337,13 @@ def main() -> None:
     print("\nStacked allocation (top 5):")
     print(stacked.sort_values(ascending=False).head())
 
+    OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+    weights_fig, ax = plt.subplots(figsize=(6, 3))
+    plot_weights(stacked, ax=ax, title="Stacked Weights", kind="barh", percent_axes=True)
+    weights_fig.tight_layout()
+    weights_fig.savefig(OUTPUT_DIR / "stacked_weights.png", dpi=150)
+    plt.close(weights_fig)
+
     step("Evaluating trailing metrics...")
     weekly_simple = weekly_prices.pct_change().dropna()
     aligned = stacked.reindex(weekly_simple.columns, fill_value=0.0)
@@ -333,17 +353,131 @@ def main() -> None:
     sharpe = (annual_return - RISK_FREE) / annual_vol if annual_vol > 0 else np.nan
     print(f"\nStacked trailing metrics: return={annual_return:.2%}, vol={annual_vol:.2%}, Sharpe≈{sharpe:.2f} (rf={RISK_FREE:.0%})")
 
-    step("Drawing combined frontier plot...")
-    fig, _ = plot_frontiers_grid(
-        ensemble.frontiers,
-        by=lambda _label, frontier: "CVaR (alpha=5%)" if "CVaR" in (frontier.risk_measure or "") else "Volatility",
-        highlight=("min_risk", "max_return"),
-        risk_free_rate=RISK_FREE,
-        legend=True,
-        figsize=(13, 5),
+    step("Drawing in-sample vs out-of-sample frontier plot...")
+    oos_mu, oos_cov = estimate_sample_moments(
+        out_sample_returns, np.full(len(out_sample_returns), 1.0 / len(out_sample_returns))
     )
+    oos_mu_1y, oos_cov_1y = project_one_year(
+        pd.Series(oos_mu, index=in_sample_returns.columns),
+        pd.DataFrame(oos_cov, index=in_sample_returns.columns, columns=in_sample_returns.columns),
+    )
+
+    label_map = {
+        "Shrinkage_MV": "Shrinkage",
+        "NLS_MV": "NLS",
+        "Robust_RRP": "Robust RRP",
+        "Robust_Bayes_MV": "Robust Bayes",
+        "BL_MV": "Black-Litterman",
+        "EP_MV": "Entropy Pooling",
+    }
+    in_sample_frontiers = {
+        label_map.get(name, name.replace("_", " ")): frontier
+        for name, frontier in ensemble.frontiers.items()
+        if "CVaR" not in (frontier.risk_measure or "")
+    }
+    oos_frontiers = {}
+    for name, frontier in in_sample_frontiers.items():
+        weights = frontier.weights
+        returns = np.asarray(oos_mu_1y, dtype=float) @ weights
+        risks = np.sqrt(np.sum((weights.T @ np.asarray(oos_cov_1y, dtype=float)) * weights.T, axis=1))
+        oos_frontiers[name] = PortfolioFrontier(
+            weights=weights,
+            returns=returns,
+            risks=risks,
+            risk_measure="Volatility (OOS)",
+            asset_names=frontier.asset_names,
+            metadata=frontier.metadata,
+        )
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    plot_frontiers(
+        in_sample_frontiers,
+        ax=axes[0],
+        highlight=(),
+        legend=True,
+        show_points=False,
+        percent_axes=True,
+    )
+    axes[0].set_title("In-sample")
+    axes[0].set_xlabel("Volatility")
+
+    # Overlay robust uncertainty path (diagnostic, dashed)
+    # Mean-uncertainty covariance from NIW posterior (delta approximation in simple returns).
+    uncertainty_cov = rb_posterior.mean_uncertainty_cov_simple(annualization_factor=52)
+    robust_uncertainty = PortfolioWrapper(
+        AssetsDistribution(mu=annual_mu["RobustBayes"], cov=uncertainty_cov)
+    )
+    robust_uncertainty.set_constraints({"long_only": True, "total_weight": 1.0, "bounds": (None, 0.6)})
+    lambda_grid = np.geomspace(0.01, 10.0, 11)
+    robust_frontier = robust_uncertainty.robust_lambda_frontier(
+        lambdas=lambda_grid,
+        return_cov=annual_cov["RobustBayes"],
+    )
+    weights = robust_frontier.weights
+    cov_is = annual_cov["RobustBayes"].to_numpy()
+    robust_vol_is = np.sqrt(np.sum((weights.T @ cov_is) * weights.T, axis=1))
+    axes[0].plot(
+        robust_vol_is,
+        robust_frontier.returns,
+        linestyle="--",
+        color="black",
+        alpha=0.6,
+        label="Robust (uncert.)",
+    )
+    axes[0].legend()
+
+    plot_frontiers(
+        oos_frontiers,
+        ax=axes[1],
+        highlight=(),
+        legend=True,
+        show_points=False,
+        percent_axes=True,
+    )
+    axes[1].set_title("Out-of-sample")
+
+    cov_oos = oos_cov_1y.to_numpy()
+    robust_vol_oos = np.sqrt(np.sum((weights.T @ cov_oos) * weights.T, axis=1))
+    robust_ret_oos = np.asarray(oos_mu_1y, dtype=float) @ weights
+    axes[1].plot(
+        robust_vol_oos,
+        robust_ret_oos,
+        linestyle="--",
+        color="black",
+        alpha=0.6,
+        label="Robust (uncert.)",
+    )
+    axes[1].legend()
+
+    fig.tight_layout()
     fig.savefig(OUTPUT_DIR / "frontiers.png", dpi=150)
     plt.close(fig)
+
+    step("Visualising robust uncertainty path...")
+    print(
+        f"Robust uncertainty radius (min/max): {robust_frontier.risks.min():.4f} / {robust_frontier.risks.max():.4f}"
+    )
+
+    fig_unc, ax_unc = plt.subplots(figsize=(6, 4))
+    plot_robust_path(robust_frontier, ax=ax_unc, percent_axes=True)
+    fig_unc.tight_layout()
+    fig_unc.savefig(OUTPUT_DIR / "robust_uncertainty.png", dpi=150)
+    plt.close(fig_unc)
+
+    fig_imp, _ = plot_param_impact(robust_frontier, param="lambda", percent_axes=True)
+    fig_imp.savefig(OUTPUT_DIR / "robust_param_impact.png", dpi=150)
+    plt.close(fig_imp)
+
+    step("Visualising robust assumptions in 3D...")
+    fig_assumptions, _ = plot_assumptions_3d(
+        mean=annual_mu["RobustBayes"].to_numpy(),
+        cov=annual_cov["RobustBayes"].to_numpy(),
+        scenarios=ep_scenarios.to_numpy(),
+        uncertainty_cov=uncertainty_cov.to_numpy(),
+        titles=("Return distribution (EP scenarios)", "Mean uncertainty (Robust Bayes)"),
+    )
+    fig_assumptions.savefig(OUTPUT_DIR / "robust_assumptions_3d.png", dpi=150)
+    plt.close(fig_assumptions)
 
     step("Converting to discrete trades...")
     allocation = discretize_weights(
@@ -364,7 +498,6 @@ def main() -> None:
     print(f"Residual cash: {allocation.leftover_cash:,.2f} | Tracking error RMSE: {allocation.tracking_error:.6f}")
 
     step("Persisting key artefacts...")
-    OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
     selected.to_csv(OUTPUT_DIR / "selected_weights.csv")
     stacked.to_csv(OUTPUT_DIR / "stacked_weights.csv")
     if ensemble.average is not None:
@@ -372,7 +505,7 @@ def main() -> None:
 
     step("Stress-testing with adverse flexible views...")
     stress_processor = FlexibleViewsProcessor(
-        prior_returns=weekly_returns,
+        prior_returns=in_sample_returns,
         mean_views={"SPY": ("<=", -0.0002)},
         corr_views={("SPY", "TLT"): (">=", -0.02)},
         sequential=True,
@@ -380,8 +513,8 @@ def main() -> None:
     )
     mu_stress, sigma_stress = stress_processor.get_posterior()
     mu_stress_1y, sigma_stress_1y = project_one_year(
-        pd.Series(mu_stress, index=weekly_returns.columns),
-        pd.DataFrame(sigma_stress, index=weekly_returns.columns, columns=weekly_returns.columns),
+        pd.Series(mu_stress, index=in_sample_returns.columns),
+        pd.DataFrame(sigma_stress, index=in_sample_returns.columns, columns=in_sample_returns.columns),
     )
     stress_cov = sigma_stress_1y.reindex(stacked.index, axis=0).reindex(stacked.index, axis=1)
     stress_return = stacked.values @ mu_stress_1y.reindex(stacked.index).values

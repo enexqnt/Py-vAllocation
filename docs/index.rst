@@ -51,7 +51,7 @@ Install & quickstart
 
    wrapper = PortfolioWrapper(AssetsDistribution(scenarios=np.random.normal(0, 0.01, size=(252, 4))))
    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
-   frontier = wrapper.mean_variance_frontier(num_portfolios=11)
+   frontier = wrapper.variance_frontier(num_portfolios=11)
    weights, ret, risk = frontier.get_tangency_portfolio(risk_free_rate=0.01)
    print(weights.round(3))
 

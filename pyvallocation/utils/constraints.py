@@ -25,7 +25,18 @@ BoundsLike = Union[
 RelBound = Tuple[int, int, Number]
 EqRow = Tuple[Sequence[Number], Number]
 
+
 def _check_number(x: Number, name: str) -> None:
+    """Validate that ``x`` is a finite real number.
+
+    Args:
+        x: Candidate numeric value.
+        name: Parameter name for error messaging.
+
+    Raises:
+        TypeError: If ``x`` is not a real number.
+        ValueError: If ``x`` is not finite.
+    """
     if not isinstance(x, numbers.Real):
         logger.error("%s must be a real number, got %s", name, type(x))
         raise TypeError(f"{name} must be a real number, got {type(x)}")
@@ -253,6 +264,14 @@ def build_G_h_A_b(
         )
 
     def _stack(rows: List[np.ndarray]) -> Optional[np.ndarray]:
+        """Stack constraint rows into a 2D array or return ``None`` if empty.
+
+        Args:
+            rows: List of row arrays.
+
+        Returns:
+            Optional[np.ndarray]: Stacked 2D array or ``None``.
+        """
         if rows:
             return np.vstack(rows)
         return None if return_none_if_empty else np.zeros((0, n_assets))
@@ -272,4 +291,3 @@ def build_G_h_A_b(
 
     logger.debug("Built constraint matrices G, h, A, b.")
     return G, h, A, b
-

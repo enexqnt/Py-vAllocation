@@ -209,7 +209,7 @@ class TestSmoke(unittest.TestCase):
         wrapper.set_constraints(constraints_to_set)
 
         num_portfolios = 10
-        frontier = wrapper.mean_variance_frontier(num_portfolios=num_portfolios)
+        frontier = wrapper.variance_frontier(num_portfolios=num_portfolios)
         self.assertEqual(frontier.weights.shape, (self.N, num_portfolios))
         self.assertEqual(len(frontier.returns), num_portfolios)
         self.assertEqual(len(frontier.risks), num_portfolios)
@@ -425,7 +425,7 @@ class TestSmoke(unittest.TestCase):
 
         num_portfolios_cvar = 10
         alpha_cvar = 0.05
-        cvar_frontier = cvar_wrapper.mean_cvar_frontier(num_portfolios=num_portfolios_cvar, alpha=alpha_cvar)
+        cvar_frontier = cvar_wrapper.cvar_frontier(num_portfolios=num_portfolios_cvar, alpha=alpha_cvar)
 
         self.assertEqual(cvar_frontier.weights.shape, (self.N, num_portfolios_cvar))
         self.assertEqual(len(cvar_frontier.returns), num_portfolios_cvar)

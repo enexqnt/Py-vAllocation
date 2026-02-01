@@ -24,8 +24,7 @@ def test_mean_cvar_frontier_convex():
     port = PortfolioWrapper(dist)
     port.set_constraints({"long_only": True, "total_weight": 1.0})
 
-    front = port.mean_cvar_frontier(num_portfolios=13, alpha=0.05)
+    front = port.cvar_frontier(num_portfolios=13, alpha=0.05)
     x, y = np.asarray(front.returns), np.asarray(front.risks)
 
     assert is_convex_envelope(x, y)
-

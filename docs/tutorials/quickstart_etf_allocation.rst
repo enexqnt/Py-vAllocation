@@ -9,7 +9,7 @@ preparing an allocation memo:
 2. Estimate moments using shrinkage, robust, Bayesian, and view-based models.
 3. Project the statistics to a one-year horizon.
 4. Configure multiple optimiser specifications and assemble an ensemble.
-5. Plot and sanity-check the resulting frontiers.
+5. Plot and sanity-check the resulting frontiers (in-sample and out-of-sample).
 6. Convert the final stack into discrete trade lots and persist artefacts.
 7. Stress test the allocation with adverse flexible views.
 
@@ -73,7 +73,7 @@ The quickstart showcases four complementary approaches:
 - **Robust** - Huber mean + Tyler covariance with shrinkage.
 - **Robust Bayesian** - Normal-Inverse-Wishart posterior using shrinkage moments
   as priors and robust statistics as evidence via
-  :func:`pyvallocation.moments.posterior_moments_niw`.
+  :class:`pyvallocation.bayesian.RobustBayesPosterior`.
 - **Black-Litterman** - macro view favouring SPY over TLT via
   :class:`pyvallocation.views.BlackLittermanProcessor`.
 - **Entropy pooling** - opinion pooling with flexible views using
@@ -81,7 +81,8 @@ The quickstart showcases four complementary approaches:
 
 .. code-block:: python
 
-   from pyvallocation.moments import estimate_moments, posterior_moments_niw
+   from pyvallocation.moments import estimate_moments
+   from pyvallocation.bayesian import RobustBayesPosterior
    from pyvallocation.views import BlackLittermanProcessor, FlexibleViewsProcessor
 
    mu_shrink, sigma_oas = estimate_moments(
@@ -95,7 +96,7 @@ The quickstart showcases four complementary approaches:
        cov_estimator="tyler",
        cov_kwargs={"shrinkage": 0.1},
    )
-   mu_rb, sigma_rb = posterior_moments_niw(
+   rb_posterior = RobustBayesPosterior.from_niw(
        prior_mu=mu_shrink,
        prior_sigma=sigma_oas,
        t0=8,
@@ -104,6 +105,7 @@ The quickstart showcases four complementary approaches:
        sample_sigma=sigma_tyler,
        n_obs=len(weekly_returns),
    )
+   mu_rb, sigma_rb = rb_posterior.mu, rb_posterior.sigma
 
    bl_posterior = BlackLittermanProcessor(
        prior_cov=sigma_oas,
@@ -269,33 +271,39 @@ stacked holdings. It also computes trailing Sharpe metrics using simple returns:
        f"return={annualised_return:.2%}, vol={annualised_vol:.2%}, Sharpe~{sharpe:.2f} (rf=1%)"
    )
 
-Step 6 - Plot frontiers
------------------------
+Step 6 - Plot frontiers and robust diagnostics
+----------------------------------------------
 
-The tutorial saves three figures:
+The tutorial saves several figures:
 
-- ``frontiers_vol.png`` - volatility-based frontiers (mean-variance, BL, robust).
-- ``frontiers_cvar.png`` - CVaR frontiers.
-- ``frontiers.png`` - composite figure for dashboards.
+- ``frontiers.png`` - in-sample vs out-of-sample frontiers with robust overlay.
+- ``robust_uncertainty.png`` - uncertainty path coloured by :math:`\lambda`.
+- ``robust_param_impact.png`` - :math:`\lambda` impact on return and risk.
+- ``robust_assumptions_3d.png`` - 3D view of return distribution and mean uncertainty.
 
-All plots rely on :func:`pyvallocation.plotting.plot_frontiers`.
+All plots rely on :func:`pyvallocation.plotting.plot_frontiers` plus the robust
+helpers below.
 
 .. code-block:: python
 
-   from pyvallocation.plotting import plot_frontiers
+   from pyvallocation.plotting import plot_robust_path, plot_param_impact, plot_assumptions_3d
 
-   fig, ax = plt.subplots(figsize=(8, 5))
-   mv_names = [name for name in ensemble.frontiers if "CVaR" not in name]
-   mv_frontiers = {name: ensemble.frontiers[name] for name in mv_names}
-   plot_frontiers(mv_frontiers, ax=ax, highlight=())
-   ax.set_title("ETF Frontier Comparison - 1Y Horizon (Volatility)")
-   ax.set_xlabel("Risk")
-   ax.set_ylabel("Expected Return")
-   fig.tight_layout()
-   fig.savefig(OUTPUT_DIR / "frontiers_vol.png", dpi=150)
+   fig_unc, ax_unc = plt.subplots(figsize=(6, 4))
+   plot_robust_path(robust_frontier, ax=ax_unc, percent_axes=True)
+   fig_unc.savefig(OUTPUT_DIR / "robust_uncertainty.png", dpi=150)
 
-The script repeats the call for CVaR frontiers and stores a combined figure
-under ``output/frontiers.png``.
+   fig_imp, _ = plot_param_impact(robust_frontier, param="lambda", percent_axes=True)
+   fig_imp.savefig(OUTPUT_DIR / "robust_param_impact.png", dpi=150)
+
+   uncertainty_cov = rb_posterior.mean_uncertainty_cov_simple(annualization_factor=52)
+   fig_3d, _ = plot_assumptions_3d(
+       mean=annual_mu["RobustBayes"].to_numpy(),
+       cov=annual_cov["RobustBayes"].to_numpy(),
+       scenarios=ep_scenarios.to_numpy(),
+       uncertainty_cov=uncertainty_cov.to_numpy(),
+       titles=("Return distribution (EP scenarios)", "Mean uncertainty (Robust Bayes)"),
+   )
+   fig_3d.savefig(OUTPUT_DIR / "robust_assumptions_3d.png", dpi=150)
 
 Step 7 - Discretise to trades
 -----------------------------
@@ -352,7 +360,7 @@ shows the change in optimal weights relative to the baseline stack:
 
    stress_wrapper = PortfolioWrapper(AssetsDistribution(mu=mu_stress_1y, cov=sigma_stress_1y))
    stress_wrapper.set_constraints(long_only)
-   stress_frontier = stress_wrapper.mean_variance_frontier(num_portfolios=21)
+   stress_frontier = stress_wrapper.variance_frontier(num_portfolios=21)
    stress_weights, *_ = stress_frontier.portfolio_at_risk_target(max_risk=0.12)
    drift = (stress_weights - ensemble.stacked).dropna()
    print(drift.reindex(drift.abs().sort_values(ascending=False).head().index))

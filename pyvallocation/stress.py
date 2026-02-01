@@ -1,10 +1,4 @@
-"""
-Stress-testing helpers built on top of the single-period scenario engine.
-
-The utilities in this module reuse the existing scenario notation (``R`` for
-scenarios, ``p`` for probabilities) and risk functions to evaluate allocations
-under probability tilts and linear scenario transforms.
-"""
+"""Scenario-based stress testing helpers."""
 
 from __future__ import annotations
 
@@ -41,6 +35,14 @@ def _align_weights(
 ) -> Tuple[np.ndarray, Optional[Sequence[str]], Sequence[str]]:
     """
     Return weight matrix shaped (N, M), the asset order, and portfolio names.
+
+    Args:
+        weights: Weight inputs (Series/DataFrame/array/mapping).
+        asset_names: Optional asset name ordering to enforce.
+
+    Returns:
+        Tuple[np.ndarray, Optional[Sequence[str]], Sequence[str]]: Weight matrix,
+        resolved asset names, and portfolio labels.
     """
     if isinstance(weights, pd.DataFrame):
         matrix = weights.to_numpy(dtype=float)
@@ -86,6 +88,15 @@ def _align_weights(
 
 
 def _kl_divergence(p_star: np.ndarray, p_nom: np.ndarray) -> float:
+    """Compute the KL divergence ``KL(p* || p)`` for probability vectors.
+
+    Args:
+        p_star: Stressed probability vector.
+        p_nom: Nominal probability vector.
+
+    Returns:
+        float: KL divergence value.
+    """
     eps = 1e-16
     p1 = np.clip(p_star, eps, None)
     p0 = np.clip(p_nom, eps, None)
@@ -105,49 +116,35 @@ def stress_test(
     """
     Evaluate allocations under nominal and stressed conditions.
 
-    Parameters
-    ----------
-    weights :
-        Portfolio weights (Series, DataFrame, NumPy array, or mapping). Multiple
-        portfolios can be evaluated at once by passing a 2-D array/DataFrame.
-    scenarios :
-        Scenario matrix ``R`` with shape ``(T, N)`` (rows = observations,
-        columns = assets). Accepts pandas objects or ndarrays.
-    probabilities :
-        Optional nominal scenario probabilities ``p``. Defaults to a uniform
-        distribution across scenarios.
-    stressed_probabilities :
-        Optional stressed probabilities ``p*`` on the same scenario grid. When
-        supplied alongside ``probabilities`` the KL divergence ``KL(p* || p)``
-        is reported.
-    transform :
-        Callable applied to ``R`` (after conversion to ``float``) to obtain
-        stressed scenarios (e.g., shocks, factor projections).
-    alpha :
-        Confidence level for VaR/CVaR metrics (default ``0.95``).
-    demean :
-        When ``True`` the scenario P&L used for VaR/CVaR is demeaned by the
-        respective probabilities.
+    Args:
+        weights: Portfolio weights (Series, DataFrame, NumPy array, or mapping).
+            Multiple portfolios can be evaluated at once by passing a 2-D array/DataFrame.
+        scenarios: Scenario matrix ``R`` with shape ``(T, N)`` (rows = observations,
+            columns = assets). Accepts pandas objects or ndarrays.
+        probabilities: Optional nominal scenario probabilities ``p``. Defaults to a
+            uniform distribution across scenarios.
+        stressed_probabilities: Optional stressed probabilities ``p*`` on the same
+            scenario grid. When supplied alongside ``probabilities`` the KL divergence
+            ``KL(p* || p)`` is reported.
+        transform: Callable applied to ``R`` (after conversion to ``float``) to obtain
+            stressed scenarios (e.g., shocks, factor projections).
+        alpha: Confidence level for VaR/CVaR metrics (default ``0.95``). Risk is reported
+            as a positive loss.
+        demean: When ``True`` the scenario P&L used for VaR/CVaR is demeaned by the
+            respective probabilities.
 
-    Returns
-    -------
-    pandas.DataFrame
-        Tidy DataFrame indexed by portfolio label containing nominal metrics,
-        stressed metrics (when a transform or stressed probabilities are
-        provided), effective number of scenarios, and optionally the KL
-        divergence.
+    Returns:
+        pd.DataFrame: Tidy DataFrame indexed by portfolio label containing nominal
+        metrics, stressed metrics (when supplied), effective number of scenarios,
+        and optional KL divergence.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from pyvallocation.stress import stress_test, linear_map
-    >>> weights = np.array([0.6, 0.4])
-    >>> scenarios = np.array([[0.01, 0.02], [0.00, 0.01], [-0.02, 0.00]])
-    >>> shock = linear_map(scale=1.5)  # magnify returns by 50%
-    >>> df = stress_test(weights, scenarios, transform=shock)
-    >>> df[["return_nom", "return_stress"]].round(3)
-                 return_nom  return_stress
-    portfolio_0        0.002          0.003
+    Examples:
+        >>> import numpy as np
+        >>> from pyvallocation.stress import stress_test, linear_map
+        >>> weights = np.array([0.6, 0.4])
+        >>> scenarios = np.array([[0.01, 0.02], [0.00, 0.01], [-0.02, 0.00]])
+        >>> shock = linear_map(scale=1.5)  # magnify returns by 50%
+        >>> df = stress_test(weights, scenarios, transform=shock)
     """
 
     if not 0.0 < alpha < 1.0:
@@ -172,6 +169,16 @@ def stress_test(
     def _metrics(
         R_matrix: np.ndarray, probs: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+        """Compute mean, volatility, VaR, CVaR, and ENS for a scenario set.
+
+        Args:
+            R_matrix: Scenario matrix.
+            probs: Scenario probabilities.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]: Mean, volatility,
+            VaR, CVaR, and effective number of scenarios.
+        """
         mu, sigma = estimate_sample_moments(R_matrix, probs)
         mu_vec = np.asarray(mu, dtype=float).reshape(-1, 1)
         sigma_mat = np.asarray(sigma, dtype=float)
@@ -243,32 +250,22 @@ def exp_decay_stress(
     :func:`pyvallocation.probabilities.generate_exp_decay_probabilities` and
     passes them to :func:`stress_test`.
 
-    Parameters
-    ----------
-    weights, scenarios :
-        See :func:`stress_test`.
-    probabilities :
-        Nominal scenario probabilities ``p``. Defaults to uniform.
-    half_life :
-        Half-life (in observations) of the exponential decay kernel.
-    alpha, demean :
-        Risk settings forwarded to :func:`stress_test`.
+    Args:
+        weights, scenarios: See :func:`stress_test`.
+        probabilities: Nominal scenario probabilities ``p``. Defaults to uniform.
+        half_life: Half-life (in observations) of the exponential decay kernel.
+            Defaults to ``60``.
+        alpha, demean: Risk settings forwarded to :func:`stress_test`.
 
-    Returns
-    -------
-    pandas.DataFrame
-        Tidy comparison between nominal and stressed metrics.
+    Returns:
+        pd.DataFrame: Tidy comparison between nominal and stressed metrics.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from pyvallocation.stress import exp_decay_stress
-    >>> weights = np.array([0.5, 0.5])
-    >>> scenarios = np.array([[0.01, 0.00], [-0.02, 0.03], [0.015, -0.01]])
-    >>> df = exp_decay_stress(weights, scenarios, half_life=2)
-    >>> df[["return_nom", "return_stress"]].round(4)
-                 return_nom  return_stress
-    portfolio_0        0.0042         0.0039
+    Examples:
+        >>> import numpy as np
+        >>> from pyvallocation.stress import exp_decay_stress
+        >>> weights = np.array([0.5, 0.5])
+        >>> scenarios = np.array([[0.01, 0.00], [-0.02, 0.03], [0.015, -0.01]])
+        >>> df = exp_decay_stress(weights, scenarios, half_life=2)
     """
     scenario_array = np.asarray(scenarios, dtype=float)
     p_star = generate_exp_decay_probabilities(scenario_array.shape[0], half_life)
@@ -296,39 +293,26 @@ def kernel_focus_stress(
     """
     Gaussian-kernel stress that focuses on a state variable.
 
-    Parameters
-    ----------
-    weights, scenarios :
-        See :func:`stress_test`.
-    focus_series :
-        One-dimensional feature (e.g., realised volatility) with length equal to
-        the number of scenarios.
-    probabilities :
-        Nominal probabilities ``p`` (defaults to uniform).
-    bandwidth :
-        Optional kernel bandwidth ``h`` supplied to
-        :func:`pyvallocation.probabilities.generate_gaussian_kernel_probabilities`.
-    target :
-        Target state ``x_T`` around which probability mass is concentrated. When
-        omitted, the last observation is used.
-    alpha, demean :
-        Risk settings forwarded to :func:`stress_test`.
+    Args:
+        weights, scenarios: See :func:`stress_test`.
+        focus_series: One-dimensional feature (e.g., realised volatility) with
+            length equal to the number of scenarios.
+        probabilities: Nominal probabilities ``p`` (defaults to uniform).
+        bandwidth: Optional kernel bandwidth ``h`` supplied to
+            :func:`pyvallocation.probabilities.generate_gaussian_kernel_probabilities`.
+        target: Target state ``x_T`` around which probability mass is concentrated.
+            When omitted, the last observation is used.
+        alpha, demean: Risk settings forwarded to :func:`stress_test`.
 
-    Returns
-    -------
-    pandas.DataFrame
-        Tidy comparison between nominal and stressed metrics.
+    Returns:
+        pd.DataFrame: Tidy comparison between nominal and stressed metrics.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from pyvallocation.stress import kernel_focus_stress
-    >>> returns = np.array([[0.01, 0.00], [-0.02, 0.03], [0.015, -0.01]])
-    >>> vol_proxy = np.array([0.10, 0.15, 0.30])  # e.g. rolling volatility
-    >>> df = kernel_focus_stress([0.5, 0.5], returns, focus_series=vol_proxy, target=0.30)
-    >>> df[["return_nom", "return_stress"]].round(4)
-                 return_nom  return_stress
-    portfolio_0        0.0042         0.0031
+    Examples:
+        >>> import numpy as np
+        >>> from pyvallocation.stress import kernel_focus_stress
+        >>> returns = np.array([[0.01, 0.00], [-0.02, 0.03], [0.015, -0.01]])
+        >>> vol_proxy = np.array([0.10, 0.15, 0.30])  # e.g. rolling volatility
+        >>> df = kernel_focus_stress([0.5, 0.5], returns, focus_series=vol_proxy, target=0.30)
     """
     v = np.asarray(focus_series, dtype=float).reshape(-1)
     if v.shape[0] != np.asarray(scenarios, dtype=float).shape[0]:
@@ -356,34 +340,24 @@ def entropy_pooling_stress(
     """
     Stress test using posterior probabilities produced by entropy pooling.
 
-    Parameters
-    ----------
-    weights, scenarios :
-        See :func:`stress_test`.
-    posterior_probabilities :
-        Probability vector returned by :func:`pyvallocation.views.entropy_pooling`
-        or :class:`pyvallocation.views.FlexibleViewsProcessor`.
-    probabilities :
-        Nominal probabilities ``p``. Defaults to uniform.
-    alpha, demean :
-        Risk settings forwarded to :func:`stress_test`.
+    Args:
+        weights, scenarios: See :func:`stress_test`.
+        posterior_probabilities: Probability vector returned by
+            :func:`pyvallocation.views.entropy_pooling` or
+            :class:`pyvallocation.views.FlexibleViewsProcessor`.
+        probabilities: Nominal probabilities ``p``. Defaults to uniform.
+        alpha, demean: Risk settings forwarded to :func:`stress_test`.
 
-    Returns
-    -------
-    pandas.DataFrame
-        Tidy comparison between nominal and stressed metrics including KL
-        divergence between ``p*`` and ``p``.
+    Returns:
+        pd.DataFrame: Tidy comparison between nominal and stressed metrics including
+        KL divergence between ``p*`` and ``p``.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from pyvallocation.stress import entropy_pooling_stress
-    >>> scenarios = np.array([[0.01, -0.02], [0.02, 0.01], [-0.03, 0.00]])
-    >>> posterior = np.array([0.10, 0.70, 0.20])  # output of entropy_pooling
-    >>> df = entropy_pooling_stress([0.4, 0.6], scenarios, posterior_probabilities=posterior)
-    >>> df[["return_nom", "return_stress", "KL_q_p"]].round(4)
-                 return_nom  return_stress  KL_q_p
-    portfolio_0       -0.002         0.0066  0.2968
+    Examples:
+        >>> import numpy as np
+        >>> from pyvallocation.stress import entropy_pooling_stress
+        >>> scenarios = np.array([[0.01, -0.02], [0.02, 0.01], [-0.03, 0.00]])
+        >>> posterior = np.array([0.10, 0.70, 0.20])  # output of entropy_pooling
+        >>> df = entropy_pooling_stress([0.4, 0.6], scenarios, posterior_probabilities=posterior)
     """
     return stress_test(
         weights,
@@ -404,33 +378,32 @@ def linear_map(
     """
     Build a linear scenario transform ``R -> R @ matrix.T * scale + mean_shift``.
 
-    Parameters
-    ----------
-    mean_shift :
-        Optional vector added to every scenario (shape ``(N,)``).
-    scale :
-        Scalar multiplier applied after the optional matrix projection.
-    matrix :
-        Optional matrix ``B`` with shape ``(N_out, N_in)``. When provided,
-        scenarios are multiplied on the right by ``B^T``.
+    Args:
+        mean_shift: Optional vector added to every scenario (shape ``(N,)``).
+        scale: Scalar multiplier applied after the optional matrix projection.
+        matrix: Optional matrix ``B`` with shape ``(N_out, N_in)``. When provided,
+            scenarios are multiplied on the right by ``B^T``.
 
-    Returns
-    -------
-    callable
-        Function that accepts a scenario matrix and returns a transformed copy.
+    Returns:
+        Callable[[np.ndarray], np.ndarray]: Function that accepts a scenario matrix
+        and returns a transformed copy.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from pyvallocation.stress import linear_map
-    >>> R = np.array([[0.01, 0.00], [-0.02, 0.03]])
-    >>> transform = linear_map(mean_shift=np.array([0.0, -0.01]), scale=1.2)
-    >>> transform(R)
-    array([[ 0.012 , -0.01  ],
-           [-0.024 ,  0.026 ]])
+    Examples:
+        >>> import numpy as np
+        >>> from pyvallocation.stress import linear_map
+        >>> R = np.array([[0.01, 0.00], [-0.02, 0.03]])
+        >>> transform = linear_map(mean_shift=np.array([0.0, -0.01]), scale=1.2)
     """
 
     def _transform(R: np.ndarray) -> np.ndarray:
+        """Apply the configured linear transformation to scenarios.
+
+        Args:
+            R: Scenario matrix.
+
+        Returns:
+            np.ndarray: Transformed scenarios.
+        """
         X = np.asarray(R, dtype=float)
         if matrix is not None:
             mat = np.asarray(matrix, dtype=float)

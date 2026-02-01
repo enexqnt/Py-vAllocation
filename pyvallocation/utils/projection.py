@@ -8,30 +8,68 @@ def project_mean_covariance(
     cov: Union[np.ndarray, pd.DataFrame],
     annualization_factor: float,
 ) -> tuple[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.DataFrame]]:
-    """Scale mean and covariance by ``annualization_factor``."""
+    """Scale mean and covariance by ``annualization_factor``.
+
+    Args:
+        mu: Mean vector.
+        cov: Covariance matrix.
+        annualization_factor: Scaling factor (e.g., 12 for monthly to annual).
+
+    Returns:
+        tuple: Scaled mean vector and covariance matrix.
+    """
 
     return mu * annualization_factor, cov * annualization_factor
 
 
 def convert_scenarios_compound_to_simple(scenarios: np.ndarray) -> np.ndarray:
-    """Convert compound returns to simple returns."""
+    """Convert compound returns to simple returns.
+
+    Args:
+        scenarios: Log/compound return scenarios.
+
+    Returns:
+        np.ndarray: Simple return scenarios.
+    """
 
     return np.exp(scenarios) - 1
 
 
 def convert_scenarios_simple_to_compound(scenarios: np.ndarray) -> np.ndarray:
-    """Convert simple returns to compound returns."""
+    """Convert simple returns to compound returns.
+
+    Args:
+        scenarios: Simple return scenarios.
+
+    Returns:
+        np.ndarray: Log/compound return scenarios.
+    """
 
     return np.log(1 + scenarios)
 
 
 def _to_numpy(x):
-    """Return the underlying ndarray (no copy for ndarray)."""
+    """Return the underlying ndarray (no copy for ndarray).
+
+    Args:
+        x: NumPy array or pandas object.
+
+    Returns:
+        np.ndarray: Dense array view/copy.
+    """
     return x.to_numpy() if isinstance(x, (pd.Series, pd.DataFrame)) else np.asarray(x)
 
 
 def _wrap_vector(x_np, template):
-    """Wrap 1-D ndarray in the same type as `template` (Series or ndarray)."""
+    """Wrap 1-D ndarray in the same type as `template` (Series or ndarray).
+
+    Args:
+        x_np: Vector to wrap.
+        template: Template object (Series or ndarray).
+
+    Returns:
+        Union[np.ndarray, pd.Series]: Wrapped vector.
+    """
     return (
         pd.Series(x_np, index=template.index, name=template.name)
         if isinstance(template, pd.Series)
@@ -40,7 +78,15 @@ def _wrap_vector(x_np, template):
 
 
 def _wrap_matrix(x_np, template):
-    """Wrap 2-D ndarray in the same type as `template` (DataFrame or ndarray)."""
+    """Wrap 2-D ndarray in the same type as `template` (DataFrame or ndarray).
+
+    Args:
+        x_np: Matrix to wrap.
+        template: Template object (DataFrame or ndarray).
+
+    Returns:
+        Union[np.ndarray, pd.DataFrame]: Wrapped matrix.
+    """
     return (
         pd.DataFrame(x_np, index=template.index, columns=template.columns)
         if isinstance(template, pd.DataFrame)
@@ -49,7 +95,15 @@ def _wrap_matrix(x_np, template):
 
 
 def log2simple(mu_g, cov_g):
-    r"""\mu,\Sigma of log-returns -> \mu,\Sigma of simple returns (vectorised, pandas-aware)."""
+    r"""\mu,\Sigma of log-returns -> \mu,\Sigma of simple returns (vectorised, pandas-aware).
+
+    Args:
+        mu_g: Mean of log-returns.
+        cov_g: Covariance of log-returns.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: Mean and covariance in simple-return units.
+    """
     mu_g_np = _to_numpy(mu_g)
     cov_g_np = _to_numpy(cov_g)
 
@@ -66,7 +120,15 @@ def log2simple(mu_g, cov_g):
 
 
 def simple2log(mu_r, cov_r):
-    r"""\mu,\Sigma of simple returns -> \mu,\Sigma of log-returns (log-normal assumption)."""
+    r"""\mu,\Sigma of simple returns -> \mu,\Sigma of log-returns (log-normal assumption).
+
+    Args:
+        mu_r: Mean of simple returns.
+        cov_r: Covariance of simple returns.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: Mean and covariance in log-return units.
+    """
     mu_r_np = _to_numpy(mu_r)
     cov_r_np = _to_numpy(cov_r)
 
@@ -84,37 +146,35 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
     """
     Simulate horizon sums by sampling scenarios with replacement.
 
-    Parameters
-    ----------
-    R : array-like or pandas object
-        Historical or simulated scenarios. One-dimensional inputs represent
-        single-asset returns (length ``T``). Two-dimensional inputs represent
-        ``T`` scenarios across ``N`` assets.
-    investment_horizon : int, default ``2``
-        Number of draws (with replacement) per simulated path.
-    p : array-like, optional
-        Scenario probabilities. When omitted, draws are uniform. Length must
-        match the number of rows in ``R``.
-    n_simulations : int, default ``1000``
-        Number of simulated paths to generate.
+    Args:
+        R: Historical or simulated scenarios. One-dimensional inputs represent
+            single-asset returns (length ``T``). Two-dimensional inputs represent
+            ``T`` scenarios across ``N`` assets.
+        investment_horizon: Number of draws (with replacement) per simulated path.
+            Defaults to ``2``.
+        p: Scenario probabilities. When omitted, draws are uniform. Length must
+            match the number of rows in ``R``.
+        n_simulations: Number of simulated paths to generate. Defaults to ``1000``.
 
-    Returns
-    -------
-    numpy.ndarray or pandas.Series or pandas.DataFrame
-        Simulated sums whose structure mirrors the input type:
+    Returns:
+        numpy.ndarray or pandas.Series or pandas.DataFrame: Simulated sums whose
+        structure mirrors the input type:
 
         * 1-D inputs yield length-``n_simulations`` vectors.
         * 2-D inputs yield ``(n_simulations, n_assets)`` matrices.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> project_scenarios(np.array([0.01, -0.02, 0.03]), investment_horizon=2, n_simulations=4).shape
-    (4,)
-    >>> import pandas as pd
-    >>> df = pd.DataFrame({'a': [0.01, -0.02], 'b': [0.0, 0.02]})
-    >>> project_scenarios(df, investment_horizon=2, n_simulations=3).shape
-    (3, 2)
+    Examples:
+        >>> import numpy as np
+        >>> project_scenarios(
+        ...     np.array([0.01, -0.02, 0.03]),
+        ...     investment_horizon=2,
+        ...     n_simulations=4,
+        ... ).shape
+        (4,)
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({"a": [0.01, -0.02], "b": [0.0, 0.02]})
+        >>> project_scenarios(df, investment_horizon=2, n_simulations=3).shape
+        (3, 2)
     """
 
     if investment_horizon <= 0:
@@ -156,3 +216,6 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
         template_df = pd.DataFrame(index=range(n_simulations), columns=R.columns)
         return _wrap_matrix(scenario_sums, template_df)
     return scenario_sums
+
+# Alias emphasising that inputs can be generic risk drivers, not only returns.
+project_risk_drivers = project_scenarios

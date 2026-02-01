@@ -69,35 +69,25 @@ def _entropy_pooling_dual_objective(
     precision issues), and it does not affect the location of the minimizer
     for the dual problem.
 
-    Parameters
-    ----------
-    lagrange_multipliers : (K,) ndarray
-        The current vector of Lagrange multipliers, :math:`\lambda`, at which the
-        objective and gradient are to be evaluated.
-    log_p_col : (S, 1) ndarray
-        The natural logarithm of the prior probabilities :math:`p^{(0)}`, provided
-        as a column vector.
-    lhs : (K, S) ndarray
-        The left-hand side matrix :math:`A` representing the coefficients of the
-        linear constraints. This matrix combines both equality and inequality
-        constraints.
-    rhs_squeezed : (K,) ndarray
-        The right-hand side vector :math:`b` representing the target values for the
-        linear constraints. This vector combines targets for both equality and
-        inequality constraints.
+    Args:
+        lagrange_multipliers (np.ndarray): Current vector of Lagrange multipliers
+            :math:`\\lambda` at which the objective and gradient are evaluated.
+        log_p_col (np.ndarray): Log prior probabilities :math:`\\log p^{(0)}` as a
+            column vector with shape ``(S, 1)``.
+        lhs (np.ndarray): Left-hand side matrix :math:`A` with shape ``(K, S)``
+            combining equality and inequality constraints.
+        rhs_squeezed (np.ndarray): Right-hand side targets :math:`b` with shape ``(K,)``.
 
-    Returns
-    -------
-    value : float
-        The scaled value of the dual objective function, i.e., ``1e3 * varphi(lambda)``.
-    gradient : (K,) ndarray
-        The scaled gradient of the dual objective function, i.e., ``1e3 * nabla varphi(lambda)``.
+    Returns:
+        Tuple[float, np.ndarray]: Scaled dual objective value and gradient.
+        The tuple entries correspond to ``value`` and ``gradient`` where
+        ``value = 1e3 * varphi(lambda)`` and
+        ``gradient = 1e3 * nabla varphi(lambda)``.
 
-    Notes
-    -----
-    This function is intended for internal use by the `scipy.optimize.minimize`
-    solver within the `entropy_pooling` function. It is based on the dual problem
-    formulation for entropy minimization as described in.
+    Notes:
+        Intended for internal use by ``scipy.optimize.minimize`` inside
+        :func:`entropy_pooling`. Based on the dual formulation of entropy
+        minimization.
     """
     lagrange_multipliers_col = lagrange_multipliers[:, np.newaxis]
 
@@ -145,52 +135,31 @@ def entropy_pooling(
     constraints) are supported, as they allow for box bounds on the Lagrange
     multipliers.
 
-    Parameters
-    ----------
-    p : (S,) or (S, 1) ndarray
-        The prior probability vector, :math:`p^{(0)} \in (0,1)^S`, where :math:`S`
-        is the number of scenarios. This vector is typically uniform
-        but can be any valid probability distribution (i.e., elements sum to 1 and are positive).
-    A : ndarray
-        The matrix :math:`E` for the equality constraints, :math:`Eq = b`. Its
-        shape is :math:`(K_{eq}, S)`, where :math:`K_{eq}` is the number of
-        equality constraints.
-    b : ndarray
-        The target vector :math:`b` for the equality constraints. Its shape is
-        :math:`(K_{eq},)`.
-    G : ndarray, optional
-        The matrix :math:`G` for the inequality constraints, :math:`Gq \le h`.
-        Its shape is :math:`(K_{ineq}, S)`, where :math:`K_{ineq}` is the number
-        of inequality constraints. Defaults to *None* if no inequality constraints
-        are present.
-    h : ndarray, optional
-        The target vector :math:`h` for the inequality constraints. Its shape is
-        :math:`(K_{ineq},)`. Defaults to *None* if no inequality constraints are
-        present.
-    method : {'TNC', 'L-BFGS-B'}, optional
-        The optimization method to be used by `scipy.optimize.minimize`.
-        Supported options are `'TNC'` and `'L-BFGS-B'`. If *None*, the function
-        defaults to `'TNC'`, which is generally faster for the current SciPy
-        build.
+    Args:
+        p (np.ndarray): Prior probability vector :math:`p^{(0)} \\in (0,1)^S`,
+            shape ``(S,)`` or ``(S, 1)``. Must sum to 1 with strictly positive entries.
+        A (np.ndarray): Equality constraint matrix :math:`E` in :math:`Eq=b`,
+            shape ``(K_eq, S)``.
+        b (np.ndarray): Equality targets :math:`b`, shape ``(K_eq,)``.
+        G (np.ndarray, optional): Inequality constraint matrix :math:`G` in
+            :math:`Gq \\le h`, shape ``(K_ineq, S)``. Defaults to ``None``.
+        h (np.ndarray, optional): Inequality targets :math:`h`,
+            shape ``(K_ineq,)``. Defaults to ``None``.
+        method (str, optional): Optimizer passed to ``scipy.optimize.minimize``.
+            Supported values: ``"TNC"`` or ``"L-BFGS-B"``. Defaults to ``"TNC"``.
 
-    Returns
-    -------
-    q : (S, 1) ndarray
-        The posterior probability vector, :math:`q`, in column-vector form,
-        satisfying the given constraints while minimizing relative entropy to `p`.
+    Returns:
+        np.ndarray: Posterior probability column vector :math:`q` with shape
+        ``(S, 1)`` satisfying the constraints while minimizing relative entropy.
 
-    Raises
-    ------
-    ValueError
-        If an unsupported `method` is specified.
+    Raises:
+        ValueError: If an unsupported ``method`` is specified.
 
-    Notes
-    -----
-    This function is an adaptation from the `fortitudo.tech` open-source package
-    (https://github.com/fortitudo-tech/fortitudo.tech). The core methodology is
-    described in Meucci (2008). The dual problem is minimized, and the
-    primal solution (posterior probabilities) is recovered from the optimal Lagrange
-    multipliers.
+    Notes:
+        Adapted from `fortitudo.tech` (https://github.com/fortitudo-tech/fortitudo.tech).
+        The core methodology is described in Meucci (2008). The dual problem is
+        minimized and the posterior probabilities are recovered from the optimal
+        Lagrange multipliers.
     """
     opt_method = method or "TNC"
     if opt_method not in ("TNC", "L-BFGS-B"):
@@ -318,95 +287,83 @@ class FlexibleViewsProcessor:
         `vol_views={'Equity US': ('<=', 0.20)}` sets an upper bound on the
         volatility. Equality is the default if no operator is specified.
 
-    Parameters
-    ----------
-    prior_returns : (S, N) ndarray or DataFrame, optional
-        A matrix or DataFrame of historical or simulated prior scenarios. `S` is the
-        number of scenarios, and `N` is the number of assets/risk factors. If
-        provided, `prior_mean` and `prior_cov` are ignored.
-    prior_probabilities : (S,) array_like, optional
-        A vector of prior scenario weights. If not provided, a uniform distribution
-        (i.e., `1/S` for each scenario) is assumed.
-    prior_mean : (N,) array_like, optional
-        The mean vector used for synthesizing scenarios when `prior_returns` is not supplied.
-    prior_cov : (N, N) array_like, optional
-        The covariance matrix used for synthesizing scenarios when `prior_returns` is not supplied.
-    distribution_fn : callable, optional
-        A custom function for generating synthetic scenarios when `prior_returns`
-        is not supplied. The function signature should be
-        `f(mu: np.ndarray, cov: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray`
-        returning an `(n, N)` array. If omitted,
-        :py:func:`numpy.random.Generator.multivariate_normal` is used.
-    num_scenarios : int, default ``10000``
-        The number of synthetic scenarios to generate if `prior_returns` is not
-        provided. Defaults to 10,000.
-    random_state : int or numpy.random.Generator, optional
-        A seed or a `numpy.random.Generator` instance to ensure reproducibility
-        when generating synthetic scenarios via `distribution_fn` or
-        `numpy.random.multivariate_normal`.
-    mean_views, vol_views, corr_views, skew_views : mapping or array_like, optional
-        View payloads. Keys are asset labels (or pairs for correlations);
-        values are either a scalar *x* (equality) or a 2-tuple such as
-        ``('>=', x)``.
-    sequential : bool, default ``False``
-        If ``True``, views are applied sequentially (iterated EP). The views are
-        processed in the order *mean -> vol -> skew -> corr*. If ``False``,
-        all views are processed simultaneously in a single EP optimization.
+    Args:
+        prior_risk_drivers (np.ndarray or pd.DataFrame, optional): Prior
+            *risk-driver* scenarios (returns, factors, spreads, vol surfaces, etc.).
+            If supplied, ``prior_mean`` and ``prior_cov`` are ignored.
+        prior_returns (np.ndarray or pd.DataFrame, optional): Deprecated alias for
+            ``prior_risk_drivers`` (backward compatibility only).
+        prior_probabilities (array-like, optional): Prior scenario weights. If omitted,
+            uniform probabilities ``1/S`` are used.
+        prior_mean (array-like, optional): Mean vector used to synthesize scenarios
+            when ``prior_returns`` is not supplied.
+        prior_cov (array-like, optional): Covariance matrix used to synthesize scenarios
+            when ``prior_returns`` is not supplied.
+        distribution_fn (callable, optional): Custom scenario generator with signature
+            ``f(mu, cov, n, rng) -> np.ndarray`` returning shape ``(n, N)``. Defaults to
+            ``numpy.random.Generator.multivariate_normal``.
+        num_scenarios (int, optional): Number of synthetic scenarios when
+            ``prior_returns`` is missing. Defaults to ``10000``.
+        random_state (int or np.random.Generator, optional): Seed or RNG used by
+            ``distribution_fn`` / ``multivariate_normal``.
+        mean_views, vol_views, corr_views, skew_views (mapping or array-like, optional):
+            View payloads. Keys are asset labels (or pairs for correlations).
+            Values are scalars (equalities) or tuples like ``('>=', x)``.
+        sequential (bool, optional): If ``True``, apply views sequentially (mean → vol → skew → corr).
+            Defaults to ``False`` (single entropy pooling solve).
 
-    Attributes
-    ----------
-    posterior_probabilities : (S, 1) ndarray
-        The optimal probability vector :math:`q`.
-    posterior_returns : ndarray or Series
-        The posterior mean.
-    posterior_cov : ndarray or DataFrame
-        The posterior covariance.
+    Attributes:
+        posterior_probabilities (np.ndarray): Optimal posterior probabilities :math:`q`, shape ``(S, 1)``.
+        posterior_returns (np.ndarray or pd.Series): Posterior mean.
+        posterior_cov (np.ndarray or pd.DataFrame): Posterior covariance.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> import pandas as pd
-    >>> from scipy.stats import multivariate_normal
-    >>>
-    >>> # Example with historical returns
-    >>> np.random.seed(42)
-    >>> returns_data = np.random.randn(100, 3) # S=100 scenarios, N=3 assets
-    >>> return_df = pd.DataFrame(returns_data, columns=['Asset A', 'Asset B', 'Asset C'])
-    >>>
-    >>> # Initialize with historical returns and views
-    >>> fp_hist = FlexibleViewsProcessor(
-    ...     prior_returns=return_df,
-    ...     mean_views={'Asset A': 0.05, 'Asset B': ('>=', 0.01)},
-    ...     vol_views={'Asset A': ('<=', 0.15)},
-    ...     sequential=True, # Apply views sequentially
-    ... )
-    >>> q_hist = fp_hist.get_posterior_probabilities()
-    >>> mu_post_hist, cov_post_hist = fp_hist.get_posterior()
-    >>> print("Posterior Mean (Historical):", mu_post_hist)
-    >>> print("Posterior Covariance (Historical):\n", cov_post_hist)
-    >>>
-    >>> # Example with synthesized scenarios
-    >>> prior_mu = np.array([0.01, 0.02])
-    >>> prior_sigma = np.array([[0.01, 0.005], [0.005, 0.015]])
-    >>>
-    >>> # Initialize with mean and covariance, synthesizing 5000 scenarios
-    >>> fp_synth = FlexibleViewsProcessor(
-    ...     prior_mean=prior_mu,
-    ...     prior_cov=prior_sigma,
-    ...     num_scenarios=5000,
-    ...     random_state=123,
-    ...     corr_views={('0', '1'): 0.8}, # View on correlation between asset 0 and 1
-    ... )
-    >>> q_synth = fp_synth.get_posterior_probabilities()
-    >>> mu_post_synth, cov_post_synth = fp_synth.get_posterior()
-    >>> print("\nPosterior Mean (Synthesized):", mu_post_synth)
-    >>> print("Posterior Covariance (Synthesized):\n", cov_post_synth)
+    Examples:
+        >>> import numpy as np
+        >>> import pandas as pd
+        >>> from scipy.stats import multivariate_normal
+        >>>
+        >>> # Example with historical returns
+        >>> np.random.seed(42)
+        >>> returns_data = np.random.randn(100, 3)  # S=100 scenarios, N=3 assets
+        >>> return_df = pd.DataFrame(
+        ...     returns_data, columns=["Asset A", "Asset B", "Asset C"]
+        ... )
+        >>>
+        >>> # Initialize with historical returns and views
+        >>> fp_hist = FlexibleViewsProcessor(
+        ...     prior_returns=return_df,
+        ...     mean_views={"Asset A": 0.05, "Asset B": (">=", 0.01)},
+        ...     vol_views={"Asset A": ("<=", 0.15)},
+        ...     sequential=True,  # Apply views sequentially
+        ... )
+        >>> q_hist = fp_hist.get_posterior_probabilities()
+        >>> mu_post_hist, cov_post_hist = fp_hist.get_posterior()
+        >>> print("Posterior Mean (Historical):", mu_post_hist)
+        >>> print("Posterior Covariance (Historical):\\n", cov_post_hist)
+        >>>
+        >>> # Example with synthesized scenarios
+        >>> prior_mu = np.array([0.01, 0.02])
+        >>> prior_sigma = np.array([[0.01, 0.005], [0.005, 0.015]])
+        >>>
+        >>> # Initialize with mean and covariance, synthesizing 5000 scenarios
+        >>> fp_synth = FlexibleViewsProcessor(
+        ...     prior_mean=prior_mu,
+        ...     prior_cov=prior_sigma,
+        ...     num_scenarios=5000,
+        ...     random_state=123,
+        ...     corr_views={("0", "1"): 0.8},  # Correlation view between asset 0 and 1
+        ... )
+        >>> q_synth = fp_synth.get_posterior_probabilities()
+        >>> mu_post_synth, cov_post_synth = fp_synth.get_posterior()
+        >>> print("\\nPosterior Mean (Synthesized):", mu_post_synth)
+        >>> print("Posterior Covariance (Synthesized):\\n", cov_post_synth)
     """
     def __init__(
         self,
         prior_returns: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
         prior_probabilities: Optional[Union[np.ndarray, "pd.Series"]] = None,
         *,
+        prior_risk_drivers: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
         prior_mean: Optional[Union[np.ndarray, "pd.Series"]] = None,
         prior_cov: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
         distribution_fn: Optional[
@@ -420,13 +377,38 @@ class FlexibleViewsProcessor:
         skew_views: Any = None,
         sequential: bool = False,
     ):
-        if prior_returns is not None:
-            if isinstance(prior_returns, pd.DataFrame):
-                self.R = prior_returns.values
-                self.assets = list(prior_returns.columns)
+        """Initialise the flexible-views processor.
+
+        Args:
+            prior_returns: Scenario matrix of returns (deprecated alias for ``prior_risk_drivers``).
+            prior_probabilities: Optional scenario probabilities aligned to scenarios.
+            prior_risk_drivers: Scenario matrix of risk drivers (preferred).
+            prior_mean: Prior mean vector used when scenarios are not provided.
+            prior_cov: Prior covariance matrix used when scenarios are not provided.
+            distribution_fn: Optional callable to draw scenarios from moments.
+            num_scenarios: Number of scenarios to simulate when needed (default ``10000``).
+            random_state: Optional random seed or Generator.
+            mean_views: Views on means (absolute or relative).
+            vol_views: Views on marginal volatilities.
+            corr_views: Views on correlations.
+            skew_views: Views on skewness.
+            sequential: Whether to apply views sequentially (default ``False``).
+        """
+        if prior_returns is not None and prior_risk_drivers is not None:
+            raise ValueError(
+                "Provide either `prior_risk_drivers` or `prior_returns`, not both. "
+                "`prior_returns` is kept for backward compatibility."
+            )
+
+        risk_drivers = prior_risk_drivers if prior_risk_drivers is not None else prior_returns
+
+        if risk_drivers is not None:
+            if isinstance(risk_drivers, pd.DataFrame):
+                self.R = risk_drivers.values
+                self.assets = list(risk_drivers.columns)
                 self._use_pandas = True
             else:
-                self.R = np.atleast_2d(np.asarray(prior_returns, float))
+                self.R = np.atleast_2d(np.asarray(risk_drivers, float))
                 self.assets = [str(i) for i in range(self.R.shape[1])]
                 self._use_pandas = False
 
@@ -510,6 +492,15 @@ class FlexibleViewsProcessor:
         self.var0 = np.diag(self.cov0)
 
         def _vec_to_dict(vec_like, name):
+            """Normalize vector-like views into an asset-keyed dictionary.
+
+            Args:
+                vec_like: Vector-like or mapping of view targets.
+                name: Parameter name for error messages.
+
+            Returns:
+                dict: Asset-keyed views.
+            """
             if vec_like is None:
                 return {}
             if isinstance(vec_like, dict):
@@ -559,15 +550,11 @@ class FlexibleViewsProcessor:
         the target `x` is interpreted as the desired difference between the means
         (e.g., :math:`\mu_1 - \mu_2 \ge x`).
 
-        Parameters
-        ----------
-        v : Any
-            The raw view value, which can be a scalar or a tuple.
+        Args:
+            v (Any): Raw view value (scalar or tuple).
 
-        Returns
-        -------
-        Tuple[str, float]
-            A tuple containing the operator string ('==', '>=', '<=', '>', '<')
+        Returns:
+            Tuple[str, float]: Operator string (``'=='``, ``'>='``, ``'<='``, ``'>'``, ``'<'``)
             and the numerical target value.
         """
         if (
@@ -586,22 +573,15 @@ class FlexibleViewsProcessor:
         labels (strings or integers from pandas) to the zero-based integer indices
         used in NumPy arrays.
 
-        Parameters
-        ----------
-        key : Any
-            The asset label. This can be the exact label used during initialization
-            (e.g., column name for a DataFrame, or an integer if `range` was used),
-            or a numeric string that can be cast to an integer (e.g., "0", "1").
+        Args:
+            key (Any): Asset label. Can be the original label used at initialization
+                (e.g., DataFrame column name) or a numeric string (e.g., ``"0"``).
 
-        Returns
-        -------
-        int
-            The zero-based integer index of the asset within the scenario matrix.
+        Returns:
+            int: Zero-based integer index of the asset within the scenario matrix.
 
-        Raises
-        ------
-        ValueError
-            If the asset label `key` is not recognized or found in the list of assets.
+        Raises:
+            ValueError: If the asset label is not recognized.
         """
         if key in self.assets:
             return self.assets.index(key)
@@ -628,33 +608,23 @@ class FlexibleViewsProcessor:
         The conversion leverages properties of expected values and higher moments
         (e.g., :math:`\mathbb{E}[R^2] = \text{Var}[R] + (\mathbb{E}[R])^2`).
 
-        Parameters
-        ----------
-        view_dict : Dict
-            A dictionary containing views for a specific moment type (e.g.,
-            `self.mean_views`, `self.vol_views`). Keys are asset labels (or tuples
-            for combined assets), and values are the view specifications.
-        moment_type : str
-            A string indicating the type of moment view to process.
-            Accepted values are "mean", "vol" (volatility), "skew" (skewness),
-            and "corr" (correlation).
-        mu : (N,) ndarray
-            The current mean vector of the asset returns. In sequential EP, this is
-            the posterior mean from previous steps; in simultaneous EP, it's the prior mean.
-            Used to linearize constraints for higher-order moments.
-        var : (N,) ndarray
-            The current variance vector of the asset returns. In sequential EP, this is
-            the posterior variance from previous steps; in simultaneous EP, it's the prior variance.
-            Used to linearize constraints for higher-order moments.
+        Args:
+            view_dict (Dict): Views for the specified moment type (e.g.,
+                ``self.mean_views`` or ``self.vol_views``). Keys are asset labels
+                (or tuples for combined assets), values are view specifications.
+            moment_type (str): Moment type to process. Supported values:
+                ``"mean"``, ``"vol"``, ``"skew"``, ``"corr"``.
+            mu (np.ndarray): Current mean vector, shape ``(N,)``. In sequential EP,
+                this is the posterior mean from prior steps; in simultaneous EP,
+                it is the prior mean. Used to linearize higher-order constraints.
+            var (np.ndarray): Current variance vector, shape ``(N,)``. In sequential EP,
+                this is the posterior variance from prior steps; in simultaneous EP,
+                it is the prior variance. Used to linearize higher-order constraints.
 
-        Returns
-        -------
-        Tuple[List[np.ndarray], List[float], List[np.ndarray], List[float]]
-            A tuple containing four lists:
-            * `A_eq`: List of NumPy arrays, where each array is a row for the
-                equality constraint matrix :math:`E`.
-            * `b_eq`: List of floats, where each float is a target value for
-                the equality constraints :math:`b`.
+        Returns:
+            Tuple[List[np.ndarray], List[float], List[np.ndarray], List[float]]:
+            ``(A_eq, b_eq, A_ineq, b_ineq)`` constraint lists for entropy pooling,
+            where ``A_eq``/``A_ineq`` are row arrays and ``b_eq``/``b_ineq`` are targets.
             * `G_ineq`: List of NumPy arrays, where each array is a row for the
                 inequality constraint matrix :math:`G`.
             * `h_ineq`: List of floats, where each float is a target value for
@@ -691,6 +661,13 @@ class FlexibleViewsProcessor:
         R = self.R
 
         def add(op, row, raw):
+            """Append a linear constraint row based on the operator.
+
+            Args:
+                op: Operator string (``==``, ``<=``, ``>=``).
+                row: Constraint row vector.
+                raw: Right-hand-side scalar.
+            """
             if op == "==":
                 A_eq.append(row)
                 b_eq.append(raw)
@@ -763,6 +740,18 @@ class FlexibleViewsProcessor:
         mu_cur, var_cur = self.mu0.copy(), self.var0.copy()
 
         def do_ep(prior_probs, A_eq_list, b_eq_list, G_ineq_list, h_ineq_list):
+            """Solve entropy pooling for a given constraint set.
+
+            Args:
+                prior_probs: Prior probability vector.
+                A_eq_list: Equality constraint rows.
+                b_eq_list: Equality constraint values.
+                G_ineq_list: Inequality constraint rows.
+                h_ineq_list: Inequality constraint values.
+
+            Returns:
+                np.ndarray: Posterior probability vector.
+            """
             S = R.shape[0]
             A_eq_list.append(np.ones(S))
             b_eq_list.append(1.0)
@@ -918,72 +907,57 @@ class BlackLittermanProcessor:
        **risk-aversion** :math:`\delta>0` :cite:p:`black1992global`.
     3. ``prior_mean`` - treat the sample mean as :math:`\boldsymbol\pi`.
 
-    Parameters
-    ----------
-    prior_cov : (N, N) array_like
-        Prior covariance :math:`\boldsymbol\Sigma`.
-    prior_mean : (N,) array_like, optional
-        Prior mean vector (exclusive with ``pi`` / ``market_weights``).
-    market_weights : (N,) array_like, optional
-        Market-cap weights used for CAPM reverse optimisation.
-    risk_aversion : float, default 1.0
-        Risk-aversion coefficient :math:`\delta\;(>0)`.
-    tau : float, default 0.05
-        Shrinkage scalar :math:`\tau` controlling the weight on the prior
-        covariance; typical values 0.01-0.10
-        :cite:p:`he2002intuition`.
-    idzorek_use_tau : bool, default True
-        If *True* the Idzorek confidence rule scales by
-        :math:`\tau\boldsymbol\Sigma` (original He-Litterman convention);
-        if *False* it uses :math:`\boldsymbol\Sigma` instead.
-    pi : (N,) array_like, optional
-        Direct prior mean (exclusive with the other two options above).
-    mean_views : mapping or array_like, optional
-        Equality mean views:
+    Args:
+        prior_cov (array-like): Prior covariance :math:`\\boldsymbol\\Sigma`, shape ``(N, N)``.
+        prior_mean (array-like, optional): Prior mean vector, exclusive with ``pi`` / ``market_weights``.
+        market_weights (array-like, optional): Market-cap weights used for CAPM reverse optimisation.
+        risk_aversion (float, optional): Risk-aversion coefficient :math:`\\delta (>0)`. Defaults to ``1.0``.
+        tau (float, optional): Shrinkage scalar :math:`\\tau` for the prior covariance.
+            Typical values ``0.01``–``0.10``. Defaults to ``0.05``. :cite:p:`he2002intuition`.
+        idzorek_use_tau (bool, optional): If ``True``, the Idzorek rule scales by
+            :math:`\\tau\\boldsymbol\\Sigma`; otherwise it uses :math:`\\boldsymbol\\Sigma`.
+            Defaults to ``True``.
+        pi (array-like, optional): Direct prior mean, exclusive with the other options above.
+        mean_views (mapping or array-like, optional): Equality mean views.
+            Examples: ``{'Asset': 0.02}`` (absolute), ``{('A','B'): 0.00}`` (relative),
+            or length-``N`` array (per-asset absolute views).
+        view_confidences (float | sequence | dict, optional): Idzorek confidences
+            :math:`c_k \\in (0,1]` per view.
+        omega ({"idzorek"} | array-like, optional): View covariance :math:`\\boldsymbol\\Omega`.
+            ``"idzorek"`` derives it from confidences; vector length ``K`` is diagonal;
+            full ``K x K`` matrices are used verbatim.
+        verbose (bool, optional): If ``True``, prints intermediate diagnostics. Defaults to ``False``.
 
-        * ``{'Asset': 0.02}`` (absolute)
-        * ``{('A','B'): 0.00}`` (relative :math:`\mu_A-\mu_B = 0`)
-        * length-*N* array (per-asset absolute views).
+    Attributes:
+        posterior_mean (np.ndarray or pd.Series): :math:`\\boldsymbol\\mu^{\\star}` from Eq. :eq:`bl_posterior`.
+        posterior_cov (np.ndarray or pd.DataFrame): :math:`\\boldsymbol\\Sigma^{\\star}` from Eq. :eq:`bl_posterior`.
 
-    view_confidences : float | sequence | dict, optional
-        Idzorek confidences :math:`c_k\in(0,1]` per view.
-    omega : {"idzorek"} | array_like, optional
-        View covariance :math:`\boldsymbol\Omega`.
-        * ``"idzorek"`` - derive from confidences.
-        * vector length *K* - treated as diagonal.
-        * full :math:`K\times K` matrix - used verbatim.
-    verbose : bool, default False
-        Print intermediate diagnostics.
+    Methods:
+        get_posterior() -> (posterior_mean, posterior_cov): Return posterior moments in the same
+        NumPy/Pandas flavour as the inputs.
 
-    Attributes
-    ----------
-    posterior_mean : ndarray or pandas.Series
-        :math:`\boldsymbol\mu^{\star}` from Eq. :eq:`bl_posterior`.
-    posterior_cov : ndarray or pandas.DataFrame
-        :math:`\boldsymbol\Sigma^{\star}` from Eq. :eq:`bl_posterior`.
-
-    Methods
-    -------
-    get_posterior() -> (posterior_mean, posterior_cov)
-        Return the posterior moments in the same *NumPy / Pandas* flavour as
-        the inputs.
-
-    Examples
-    --------
-    >>> bl = BlackLittermanProcessor(
-    ...         prior_cov=cov,
-    ...         market_weights=cap_weights,
-    ...         risk_aversion=2.5,
-    ...         mean_views={('EM', 'DM'): 0.03},
-    ...         view_confidences={'EM,DM': 0.60},
-    ...         omega='idzorek')
-    >>> mu_bl, sigma_bl = bl.get_posterior()
+    Examples:
+        >>> bl = BlackLittermanProcessor(
+        ...     prior_cov=cov,
+        ...     market_weights=cap_weights,
+        ...     risk_aversion=2.5,
+        ...     mean_views={("EM", "DM"): 0.03},
+        ...     view_confidences={"EM,DM": 0.60},
+        ...     omega="idzorek",
+        ... )
+        >>> mu_bl, sigma_bl = bl.get_posterior()
 
     """
     def get_posterior(
         self,
     ) -> Tuple[Union[np.ndarray, "pd.Series"], Union[np.ndarray, "pd.DataFrame"]]:
-        """:no-index:"""
+        """:no-index:
+
+        Return posterior mean and covariance.
+
+        Returns:
+            Tuple[ArrayLike, ArrayLike]: Posterior mean and covariance.
+        """
         return self._posterior_mean, self._posterior_cov
 
     def __init__(
@@ -1001,6 +975,21 @@ class BlackLittermanProcessor:
         omega: Any = None,
         verbose: bool = False,
     ) -> None:
+        """Initialise the Black-Litterman processor.
+
+        Args:
+            prior_cov: Prior covariance matrix.
+            prior_mean: Optional prior mean vector.
+            market_weights: Optional market-cap weights for implied equilibrium mean.
+            risk_aversion: Risk-aversion coefficient (default ``1.0``).
+            tau: Prior covariance scaling (default ``0.05``).
+            idzorek_use_tau: Whether to scale Idzorek Omega by ``tau``.
+            pi: Optional direct prior mean.
+            mean_views: Mean views (absolute or relative).
+            view_confidences: View confidence levels in ``(0, 1]``.
+            omega: View covariance (``"idzorek"`` or array-like).
+            verbose: Whether to print diagnostics.
+        """
 
         # ---------- \Sigma (prior covariance) --------------------------------
         self._is_pandas: bool = isinstance(prior_cov, pd.DataFrame)
@@ -1041,6 +1030,14 @@ class BlackLittermanProcessor:
             print(f"[BL] \\pi source: {src}.")
 
         def _vec_to_dict(vec_like):
+            """Normalize mean views into an asset-keyed dictionary.
+
+            Args:
+                vec_like: Vector-like or mapping of views.
+
+            Returns:
+                dict: Asset-keyed views.
+            """
             if vec_like is None:
                 return {}
             if isinstance(vec_like, dict):
@@ -1074,6 +1071,14 @@ class BlackLittermanProcessor:
     # ------------------------------------------------------------------ #
     # asset index lookup
     def _asset_index(self, label: Union[str, int]) -> int:
+        """Resolve an asset label or numeric index to a position.
+
+        Args:
+            label: Asset label or integer index.
+
+        Returns:
+            int: Asset index.
+        """
         if label in self._assets:
             return self._assets.index(label)
         if isinstance(label, str) and label.isdigit():
@@ -1086,6 +1091,14 @@ class BlackLittermanProcessor:
     def _build_views(
         self, mean_views: Dict[Any, Any]
     ) -> Tuple[np.ndarray, np.ndarray, List[Any]]:
+        """Build the P and Q matrices from mean views.
+
+        Args:
+            mean_views: Mapping of view keys to targets.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, list]: P matrix, Q vector, and view keys.
+        """
         rows: List[np.ndarray] = []
         targets: List[float] = []
         keys: List[Any] = []
@@ -1127,6 +1140,15 @@ class BlackLittermanProcessor:
     # ---- confidences --------------------------------------------------
     @staticmethod
     def _parse_conf(conf: Any, keys: List[Any]) -> Optional[np.ndarray]:
+        """Parse view confidences into a dense array aligned to view keys.
+
+        Args:
+            conf: Confidence specification (scalar, dict, or array-like).
+            keys: View identifiers in order.
+
+        Returns:
+            Optional[np.ndarray]: Confidence vector aligned to views.
+        """
         if conf is None:
             return None
         if isinstance(conf, (int, float)):
@@ -1140,6 +1162,15 @@ class BlackLittermanProcessor:
 
     # ---- \Omega construction ----------------------------------------------
     def _build_omega(self, omega: Any, verbose: bool) -> np.ndarray:
+        """Construct the view covariance matrix ``Omega``.
+
+        Args:
+            omega: ``"idzorek"`` or array-like Omega specification.
+            verbose: Whether to print diagnostics.
+
+        Returns:
+            np.ndarray: Omega matrix.
+        """
         if self._k == 0:  # no views -> empty \Omega
             return np.zeros((0, 0))
 
@@ -1186,6 +1217,14 @@ class BlackLittermanProcessor:
 
     # ---- posterior ----------------------------------------------------
     def _compute_posterior(self, verbose: bool) -> Tuple[np.ndarray, np.ndarray]:
+        """Compute posterior mean/covariance for the Black-Litterman model.
+
+        Args:
+            verbose: Whether to print diagnostics.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Posterior mean and covariance.
+        """
         tau_sigma = self._tau * self._sigma
 
         if self._k == 0:  # no views: posterior = prior

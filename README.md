@@ -3,17 +3,28 @@
 [![PyPI](https://img.shields.io/pypi/v/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
 [![Python versions](https://img.shields.io/pypi/pyversions/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
 
-Practical portfolio allocation tools with a compact, well-tested API. Build mean-variance, CVaR, and relaxed risk parity frontiers; incorporate Black-Litterman and entropy pooling views; apply shrinkage-heavy statistics (NIW, Ledoit-Wolf, nonlinear shrinkage, Tyler, Huber, POET); ensemble strategies; and convert weights to discrete trades. Pandas labels are preserved throughout the workflow.
+Py-vAllocation is a research-to-production toolkit for scenario-based portfolio
+optimisation. Build mean-variance, CVaR, and relaxed risk parity frontiers;
+incorporate Black–Litterman and entropy pooling views; apply shrinkage-heavy
+statistics (NIW, Ledoit–Wolf, nonlinear shrinkage, Tyler, Huber, POET); ensemble
+strategies; and convert weights to discrete trades. Pandas labels are preserved
+throughout the workflow.
 
 ## Highlights
 
 - **Consistent optimisation surface** - switch between mean-variance, CVaR, relaxed risk parity, and robust formulations without rewriting constraints.
-- **View integration** - Black-Litterman mean views plus entropy pooling constraints keep discretionary macro inputs consistent with posterior moments.
+- **View integration** - Black–Litterman mean views plus entropy pooling constraints keep discretionary inputs consistent with posterior moments.
 - **Robust models** - relaxed risk parity, Bayesian NIW updates, and Meucci-style probability tilts.
-- **Moment estimation** - Ledoit-Wolf, James-Stein, nonlinear shrinkage, Tyler, Huber, POET, graphical lasso, and more wired into `estimate_moments`.
+- **Moment estimation** - Ledoit–Wolf, James–Stein, nonlinear shrinkage, Tyler, Huber, POET, graphical lasso, and more via `estimate_moments`.
 - **Production plumbing** - ensemble builders, discrete allocation, plotting, and reporting helpers reduce friction between research and delivery.
-- **Stress testing & PnL** - one-line helpers for probability tilts, linear shocks, and risk reports.
+- **Stress testing & PnL** - one-line helpers for probability tilts, linear shocks, and compact risk reports.
 - **Optional extras** - install the `robust` extra only when heavy dependencies are needed.
+
+## Design principles
+
+- **Pandas-first inputs/outputs** with consistent labels when they are supplied.
+- **Scenario-based risk** by default, with clear risk labels across frontiers.
+- **Minimal reformatting**: utility helpers standardise shapes, weights, and probabilities.
 
 ## Installation
 
@@ -39,7 +50,8 @@ python examples/quickstart_etf_allocation.py
 
 Key artefacts:
 
-- `output/frontiers.png`, `frontiers_vol.png`, `frontiers_cvar.png` - efficient frontiers.
+- `output/frontiers.png` - in-sample vs out-of-sample efficient frontiers with robust overlay.
+- `output/robust_uncertainty.png`, `robust_param_impact.png`, `robust_assumptions_3d.png` - robust diagnostics.
 - `output/stacked_weights.csv`, `selected_weights.csv`, `average_weights.csv` - ensemble summaries.
 - Terminal output covering discrete trade sizing and stress results.
 
@@ -57,9 +69,15 @@ scenarios = pd.DataFrame({
 port = PortfolioWrapper(AssetsDistribution(scenarios=scenarios))
 port.set_constraints({"long_only": True, "total_weight": 1.0})
 
-frontier = port.mean_variance_frontier(num_portfolios=20)
+frontier = port.variance_frontier(num_portfolios=20)
 weights, ret, risk = frontier.get_tangency_portfolio(risk_free_rate=0.01)
 print(weights)
+
+# Pick a portfolio by CVaR even on a variance frontier (scenarios required)
+weights_cvar, ret_cvar, cvar_val = frontier.portfolio_at_risk_target(
+    max_risk=0.02, risk_label="CVaR (alpha=0.05)"
+)
+print(weights_cvar)
 ```
 
 ## Examples
@@ -67,7 +85,7 @@ print(weights)
 The `examples/` directory contains runnable scripts (see `examples/README.md`):
 
 - `quickstart_etf_allocation.py` - moments → frontiers → ensemble → trades
-- `mean_variance_frontier.py`, `cvar_allocation.py`, `robust_frontier.py`
+- `mean_variance_frontier.py`, `cvar_allocation.py`, `robust_frontier.py` (use `variance_frontier` / `cvar_frontier`)
 - `relaxed_risk_parity_frontier.py`, `portfolio_ensembles.py`, `discrete_allocation.py`
 - `stress_and_pnl.py` - probability tilts + linear shocks + performance reports
 

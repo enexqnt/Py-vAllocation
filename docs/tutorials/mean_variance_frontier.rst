@@ -57,7 +57,7 @@ frontier construction. We supply the estimated moments via
     wrapper = PortfolioWrapper(distribution)
     wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
 
-    mv_frontier = wrapper.mean_variance_frontier(num_portfolios=21)
+    mv_frontier = wrapper.variance_frontier(num_portfolios=21)
     tangency_weights, tangency_return, tangency_risk = mv_frontier.get_tangency_portfolio(
         risk_free_rate=0.01
     )
