@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+from example_utils import build_wrapper_from_moments
 
 
 def main() -> None:
@@ -18,9 +18,8 @@ def main() -> None:
         ]
     )
 
-    dist = AssetsDistribution(mu=mu, cov=cov, asset_names=["Tech", "Health", "Value", "Bonds"])
-    wrapper = PortfolioWrapper(dist)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+    wrapper = build_wrapper_from_moments(mu, cov)
+    wrapper.dist.asset_names = ["Tech", "Health", "Value", "Bonds"]
 
     frontier = wrapper.relaxed_risk_parity_frontier(
         num_portfolios=4,

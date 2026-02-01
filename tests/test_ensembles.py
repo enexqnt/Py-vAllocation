@@ -81,8 +81,8 @@ class TestEnsembleUtilities(unittest.TestCase):
         f1 = PortfolioFrontier(weights=weights1, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
         f2 = PortfolioFrontier(weights=weights2, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
 
-        result = average_frontiers([f1, f2])
-        combined = np.hstack([weights1, weights2]).mean(axis=1)
+        result = average_frontiers([f1, f2], selections=[[0], [0]])
+        combined = np.column_stack([weights1[:, 0], weights2[:, 0]]).mean(axis=1)
         self.assertTrue(np.allclose(result.values, combined))
         self.assertEqual(list(result.index), ["A", "B"])
 
@@ -103,8 +103,8 @@ class TestEnsembleUtilities(unittest.TestCase):
         risks = np.array([0.15, 0.16])
         f1 = PortfolioFrontier(weights=weights1, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
         f2 = PortfolioFrontier(weights=weights2, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
-        stacked = exposure_stack_frontiers([f1, f2], L=2)
-        expected = exposure_stacking(np.hstack([weights1, weights2]), L=2)
+        stacked = exposure_stack_frontiers([f1, f2], L=2, selections=[[0], [0]])
+        expected = exposure_stacking(np.column_stack([weights1[:, 0], weights2[:, 0]]), L=2)
         self.assertTrue(np.allclose(stacked.values, expected))
         self.assertEqual(stacked.name, "Exposure Stacking (L=2)")
 
@@ -115,8 +115,8 @@ class TestEnsembleUtilities(unittest.TestCase):
         risks = np.array([0.15, 0.16])
         f1 = PortfolioFrontier(weights=weights1, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
         f2 = PortfolioFrontier(weights=weights2, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
-        stacked = stack_portfolios([f1, f2], L=2)
-        expected = exposure_stacking(np.hstack([weights1, weights2]), L=2)
+        stacked = stack_portfolios([f1, f2], selections=[[0], [0]], L=2)
+        expected = exposure_stacking(np.column_stack([weights1[:, 0], weights2[:, 0]]), L=2)
         self.assertTrue(np.allclose(stacked.values, expected))
         self.assertEqual(stacked.name, "Exposure Stacking (L=2)")
 
@@ -190,7 +190,7 @@ class TestEnsembleUtilities(unittest.TestCase):
             },
             selector="column",
             selector_kwargs={"index": 0},
-            frontier_selection=range(4),
+            frontier_selection=[0],
         )
 
         spec_cvar = make_portfolio_spec(
@@ -207,7 +207,7 @@ class TestEnsembleUtilities(unittest.TestCase):
                 "constraints": {"long_only": True, "total_weight": 1.0},
             },
             selector="min_risk",
-            frontier_selection=[0, 2],
+            frontier_selection=[0],
         )
 
         result = assemble_portfolio_ensemble(
@@ -219,6 +219,28 @@ class TestEnsembleUtilities(unittest.TestCase):
         )
 
         self.assertIn("stack", result.ensembles)
+
+    def test_make_portfolio_spec_supports_robust_optimizer(self):
+        mu = pd.Series([0.012, 0.018], index=["A", "B"])
+        cov = pd.DataFrame(
+            [[0.05, 0.01], [0.01, 0.04]],
+            index=mu.index,
+            columns=mu.index,
+        )
+        spec = make_portfolio_spec(
+            name="Robust",
+            distribution=AssetsDistribution(mu=mu, cov=cov),
+            optimiser="robust",
+            optimiser_kwargs={
+                "num_portfolios": 3,
+                "max_lambda": 0.8,
+                "constraints": {"long_only": True, "total_weight": 1.0},
+            },
+            selector="max_return",
+        )
+        frontier = spec.frontier_factory()
+        self.assertEqual(frontier.weights.shape, (2, 3))
+        self.assertTrue(frontier.risk_measure.startswith("Estimation Risk"))
 
     def test_portfolio_wrapper_make_ensemble_spec(self):
         mu = pd.Series([0.01, 0.015, 0.02], index=["A", "B", "C"])
@@ -237,6 +259,24 @@ class TestEnsembleUtilities(unittest.TestCase):
         self.assertIn("average", result.ensembles)
         self.assertEqual(list(result.ensembles["average"].index), ["A", "B", "C"])
         self.assertIsNone(result.stacked)
+
+    def test_portfolio_wrapper_make_ensemble_spec_supports_robust(self):
+        mu = pd.Series([0.01, 0.02], index=["A", "B"])
+        cov = pd.DataFrame(
+            [[0.03, 0.005], [0.005, 0.06]],
+            index=mu.index,
+            columns=mu.index,
+        )
+        wrapper = PortfolioWrapper(AssetsDistribution(mu=mu, cov=cov))
+        spec = wrapper.make_ensemble_spec(
+            "RobustSpec",
+            optimiser="robust",
+            optimiser_kwargs={"num_portfolios": 2, "max_lambda": 0.5},
+            selector="max_return",
+        )
+        frontier = spec.frontier_factory()
+        self.assertEqual(frontier.weights.shape, (2, 2))
+        self.assertTrue(frontier.risk_measure.startswith("Estimation Risk"))
 
 
 if __name__ == "__main__":

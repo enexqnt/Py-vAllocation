@@ -75,7 +75,7 @@ handy shortcuts:
    from pyvallocation.ensembles import average_frontiers, exposure_stack_frontiers
 
    wrapper = PortfolioWrapper(AssetsDistribution(scenarios=returns))
-   frontier = wrapper.mean_variance_frontier(num_portfolios=21)
+   frontier = wrapper.variance_frontier(num_portfolios=21)
    another = wrapper.mean_cvar_frontier(num_portfolios=21)
 
    avg_portfolio = average_frontiers([frontier, another])

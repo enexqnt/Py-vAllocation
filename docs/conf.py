@@ -6,8 +6,8 @@ project = 'Py-vAllocation'
 copyright = '2025, enexqnt'
 author = 'enexqnt'
 
-version = '0.3.1'
-release = '0.3.1'
+version = '0.4.0'
+release = '0.4.0'
 
 extensions = [
     'sphinx.ext.autodoc',
@@ -43,6 +43,11 @@ napoleon_type_aliases = {
     'pd.DataFrame': 'pandas.DataFrame',
 }
 
+# Render Google-style sections as "Parameters" blocks instead of :param: fields.
+napoleon_use_param = False
+napoleon_use_rtype = False
+napoleon_use_ivar = False
+
 templates_path = ['_templates']
 
 exclude_patterns = [
@@ -71,6 +76,9 @@ autodoc_default_options = {
     '__init__': True,
     'exclude-members': 'weights,marginal_risk,psi,gamma,rho,objective,target_return,max_return',
 }
+
+# Render type hints in the description blocks instead of inline signatures.
+autodoc_typehints = "description"
 
 linkcheck_ignore = [
     r'https://doi\.org/10\.1093/.*',

@@ -32,17 +32,12 @@ def ensure_samples_matrix(
     """
     Convert sample portfolios into a ``(n_assets, n_samples)`` float array.
 
-    Parameters
-    ----------
-    sample_portfolios
-        Array/Series/DataFrame where columns correspond to portfolios.
-    allow_empty
-        When ``True`` the helper permits zero columns (useful for wiring tests).
+    Args:
+        sample_portfolios: Array/Series/DataFrame where columns correspond to portfolios.
+        allow_empty: When ``True`` the helper permits zero columns (useful for tests).
 
-    Returns
-    -------
-    tuple
-        ``(matrix, asset_names, sample_names)``.
+    Returns:
+        Tuple[np.ndarray, Optional[List[str]], Optional[List[str]]]: ``(matrix, asset_names, sample_names)``.
     """
     asset_names: Optional[List[str]] = None
     sample_names: Optional[List[str]] = None
@@ -73,7 +68,16 @@ def wrap_exposure_vector(
     *,
     label: Optional[str],
 ) -> Union[np.ndarray, pd.Series]:
-    """Return a pandas Series when asset names are provided, else fall back to ndarray."""
+    """Return a pandas Series when asset names are provided, else fall back to ndarray.
+
+    Args:
+        vector: Exposure vector.
+        asset_names: Optional asset labels.
+        label: Optional Series name.
+
+    Returns:
+        Union[np.ndarray, pd.Series]: Wrapped exposure vector.
+    """
     array = np.asarray(vector, dtype=float).reshape(-1)
     if asset_names is None:
         return array
@@ -89,6 +93,14 @@ def normalize_weights(
     Normalise a weight vector while supporting pandas-labelled inputs.
 
     When ``weights`` is ``None`` the helper returns a uniform allocation.
+
+    Args:
+        weights: Optional weights vector or Series.
+        num_samples: Expected number of samples.
+        sample_names: Optional sample labels for alignment.
+
+    Returns:
+        np.ndarray: Normalized weight vector summing to one.
     """
     if num_samples == 0:
         raise ValueError("No sample portfolios provided.")

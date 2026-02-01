@@ -5,6 +5,8 @@ from .data_helpers import numpy_weights_to_pandas_series, pandas_to_numpy_return
 from .functions import (
     portfolio_cvar,
     portfolio_var,
+    portfolio_variance,
+    portfolio_volatility,
 )
 from .validation import (
     check_non_negativity,

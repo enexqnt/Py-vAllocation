@@ -73,6 +73,7 @@ __all__ = [
     "stack_portfolios",
     "average_frontiers",
     "exposure_stack_frontiers",
+    "risk_percentile_selections",
     "EnsembleSpec",
     "EnsembleResult",
     "assemble_portfolio_ensemble",
@@ -91,30 +92,24 @@ def average_exposures(
     When ``weights`` is omitted the average is uniform; otherwise ``weights``
     must supply one non-negative scalar per sample and is normalised to unity.
 
-    Parameters
-    ----------
-    sample_portfolios :
-        Array-like object whose columns represent sample portfolios.
-    weights :
-        Optional sequence or pandas Series of length ``n_samples`` providing
-        relative importance for each column. When a Series is supplied its index
-        is aligned to the sample column labels. The entries are automatically
-        rescaled so that they sum to one.
+    Args:
+        sample_portfolios: Array-like object whose columns represent sample portfolios.
+        weights: Optional sequence or pandas Series of length ``n_samples`` providing
+            relative importance for each column. When a Series is supplied its index
+            is aligned to the sample column labels. The entries are automatically
+            rescaled so that they sum to one.
 
-    Returns
-    -------
-    ndarray or pandas.Series
-        Averaged exposure vector with length equal to ``n_assets``. A pandas
-        Series is returned when asset names are available on the input.
+    Returns:
+        np.ndarray or pd.Series: Averaged exposure vector with length ``n_assets``.
+        A pandas Series is returned when asset names are available on the input.
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> samples = np.array([[0.6, 0.3], [0.4, 0.7]])
-    >>> average_exposures(samples)
-    array([0.45, 0.55])
-    >>> average_exposures(samples, weights=[1.0, 3.0])
-    array([0.375, 0.625])
+    Examples:
+        >>> import numpy as np
+        >>> samples = np.array([[0.6, 0.3], [0.4, 0.7]])
+        >>> average_exposures(samples)
+        array([0.45, 0.55])
+        >>> average_exposures(samples, weights=[1.0, 3.0])
+        array([0.375, 0.625])
     """
     exposures, asset_names, sample_names = ensure_samples_matrix(sample_portfolios)
     num_samples = exposures.shape[1]
@@ -125,7 +120,14 @@ def average_exposures(
 
 @contextmanager
 def _temporary_solver_options(overrides: Optional[dict]):
-    """Context manager that applies temporary CVXOPT solver options."""
+    """Context manager that applies temporary CVXOPT solver options.
+
+    Args:
+        overrides: Optional dictionary of solver option overrides.
+
+    Yields:
+        None
+    """
     previous = solvers.options.copy()
     if overrides:
         solvers.options.update(overrides)
@@ -150,32 +152,24 @@ def exposure_stacking(
     residuals. Intuitively, the resulting allocation penalises weights that are
     idiosyncratic to any particular subset of samples, favouring stable signals.
 
-    Parameters
-    ----------
-    sample_portfolios :
-        Panel of sample portfolios organised column-wise.
-    L :
-        Number of cross-validation folds. Must satisfy ``1 <= L <= n_samples``.
-    solver_options :
-        Optional dictionary of CVXOPT solver overrides (e.g., ``{'maxiters': 100}``).
+    Args:
+        sample_portfolios: Panel of sample portfolios organised column-wise.
+        L: Number of cross-validation folds. Must satisfy ``1 <= L <= n_samples``.
+        solver_options: Optional dictionary of CVXOPT solver overrides
+            (e.g., ``{'maxiters': 100}``).
 
-    Returns
-    -------
-    ndarray or pandas.Series
-        Exposure-stacked portfolio of length ``n_assets``. A Series is returned
-        when asset names are provided on the input.
+    Returns:
+        np.ndarray or pd.Series: Exposure-stacked portfolio of length ``n_assets``.
+        A Series is returned when asset names are provided on the input.
 
-    Notes
-    -----
-    This implementation adapts the open-source reference code from the
-    `fortitudo.tech <https://github.com/fortitudo-tech/fortitudo.tech>`_ project
-    (GPL-3.0) that accompanies Vorobets' original publication.
+    Notes:
+        This implementation adapts the open-source reference code from
+        `fortitudo.tech <https://github.com/fortitudo-tech/fortitudo.tech>`_
+        (GPL-3.0) that accompanies Vorobets' original publication.
 
-    Raises
-    ------
-    RuntimeError
-        If the underlying quadratic programme does not terminate with status
-        ``'optimal'``.
+    Raises:
+        RuntimeError: If the underlying quadratic programme does not terminate
+        with status ``'optimal'``.
     """
     exposures, asset_names, _ = ensure_samples_matrix(sample_portfolios)
     _, num_samples = exposures.shape
@@ -255,6 +249,19 @@ def _merge_asset_names(
     candidate: Optional[Sequence[str]],
     dimension: int,
 ) -> Optional[List[str]]:
+    """Validate/merge asset name lists across multiple samples.
+
+    Args:
+        existing: Current asset name list (or ``None`` if unset).
+        candidate: Candidate asset name list inferred from a new sample.
+        dimension: Expected number of assets for unlabelled samples.
+
+    Returns:
+        list[str] or None: Consolidated asset name list.
+
+    Raises:
+        ValueError: If asset labels conflict or dimensions mismatch.
+    """
     candidate_list = list(candidate) if candidate else None
     if candidate_list:
         if existing is None:
@@ -271,6 +278,16 @@ def _collect_samples(
     entries: Sequence[Any],
     selections: Optional[Sequence[Optional[Iterable[int]]]] = None,
 ) -> Tuple[np.ndarray, Optional[List[str]]]:
+    """Collect portfolios/frontiers into a single sample matrix.
+
+    Args:
+        entries: Sequence of portfolio vectors or ``PortfolioFrontier`` objects.
+        selections: Optional per-entry column selections (for frontiers).
+
+    Returns:
+        Tuple[np.ndarray, Optional[list[str]]]: Stacked ``(n_assets, n_samples)`` matrix
+        and optional asset labels.
+    """
     if not entries:
         raise ValueError("At least one portfolio/frontier must be provided.")
 
@@ -286,7 +303,20 @@ def _collect_samples(
 
     for entry, selection in zip(entries, selections_iter):
         if hasattr(entry, "to_samples"):
-            matrix, names = entry.to_samples(columns=selection, as_frame=False)
+            cols: Optional[Iterable[int]]
+            if selection is None:
+                # default to minimum-risk column to avoid mixing risk levels
+                if hasattr(entry, "risks"):
+                    cols = [int(np.argmin(entry.risks))]
+                else:
+                    cols = [0]
+            else:
+                cols_list = list(selection)
+                if len(cols_list) != 1:
+                    raise ValueError("Provide exactly one column index per frontier to avoid mixing risk levels.")
+                cols = [int(cols_list[0])]
+
+            matrix, names = entry.to_samples(columns=cols, as_frame=False)
             asset_names = _merge_asset_names(asset_names, names, matrix.shape[0])
             stacked.append(matrix)
             continue
@@ -305,11 +335,29 @@ def _stack_frontiers(
     frontiers: Sequence[Any],
     selections: Optional[Sequence[Optional[Iterable[int]]]] = None,
 ) -> Tuple[np.ndarray, Optional[List[str]]]:
+    """Alias for :func:`_collect_samples` with frontier inputs.
+
+    Args:
+        frontiers: Sequence of frontier-like objects.
+        selections: Optional per-frontier column selections.
+
+    Returns:
+        Tuple[np.ndarray, Optional[list[str]]]: Stacked sample matrix and asset labels.
+    """
     return _collect_samples(frontiers, selections)
 
 
 def _series_from_vector(weights: np.ndarray, names: Optional[List[str]], label: str) -> pd.Series:
-    """Helper returning a labelled Series with optional asset names."""
+    """Helper returning a labelled Series with optional asset names.
+
+    Args:
+        weights: Weight vector to wrap.
+        names: Optional asset labels.
+        label: Series name.
+
+    Returns:
+        pd.Series: Labelled weight vector.
+    """
     if names:
         return pd.Series(weights, index=names, name=label)
     return pd.Series(weights, name=label)
@@ -322,24 +370,20 @@ def average_frontiers(
     ensemble_weights: Optional[Sequence[float]] = None,
 ) -> pd.Series:
     """
-    Average selected portfolios across multiple frontiers (column-wise).
+    Average one portfolio from each frontier (aligned risk level).
 
-    Parameters
-    ----------
-    frontiers :
-        Sequence of frontier-like objects (typically
-        :class:`~pyvallocation.portfolioapi.PortfolioFrontier` instances).
-    selections :
-        Optional per-frontier iterable selecting column indices. When omitted the
-        entire frontier is used.
-    ensemble_weights :
-        Optional weights applied to the stacked sample matrix before averaging.
-        Must have length equal to the total number of selected portfolios.
+    Args:
+        frontiers: Sequence of frontier-like objects (typically
+            :class:`~pyvallocation.portfolioapi.PortfolioFrontier` instances).
+        selections: Optional per-frontier iterable selecting a **single** column
+            index. When omitted, each frontier contributes its minimum-risk
+            portfolio to avoid mixing risk levels.
+        ensemble_weights: Optional weights applied to the stacked sample matrix
+            before averaging. Must have length equal to the total number of
+            selected portfolios.
 
-    Returns
-    -------
-    pandas.Series
-        Averaged exposure vector with propagated asset labels when available.
+    Returns:
+        pd.Series: Averaged exposure vector with propagated asset labels when available.
     """
     samples, names = _stack_frontiers(frontiers, selections)
     averaged = average_exposures(samples, weights=ensemble_weights)
@@ -356,32 +400,47 @@ def exposure_stack_frontiers(
     """
     Apply exposure stacking across one or more frontiers.
 
-    Parameters
-    ----------
-    frontiers :
-        Sequence of frontier-like objects contributing sample portfolios.
-    L :
-        Number of stacking folds (as in :func:`exposure_stacking`).
-    selections :
-        Optional iterable specifying which column indices to draw from each
-        frontier.
-    solver_options :
-        Optional dictionary of CVXOPT solver overrides.
+    Args:
+        frontiers: Sequence of frontier-like objects contributing sample portfolios.
+        L: Number of stacking folds (as in :func:`exposure_stacking`).
+        selections: Optional iterable specifying **one** column index per frontier.
+            When omitted, each frontier contributes its minimum-risk portfolio.
+        solver_options: Optional dictionary of CVXOPT solver overrides.
 
-    Returns
-    -------
-    pandas.Series
-        Exposure-stacked weights with propagated asset labels.
+    Returns:
+        pd.Series: Exposure-stacked weights with propagated asset labels.
 
-    Notes
-    -----
-    The total number of selected portfolios must be at least ``L``. When
-    ``selections`` is omitted the full frontier matrices are used, matching the
-    layout of :attr:`~pyvallocation.portfolioapi.PortfolioFrontier.weights`.
+    Notes:
+        The total number of selected portfolios must be at least ``L``. When
+        ``selections`` is omitted the full frontier matrices are used, matching the
+        layout of :attr:`~pyvallocation.portfolioapi.PortfolioFrontier.weights`.
     """
     samples, names = _stack_frontiers(frontiers, selections)
     stacked = exposure_stacking(samples, L=L, solver_options=solver_options)
     return _series_from_vector(stacked, names, f"Exposure Stacking (L={L})")
+
+
+def risk_percentile_selections(
+    frontiers: Sequence["PortfolioFrontier"],
+    percentile: float,
+    *,
+    risk_label: Optional[str] = None,
+) -> List[List[int]]:
+    """Return per-frontier column selections aligned by risk percentile.
+
+    Args:
+        frontiers: Sequence of frontier objects.
+        percentile: Percentile on ``[0, 1]`` or ``[0, 100]``.
+        risk_label: Optional risk label to align on.
+
+    Returns:
+        list[list[int]]: Column selections per frontier.
+    """
+    selections: List[List[int]] = []
+    for frontier in frontiers:
+        idx = frontier.index_at_risk_percentile(percentile, risk_label=risk_label)
+        selections.append([idx])
+    return selections
 
 
 # --------------------------------------------------------------------------- #
@@ -391,7 +450,15 @@ def exposure_stack_frontiers(
 
 @dataclass(frozen=True)
 class EnsembleSpec:
-    """Descriptor for a single portfolio specification participating in an ensemble."""
+    """Descriptor for a single portfolio specification participating in an ensemble.
+
+    Key fields:
+        name: Spec identifier.
+        frontier_factory: Callable returning a :class:`PortfolioFrontier`.
+        selector: Callable extracting a representative portfolio.
+        metadata: Optional metadata attached to the resulting ensemble output.
+        frontier_selection: Optional subset of frontier columns for full-frontier blends.
+    """
 
     name: str
     frontier_factory: Callable[[], "PortfolioFrontier"]
@@ -402,7 +469,14 @@ class EnsembleSpec:
 
 @dataclass
 class EnsembleResult:
-    """Container returned by :func:`assemble_portfolio_ensemble`."""
+    """Container returned by :func:`assemble_portfolio_ensemble`.
+
+    Key fields:
+        frontiers: Mapping of spec name to frontier object.
+        selections: DataFrame of representative portfolios.
+        ensembles: Mapping of ensemble label to weight Series.
+        metadata: Per-spec metadata dictionaries.
+    """
 
     frontiers: Dict[str, "PortfolioFrontier"]
     selections: pd.DataFrame
@@ -410,14 +484,33 @@ class EnsembleResult:
     metadata: Dict[str, Dict[str, Any]]
 
     def get(self, name: str, default: Optional[pd.Series] = None) -> Optional[pd.Series]:
+        """Return the ensemble weights by name (or ``default`` if missing).
+
+        Args:
+            name: Ensemble key (e.g. ``"average"`` or ``"stack"``).
+            default: Value returned when ``name`` is not present.
+
+        Returns:
+            Optional[pd.Series]: Requested ensemble weights, if available.
+        """
         return self.ensembles.get(name, default)
 
     @property
     def average(self) -> Optional[pd.Series]:
+        """Convenience accessor for the average ensemble (if computed).
+
+        Returns:
+            Optional[pd.Series]: Average ensemble weights.
+        """
         return self.ensembles.get("average")
 
     @property
     def stacked(self) -> Optional[pd.Series]:
+        """Convenience accessor for the stacked ensemble (if computed).
+
+        Returns:
+            Optional[pd.Series]: Stacked ensemble weights.
+        """
         return self.ensembles.get("stack")
 
 
@@ -434,35 +527,26 @@ def assemble_portfolio_ensemble(
     Build multiple frontiers and collapse them into ensemble portfolios with a
     single call.
 
-    Parameters
-    ----------
-    specs:
-        Sequence of :class:`EnsembleSpec` instances describing how to generate and
-        summarise each frontier.
-    ensemble:
-        ``"average"``, ``"stack"``, a sequence of the two, or ``None``. Defaults
-        to ``"stack"`` for a stacked blend. Use ``("average", "stack")`` to obtain
-        both.
-    combine:
-        ``"selected"`` (default) averages / stacks the representative portfolios
-        extracted via each spec's selector. ``"frontier"`` operates directly on
-        the underlying frontiers using :func:`average_frontiers` and
-        :func:`exposure_stack_frontiers`.
-    stack_folds:
-        Number of folds for stacking. When omitted the helper picks
-        ``min(3, number_of_portfolios)``.
-    ensemble_weights:
-        Optional weights applied during averaging (either over selected portfolios
-        or the full frontier combination).
-    stack_kwargs:
-        Optional dictionary forwarded to the stacking solver
-        (``solver_options`` argument).
+    Args:
+        specs: Sequence of :class:`EnsembleSpec` instances describing how to generate and
+            summarise each frontier.
+        ensemble: ``"average"``, ``"stack"``, a sequence of the two, or ``None``.
+            Defaults to ``"stack"`` for a stacked blend. Use ``("average", "stack")`` to
+            obtain both.
+        combine: ``"selected"`` (default) averages/stacks the representative portfolios
+            extracted via each spec's selector. ``"frontier"`` operates directly on the
+            underlying frontiers using :func:`average_frontiers` and
+            :func:`exposure_stack_frontiers`.
+        stack_folds: Number of folds for stacking. When omitted the helper picks
+            ``min(3, number_of_portfolios)``.
+        ensemble_weights: Optional weights applied during averaging (either over selected
+            portfolios or the full frontier combination).
+        stack_kwargs: Optional dictionary forwarded to the stacking solver
+            (``solver_options`` argument).
 
-    Returns
-    -------
-    EnsembleResult
-        Rich result object containing the generated frontiers, the representative
-        portfolios, and any requested ensemble allocations.
+    Returns:
+        EnsembleResult: Rich result object containing the generated frontiers,
+        representative portfolios, and any requested ensemble allocations.
     """
     if not specs:
         raise ValueError("At least one EnsembleSpec must be provided.")
@@ -510,23 +594,35 @@ def assemble_portfolio_ensemble(
                 None if spec.frontier_selection is None else list(spec.frontier_selection)
                 for spec in specs
             ]
+            # enforce single column per frontier to avoid mixing risk levels
+            cleaned_selections = []
+            for frontier, sel in zip(frontier_list, selections_norm):
+                if sel is None:
+                    cleaned_selections.append([int(np.argmin(frontier.risks))])
+                elif len(sel) != 1:
+                    raise ValueError(
+                        "frontier_selection must provide exactly one column index per frontier when combine='frontier'."
+                    )
+                else:
+                    cleaned_selections.append([int(sel[0])])
+
             total_portfolios = sum(
                 _frontier_selection_size(frontier, selection)
-                for frontier, selection in zip(frontier_list, selections_norm)
+                for frontier, selection in zip(frontier_list, cleaned_selections)
             )
             folds = _determine_stack_folds(stack_folds, total_portfolios)
             for entry in ensemble_names:
                 if entry == "average":
                     ensembles["average"] = average_frontiers(
                         frontier_list,
-                        selections=selections_norm,
+                        selections=cleaned_selections,
                         ensemble_weights=ensemble_weights,
                     )
                 elif entry == "stack":
                     ensembles["stack"] = exposure_stack_frontiers(
                         frontier_list,
                         L=folds,
-                        selections=selections_norm,
+                        selections=cleaned_selections,
                         solver_options=stack_kwargs or None,
                     )
                 else:
@@ -571,51 +667,38 @@ def make_portfolio_spec(
     """
     Convenience constructor for :class:`EnsembleSpec` covering common workflows.
 
-    Parameters
-    ----------
-    name:
-        Spec identifier.
-    returns:
-        Historical scenario matrix (rows = scenarios, columns = assets).
-    probabilities:
-        Optional scenario weights aligned with ``returns``.
-    preprocess:
-        Optional callable applied to ``returns`` before estimation (e.g., convert
-        compounded to simple returns).
-    projection:
-        Optional dictionary with projection settings. Recognised keys:
+    Args:
+        name: Spec identifier.
+        returns: Historical scenario matrix (rows = scenarios, columns = assets).
+        probabilities: Optional scenario weights aligned with ``returns``.
+        preprocess: Optional callable applied to ``returns`` before estimation
+            (e.g., convert compounded to simple returns).
+        projection: Optional dictionary with projection settings. Recognised keys:
+            ``annualization_factor`` (for :func:`project_mean_covariance`),
+            ``log_to_simple``/``to_simple`` (apply :func:`log2simple`),
+            and ``transform`` (callable ``transform(mu, Sigma) -> (mu, Sigma)``).
+        distribution / distribution_factory: Supply an :class:`AssetsDistribution`
+            directly (or a factory returning one) instead of estimating from data.
+        use_scenarios: When ``True`` the distribution is built from scenarios
+            rather than estimated moments.
+        mean_estimator / cov_estimator: Names understood by
+            :func:`pyvallocation.moments.estimate_moments`.
+        mean_kwargs / cov_kwargs: Additional keyword arguments forwarded to the estimators.
+        optimiser: Optimiser key (``"mean_variance"``, ``"cvar"``, ``"rrp"``, ``"robust"``)
+            or a callable building a :class:`PortfolioFrontier` from a
+            :class:`~pyvallocation.portfolioapi.PortfolioWrapper`.
+        optimiser_kwargs: Keyword arguments for the optimiser. If it contains ``constraints``
+            they are passed to :meth:`PortfolioWrapper.set_constraints`.
+        selector: How to extract the representative portfolio. Accepts strings
+            (``"tangency"``, ``"min_risk"``, ``"max_return"``, ``"risk_target"``,
+            ``"risk_match"``, ``"risk_percentile"``, ``"column"``) or a callable.
+        selector_kwargs: Extra parameters for the selector (e.g., ``risk_free_rate`` for tangency).
+        frontier_selection: Column subset used when combining over entire frontiers.
+        metadata: Optional dictionary persisted in the returned :class:`EnsembleResult`.
 
-        * ``annualization_factor`` - passed to :func:`project_mean_covariance`.
-        * ``log_to_simple`` / ``to_simple`` (bool) - apply :func:`log2simple`.
-        * ``transform`` - callable ``transform(mu, Sigma) -> (mu, Sigma)``.
-    distribution / distribution_factory:
-        Supply an :class:`AssetsDistribution` directly (or a factory returning
-        one) instead of estimating from data.
-    use_scenarios:
-        When ``True`` the distribution is built from scenarios rather than
-        estimated moments.
-    mean_estimator / cov_estimator:
-        Names understood by :func:`pyvallocation.moments.estimate_moments`.
-    mean_kwargs / cov_kwargs:
-        Additional keyword arguments forwarded to the estimators.
-    optimiser:
-        Optimiser key (``"mean_variance"``, ``"cvar"``, ``"rrp"``, ``"robust"``)
-        or a callable building a :class:`PortfolioFrontier` from a
-        :class:`~pyvallocation.portfolioapi.PortfolioWrapper`.
-    optimiser_kwargs:
-        Keyword arguments for the optimiser. If it contains ``constraints`` they
-        are passed to :meth:`PortfolioWrapper.set_constraints`.
-    selector:
-        How to extract the representative portfolio. Accepts strings
-        (``"tangency"``, ``"min_risk"``, ``"max_return"``, ``"risk_target"``,
-        ``"column"``) or a callable.
-    selector_kwargs:
-        Extra parameters for the selector (e.g., ``risk_free_rate`` for the
-        tangency portfolio).
-    frontier_selection:
-        Column subset used when combining over entire frontiers.
-    metadata:
-        Optional dictionary persisted in the returned :class:`EnsembleResult`.
+    Returns:
+        EnsembleSpec: Spec object that encapsulates the distribution, optimiser, selector,
+        and associated metadata.
     """
 
     from .portfolioapi import AssetsDistribution, PortfolioWrapper
@@ -630,6 +713,11 @@ def make_portfolio_spec(
     )
 
     def frontier_factory() -> "PortfolioFrontier":
+        """Build a frontier using the configured distribution and optimiser.
+
+        Returns:
+            PortfolioFrontier: Optimised frontier instance.
+        """
         dist = _build_distribution(
             returns=returns,
             probabilities=probabilities,
@@ -678,6 +766,16 @@ def _coerce_weights_series(
     weights: Union[pd.Series, Tuple[Any, ...], np.ndarray, Sequence[float]],
     label: str,
 ) -> pd.Series:
+    """Coerce selector output into a labelled Series.
+
+    Args:
+        frontier: Frontier that provides asset labels.
+        weights: Selector output (Series, ndarray, or tuple from frontier methods).
+        label: Series name to assign.
+
+    Returns:
+        pd.Series: Weight vector aligned to asset labels when available.
+    """
     if isinstance(weights, tuple):
         weights = weights[0]
     if isinstance(weights, pd.Series):
@@ -692,6 +790,14 @@ def _coerce_weights_series(
 def _normalise_ensemble_argument(
     ensemble: Union[str, Sequence[str], None]
 ) -> Tuple[str, ...]:
+    """Normalize the ensemble selection argument to a tuple of lower-case keys.
+
+    Args:
+        ensemble: ``None``, a string key, or a sequence of keys.
+
+    Returns:
+        tuple[str, ...]: Normalized ensemble keys.
+    """
     if ensemble is None:
         return tuple()
     if isinstance(ensemble, str):
@@ -703,6 +809,15 @@ def _normalise_ensemble_argument(
 
 
 def _determine_stack_folds(stack_folds: Optional[int], total: int) -> int:
+    """Return a valid number of stacking folds given available portfolios.
+
+    Args:
+        stack_folds: Requested fold count (or ``None`` for auto).
+        total: Number of available portfolios.
+
+    Returns:
+        int: Validated number of folds.
+    """
     if total <= 0:
         raise ValueError("No portfolios available for stacking.")
     if stack_folds is None:
@@ -712,6 +827,15 @@ def _determine_stack_folds(stack_folds: Optional[int], total: int) -> int:
 
 
 def _frontier_selection_size(frontier: "PortfolioFrontier", selection: Optional[Sequence[int]]) -> int:
+    """Return the number of columns selected from a frontier.
+
+    Args:
+        frontier: Frontier instance.
+        selection: Optional column indices.
+
+    Returns:
+        int: Number of columns included.
+    """
     if selection is None:
         return frontier.weights.shape[1]
     return len(list(selection))
@@ -724,21 +848,65 @@ def _resolve_optimiser(
         Callable[..., "PortfolioFrontier"],
     ]
 ) -> Callable[..., "PortfolioFrontier"]:
+    """Map a optimiser key/callable to a frontier factory.
+
+    Args:
+        optimiser: Callable or string key (e.g. ``"mean_variance"``).
+
+    Returns:
+        Callable[..., PortfolioFrontier]: Frontier builder.
+    """
     if callable(optimiser):
         return optimiser
     key = optimiser.lower()
 
     def mean_variance(wrapper: "PortfolioWrapper", **kwargs):
-        return wrapper.mean_variance_frontier(**kwargs)
+        """Build a mean-variance frontier.
+
+        Args:
+            wrapper: Portfolio wrapper instance.
+            **kwargs: Forwarded optimisation keyword arguments.
+
+        Returns:
+            PortfolioFrontier: Mean-variance frontier.
+        """
+        return wrapper.variance_frontier(**kwargs)
 
     def mean_cvar(wrapper: "PortfolioWrapper", **kwargs):
-        return wrapper.mean_cvar_frontier(**kwargs)
+        """Build a mean-CVaR frontier.
+
+        Args:
+            wrapper: Portfolio wrapper instance.
+            **kwargs: Forwarded optimisation keyword arguments.
+
+        Returns:
+            PortfolioFrontier: Mean-CVaR frontier.
+        """
+        return wrapper.cvar_frontier(**kwargs)
 
     def relaxed_rp(wrapper: "PortfolioWrapper", **kwargs):
+        """Build a relaxed risk parity frontier.
+
+        Args:
+            wrapper: Portfolio wrapper instance.
+            **kwargs: Forwarded optimisation keyword arguments.
+
+        Returns:
+            PortfolioFrontier: Relaxed risk parity frontier.
+        """
         return wrapper.relaxed_risk_parity_frontier(**kwargs)
 
     def robust(wrapper: "PortfolioWrapper", **kwargs):
-        return wrapper.robust_frontier(**kwargs)
+        """Build a robust frontier across uncertainty penalties.
+
+        Args:
+            wrapper: Portfolio wrapper instance.
+            **kwargs: Forwarded optimisation keyword arguments.
+
+        Returns:
+            PortfolioFrontier: Robust frontier.
+        """
+        return wrapper.robust_lambda_frontier(**kwargs)
 
     mapping = {
         "mean_variance": mean_variance,
@@ -759,10 +927,28 @@ def _build_selector(
     selector_kwargs: Dict[str, Any],
     label: str,
 ) -> Callable[["PortfolioFrontier"], pd.Series]:
+    """Resolve a selector string/callable into a frontier-to-weights function.
+
+    Args:
+        selector: Selector key or callable.
+        selector_kwargs: Keyword arguments forwarded to the selector.
+        label: Label used for the resulting Series.
+
+    Returns:
+        Callable[[PortfolioFrontier], pd.Series]: Selector function.
+    """
     selector_kwargs = dict(selector_kwargs)
 
     if callable(selector):
         def _callable(frontier: "PortfolioFrontier") -> pd.Series:
+            """Call a custom selector with user-supplied kwargs.
+
+            Args:
+                frontier: Portfolio frontier instance.
+
+            Returns:
+                pd.Series: Selected portfolio weights.
+            """
             return selector(frontier, **selector_kwargs)
 
         return _callable
@@ -773,6 +959,14 @@ def _build_selector(
         risk_free = selector_kwargs.pop("risk_free_rate", 0.0)
 
         def _tangency(frontier: "PortfolioFrontier") -> pd.Series:
+            """Select the tangency portfolio using ``risk_free_rate``.
+
+            Args:
+                frontier: Portfolio frontier instance.
+
+            Returns:
+                pd.Series: Tangency portfolio weights.
+            """
             weights, *_ = frontier.get_tangency_portfolio(risk_free_rate=risk_free)
             return weights.rename(label)
 
@@ -781,7 +975,16 @@ def _build_selector(
     if key in {"min_risk", "minimum_risk"}:
 
         def _min(frontier: "PortfolioFrontier") -> pd.Series:
-            weights, *_ = frontier.get_min_risk_portfolio()
+            """Select the minimum-risk portfolio.
+
+            Args:
+                frontier: Portfolio frontier instance.
+
+            Returns:
+                pd.Series: Minimum-risk portfolio weights.
+            """
+            risk_label = selector_kwargs.pop("risk_label", None)
+            weights, *_ = frontier.get_min_risk_portfolio(risk_label=risk_label)
             return weights.rename(label)
 
         return _min
@@ -789,6 +992,14 @@ def _build_selector(
     if key in {"max_return", "maximum_return"}:
 
         def _max(frontier: "PortfolioFrontier") -> pd.Series:
+            """Select the maximum-return portfolio.
+
+            Args:
+                frontier: Portfolio frontier instance.
+
+            Returns:
+                pd.Series: Maximum-return portfolio weights.
+            """
             weights, *_ = frontier.get_max_return_portfolio()
             return weights.rename(label)
 
@@ -798,12 +1009,73 @@ def _build_selector(
         if "max_risk" not in selector_kwargs:
             raise ValueError("`selector_kwargs` must include `max_risk` for 'risk_target'.")
         max_risk = selector_kwargs.pop("max_risk")
+        risk_label = selector_kwargs.pop("risk_label", None)
 
         def _risk(frontier: "PortfolioFrontier") -> pd.Series:
-            weights, *_ = frontier.portfolio_at_risk_target(max_risk=max_risk)
+            """Select the max-return portfolio under a risk limit.
+
+            Args:
+                frontier: Portfolio frontier instance.
+
+            Returns:
+                pd.Series: Selected portfolio weights.
+            """
+            resolved_label = risk_label
+            if resolved_label is None and "Volatility" in frontier.alternate_risks:
+                if "Estimation Risk" in (frontier.risk_measure or ""):
+                    resolved_label = "Volatility"
+            weights, *_ = frontier.portfolio_at_risk_target(max_risk=max_risk, risk_label=resolved_label)
             return weights.rename(label)
 
         return _risk
+
+    if key in {"risk_match", "risk_nearest"}:
+        if "target_risk" not in selector_kwargs:
+            raise ValueError("`selector_kwargs` must include `target_risk` for 'risk_match'.")
+        target_risk = selector_kwargs.pop("target_risk")
+        risk_label = selector_kwargs.pop("risk_label", None)
+
+        def _risk_match(frontier: "PortfolioFrontier") -> pd.Series:
+            """Select the portfolio closest to ``target_risk``.
+
+            Args:
+                frontier: Portfolio frontier instance.
+
+            Returns:
+                pd.Series: Selected portfolio weights.
+            """
+            resolved_label = risk_label
+            if resolved_label is None and "Volatility" in frontier.alternate_risks:
+                if "Estimation Risk" in (frontier.risk_measure or ""):
+                    resolved_label = "Volatility"
+            weights, *_ = frontier.portfolio_closest_risk(target_risk, risk_label=resolved_label)
+            return weights.rename(label)
+
+        return _risk_match
+
+    if key in {"risk_percentile", "risk_pct", "percentile"}:
+        if "percentile" not in selector_kwargs:
+            raise ValueError("`selector_kwargs` must include `percentile` for 'risk_percentile'.")
+        percentile = selector_kwargs.pop("percentile")
+        risk_label = selector_kwargs.pop("risk_label", None)
+
+        def _risk_pct(frontier: "PortfolioFrontier") -> pd.Series:
+            """Select the portfolio at a risk percentile.
+
+            Args:
+                frontier: Portfolio frontier instance.
+
+            Returns:
+                pd.Series: Selected portfolio weights.
+            """
+            resolved_label = risk_label
+            if resolved_label is None and "Volatility" in frontier.alternate_risks:
+                if "Estimation Risk" in (frontier.risk_measure or ""):
+                    resolved_label = "Volatility"
+            weights, *_ = frontier.portfolio_at_risk_percentile(percentile, risk_label=resolved_label)
+            return weights.rename(label)
+
+        return _risk_pct
 
     if key in {"column", "index"}:
         column = selector_kwargs.pop("index", None)
@@ -811,6 +1083,14 @@ def _build_selector(
             raise ValueError("`selector_kwargs` must include `index` for 'column'.")
 
         def _column(frontier: "PortfolioFrontier") -> pd.Series:
+            """Select a portfolio by column index.
+
+            Args:
+                frontier: Portfolio frontier instance.
+
+            Returns:
+                pd.Series: Selected portfolio weights.
+            """
             weights = frontier.weights[:, int(column)]
             return _series_from_vector(weights, frontier.asset_names, label)
 
@@ -833,6 +1113,11 @@ def _build_distribution(
     mean_kwargs: Dict[str, Any],
     cov_kwargs: Dict[str, Any],
 ) -> "AssetsDistribution":
+    """Construct an :class:`AssetsDistribution` from inputs or factories.
+
+    Returns:
+        AssetsDistribution: Distribution derived from scenarios or estimated moments.
+    """
     from .portfolioapi import AssetsDistribution
     from .moments import estimate_moments
     from pyvallocation.utils.validation import ensure_psd_matrix
@@ -900,6 +1185,16 @@ def _apply_projection(
     sigma: pd.DataFrame,
     projection: Dict[str, Any],
 ) -> Tuple[pd.Series, pd.DataFrame]:
+    """Apply projection options (annualisation, log/simple transform, custom).
+
+    Args:
+        mu: Mean vector.
+        sigma: Covariance matrix.
+        projection: Projection options dictionary.
+
+    Returns:
+        Tuple[pd.Series, pd.DataFrame]: Projected mean and covariance.
+    """
     from pyvallocation.utils.projection import log2simple, project_mean_covariance
 
     options = dict(projection)

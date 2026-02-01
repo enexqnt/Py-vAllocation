@@ -2,7 +2,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pyvallocation.plotting import plot_frontiers
+from pyvallocation.plotting import (
+    plot_frontiers,
+    plot_weights,
+    plot_frontier_report,
+    plot_assumptions_3d,
+)
 from pyvallocation.portfolioapi import PortfolioFrontier
 
 
@@ -15,12 +20,14 @@ def _sample_frontier() -> PortfolioFrontier:
     )
     returns = np.array([0.05, 0.07, 0.09])
     risks = np.array([0.08, 0.1, 0.14])
+    alternate_risks = {"CVaR": np.array([0.12, 0.11, 0.10])}
     return PortfolioFrontier(
         weights=weights,
         returns=returns,
         risks=risks,
         risk_measure="Volatility",
         asset_names=["AAA", "BBB"],
+        alternate_risks=alternate_risks,
     )
 
 
@@ -57,6 +64,21 @@ def test_plot_frontiers_highlight_records_capture_weights():
 
     assert ax.get_xlabel() == "Volatility"
     assert ax.get_ylabel() == "Expected Return"
+
+    plt.close(ax.figure)
+
+
+def test_plot_frontiers_with_alternate_risk_label():
+    plt = pytest.importorskip("matplotlib.pyplot")
+    frontier = _sample_frontier()
+
+    ax = plot_frontiers(frontier, risk_label="CVaR", highlight=("min_risk",))
+    highlights = getattr(ax, "_frontier_highlights")
+
+    assert ax.get_xlabel() == "CVaR"
+    assert highlights[0]["risk_measure"] == "CVaR"
+    # min_risk under alternate metric should pick last column (0.10)
+    assert np.isclose(highlights[0]["risk"], 0.10)
 
     plt.close(ax.figure)
 
@@ -99,3 +121,35 @@ def test_plot_frontiers_metadata_in_highlight_labels():
     assert highlights[0]["index"] == 2
 
     plt.close(ax.figure)
+
+
+def test_plot_weights_series():
+    plt = pytest.importorskip("matplotlib.pyplot")
+    series = pd.Series([0.6, 0.4], index=["AAA", "BBB"])
+    ax = plot_weights(series, kind="barh", percent_axes=True)
+    assert len(ax.patches) == 2
+    plt.close(ax.figure)
+
+
+def test_plot_frontier_report():
+    plt = pytest.importorskip("matplotlib.pyplot")
+    frontier = _sample_frontier()
+    fig, axes = plot_frontier_report(frontier, selection="min_risk", percent_axes=True)
+    assert len(axes) == 2
+    plt.close(fig)
+
+
+def test_plot_assumptions_3d():
+    plt = pytest.importorskip("matplotlib.pyplot")
+    mean = np.array([0.04, 0.02, 0.01])
+    cov = np.diag([0.02, 0.01, 0.005])
+    rng = np.random.default_rng(7)
+    scenarios = rng.normal(mean, 0.05, size=(50, 3))
+    fig, axes = plot_assumptions_3d(
+        mean=mean,
+        cov=cov,
+        scenarios=scenarios,
+        uncertainty_cov=cov * 0.2,
+    )
+    assert len(axes) == 2
+    plt.close(fig)

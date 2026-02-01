@@ -64,6 +64,11 @@ Bayesian Posterior Adapters
 
 .. autofunction:: posterior_moments_black_litterman
 .. autofunction:: posterior_moments_niw
+.. autofunction:: posterior_moments_niw_with_uncertainty
+
+The ``posterior_moments_niw_with_uncertainty`` helper returns both classical
+posterior moments and the NIW mean-uncertainty covariance :math:`S_\\mu`, which
+is required for robust Bayesian optimisation.
 
 Composite Factory
 -----------------

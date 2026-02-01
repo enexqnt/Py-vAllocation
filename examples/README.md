@@ -19,12 +19,13 @@ Quickstarts
 -----------
 
 - `quickstart_etf_allocation.py` - end-to-end ETF allocation (moments -> frontiers -> ensemble -> discrete trades). 
-  Writes results under `output/` with plots (`frontiers_vol.png`, `frontiers_cvar.png`) and CSVs.
+  Writes results under `output/` with plots (`frontiers.png`, `robust_uncertainty.png`,
+  `robust_param_impact.png`, `robust_assumptions_3d.png`) and CSVs.
 
 Frontiers & risk models
 -----------------------
 
-- `mean_variance_frontier.py` - classical mean-variance frontier with tangency/min-risk picks.
+- `mean_variance_frontier.py` - classical mean-variance frontier with tangency/min-risk picks (uses `variance_frontier`).
 - `cvar_allocation.py` - CVaR frontier (alpha=5%) and tangency portfolio.
 - `robust_frontier.py` - Meucci-style robust frontier over lambda.
 - `relaxed_risk_parity_frontier.py` - relaxed risk parity sweep with diagnostics.
@@ -40,6 +41,7 @@ Data
 ----
 
 - `ETF_prices.csv` - small, self-contained dataset used by most examples.
+- `data_utils.py` - shared loaders for the sample dataset.
 
 Notebooks
 ---------

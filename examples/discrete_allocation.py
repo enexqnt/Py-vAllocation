@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
-from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
-
-DATA_PATH = Path(__file__).with_name("ETF_prices.csv")
+from data_utils import load_prices
+from example_utils import build_wrapper_from_scenarios
 
 
 def load_data() -> tuple[pd.DataFrame, pd.Series]:
-    prices = pd.read_csv(DATA_PATH, index_col="Date", parse_dates=True)
-    prices = prices.ffill().dropna()
+    prices = load_prices().dropna()
     returns = prices.pct_change().dropna().iloc[-750:]
     latest_prices = prices.iloc[-1]
     return returns, latest_prices
@@ -22,11 +18,9 @@ def load_data() -> tuple[pd.DataFrame, pd.Series]:
 def main() -> None:
     returns, latest_prices = load_data()
 
-    distribution = AssetsDistribution(scenarios=returns)
-    wrapper = PortfolioWrapper(distribution)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+    wrapper = build_wrapper_from_scenarios(returns)
 
-    frontier = wrapper.mean_variance_frontier(num_portfolios=8)
+    frontier = wrapper.variance_frontier(num_portfolios=8)
     # Select a middle point on the frontier for demonstration.
     middle_index = frontier.weights.shape[1] // 2
     allocation = frontier.as_discrete_allocation(

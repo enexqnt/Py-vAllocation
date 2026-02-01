@@ -46,7 +46,7 @@ mean-variance frontier.
    wrapper = PortfolioWrapper(dist)
    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
 
-   frontier = wrapper.mean_variance_frontier(num_portfolios=5)
+   frontier = wrapper.variance_frontier(num_portfolios=5)
    weights, expected_return, risk = frontier.get_min_risk_portfolio()
 
    print(weights.round(4))

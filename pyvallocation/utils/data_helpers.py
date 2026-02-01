@@ -15,7 +15,18 @@ def pandas_to_numpy_returns(
     return_calculation_method: str = "log",
     fill_na_method: str = "ffill",
 ) -> np.ndarray:
-    """Convert a pandas DataFrame of prices to a numpy array of returns."""
+    """Convert a pandas DataFrame of prices to a numpy array of returns.
+
+    Args:
+        dataframe: Price data as a DataFrame.
+        price_columns: Optional list of columns to treat as prices.
+        date_column: Optional column name to set as index.
+        return_calculation_method: ``"log"`` or ``"simple"`` (default ``"log"``).
+        fill_na_method: Missing data handling (default ``"ffill"``).
+
+    Returns:
+        np.ndarray: Return matrix with shape ``(T-1, N)``.
+    """
     if not isinstance(dataframe, pd.DataFrame):
         raise ValueError("`dataframe` must be a pandas DataFrame.")
 
@@ -84,7 +95,15 @@ def pandas_to_numpy_returns(
 def numpy_weights_to_pandas_series(
     weights: np.ndarray, asset_names: List[str]
 ) -> "pd.Series":
-    """Convert a 1D numpy array of weights to a pandas Series with asset names as index."""
+    """Convert a 1D numpy array of weights to a pandas Series with asset names as index.
+
+    Args:
+        weights: Weight vector of shape ``(N,)``.
+        asset_names: Asset name list of length ``N``.
+
+    Returns:
+        pd.Series: Weights indexed by asset name.
+    """
     if not isinstance(weights, np.ndarray) or weights.ndim != 1:
         raise ValueError("`weights` must be a 1D NumPy array.")
     if not isinstance(asset_names, list) or not all(

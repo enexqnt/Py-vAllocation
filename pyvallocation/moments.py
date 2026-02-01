@@ -139,7 +139,14 @@ logger = logging.getLogger(__name__)
 
 
 def _labels(*objs: ArrayLike) -> Optional[Sequence[str]]:
-    """Return asset labels when the first pandas object is encountered."""
+    """Return asset labels when the first pandas object is encountered.
+
+    Args:
+        *objs: Candidate arrays/Series/DataFrames to inspect.
+
+    Returns:
+        Optional[Sequence[str]]: Asset labels if pandas objects are present.
+    """
     for obj in objs:
         if isinstance(obj, pd.DataFrame):
             return obj.columns.to_list()
@@ -149,6 +156,16 @@ def _labels(*objs: ArrayLike) -> Optional[Sequence[str]]:
 
 
 def _wrap(x: np.ndarray, labels: Optional[Sequence[str]], vector: bool) -> ArrayLike:
+    """Wrap arrays into pandas containers when labels are available.
+
+    Args:
+        x: Array data to wrap.
+        labels: Asset labels (index/columns) or ``None``.
+        vector: ``True`` for a 1-D vector, ``False`` for a square matrix.
+
+    Returns:
+        ArrayLike: pandas Series/DataFrame when labels are provided, otherwise ndarray.
+    """
     if labels is None:
         return x
     if vector:
@@ -363,7 +380,18 @@ def shrink_covariance_ledoit_wolf(
 
 
 def shrink_covariance_oas(R: ArrayLike, assume_centered: bool = True) -> ArrayLike:
-    """Return the Oracle Approximating Shrinkage (OAS) covariance estimator."""
+    """Return the Oracle Approximating Shrinkage (OAS) covariance estimator.
+
+    Args:
+        R: Scenario matrix with shape ``(T, N)``.
+        assume_centered: If ``True`` treat data as centered. Defaults to ``True``.
+
+    Returns:
+        ArrayLike: Shrunk covariance matrix (pandas DataFrame when labels are available).
+
+    References:
+        :cite:p:`chen2010shrinkage`
+    """
     X = np.asarray(R, dtype=float)
     if X.ndim != 2:
         raise ValueError("Input `R` must be two-dimensional with shape (T, N).")
@@ -396,7 +424,19 @@ def shrink_covariance_nls(
     input_is_cov: bool = False,
     dof_correction: int = 0,
 ) -> ArrayLike:
-    """Return Ledoit-Wolf analytical nonlinear shrinkage (QuEST) of covariance."""
+    """Return Ledoit-Wolf analytical nonlinear shrinkage (QuEST) of covariance.
+
+    Args:
+        R_or_S: Scenario matrix with shape ``(T, N)`` (raw returns).
+        input_is_cov: Reserved for compatibility; must remain ``False``. Defaults to ``False``.
+        dof_correction: Degrees-of-freedom correction applied to the sample covariance.
+
+    Returns:
+        ArrayLike: Shrunk covariance matrix.
+
+    References:
+        :cite:p:`ledoit2020analytical`
+    """
     if input_is_cov:
         raise ValueError(
             "`shrink_covariance_nls` expects raw returns. "
@@ -438,7 +478,21 @@ def factor_covariance_poet(
     standardize: bool = True,
     return_decomp: bool = False,
 ) -> ArrayLike | Tuple[ArrayLike, ArrayLike, ArrayLike]:
-    """Return POET low-rank plus sparse covariance estimator."""
+    """Return POET low-rank plus sparse covariance estimator.
+
+    Args:
+        R: Scenario matrix with shape ``(T, N)``.
+        k: Number of factors or ``"auto"`` to pick via eigen-gap.
+        thresh: Threshold for the sparse residual (``"auto"`` uses a heuristic).
+        standardize: Whether to standardize returns before decomposition.
+        return_decomp: If ``True`` return factor loadings and factor scores.
+
+    Returns:
+        ArrayLike or tuple: Covariance estimate, and optionally factor loadings/scores.
+
+    References:
+        :cite:p:`fan2013large`
+    """
     X = np.asarray(R, dtype=float)
     if X.ndim != 2:
         raise ValueError("Input `R` must be two-dimensional with shape (T, N).")
@@ -505,6 +559,15 @@ def factor_covariance_poet(
         return Sigma_wrapped
 
     def _wrap_matrix(matrix: Optional[np.ndarray], *, index: Optional[pd.Index]) -> ArrayLike:
+        """Wrap factor matrices in a DataFrame when index labels are provided.
+
+        Args:
+            matrix: Factor matrix or ``None``.
+            index: Optional index labels for rows.
+
+        Returns:
+            ArrayLike: Wrapped matrix.
+        """
         if matrix is None:
             return None  # type: ignore[return-value]
         if index is not None:
@@ -513,6 +576,15 @@ def factor_covariance_poet(
         return matrix
 
     def _wrap_loadings(loadings_matrix: Optional[np.ndarray], *, columns: Sequence[str]) -> ArrayLike:
+        """Wrap loadings in a DataFrame when column labels are provided.
+
+        Args:
+            loadings_matrix: Loadings matrix or ``None``.
+            columns: Column labels for assets.
+
+        Returns:
+            ArrayLike: Wrapped loadings matrix.
+        """
         if loadings_matrix is None:
             return None  # type: ignore[return-value]
         if columns:
@@ -535,7 +607,22 @@ def robust_covariance_tyler(
     max_iter: int = 200,
     ensure_psd: bool = True,
 ) -> ArrayLike:
-    """Return regularised Tyler's M-estimator for heavy-tailed covariance."""
+    """Return regularised Tyler's M-estimator for heavy-tailed covariance.
+
+    Args:
+        R: Scenario matrix with shape ``(T, N)``.
+        shrinkage: Shrinkage intensity toward ``target`` in ``[0, 1]``.
+        target: Target covariance matrix or ``"identity"``.
+        tol: Relative convergence tolerance for the fixed-point iteration.
+        max_iter: Maximum number of iterations.
+        ensure_psd: Whether to project the result to PSD.
+
+    Returns:
+        ArrayLike: Robust covariance matrix.
+
+    References:
+        :cite:p:`tyler1987statistical`
+    """
     X = np.asarray(R, dtype=float)
     if X.ndim != 2:
         raise ValueError("Input `R` must be two-dimensional with shape (T, N).")
@@ -600,7 +687,15 @@ def robust_covariance_tyler(
 
 
 def _soft_threshold(matrix: np.ndarray, threshold: float) -> np.ndarray:
-    """Apply soft-thresholding to off-diagonal elements."""
+    """Apply soft-thresholding to off-diagonal elements.
+
+    Args:
+        matrix: Input matrix.
+        threshold: Non-negative threshold value.
+
+    Returns:
+        np.ndarray: Thresholded matrix.
+    """
     result = matrix.copy()
     mask = ~np.eye(matrix.shape[0], dtype=bool)
     off = result[mask]
@@ -616,7 +711,18 @@ def _graphical_lasso_admm(
     max_iter: int = 200,
     tol: float = 1e-4,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
-    """Solve the graphical lasso via ADMM."""
+    """Solve the graphical lasso via ADMM.
+
+    Args:
+        emp_cov: Empirical covariance matrix.
+        alpha: L1 penalty parameter.
+        rho: ADMM penalty parameter.
+        max_iter: Maximum number of iterations.
+        tol: Convergence tolerance.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, int]: Covariance, precision, and iteration count.
+    """
     p = emp_cov.shape[0]
     Theta = np.linalg.inv(emp_cov + alpha * np.eye(p))
     Z = Theta.copy()
@@ -666,7 +772,20 @@ def sparse_precision_glasso(
     assume_centered: bool = True,
     return_precision: bool = False,
 ) -> ArrayLike | Tuple[ArrayLike, ArrayLike]:
-    """Estimate covariance via sparse inverse covariance (Graphical Lasso)."""
+    """Estimate covariance via sparse inverse covariance (Graphical Lasso).
+
+    Args:
+        R: Scenario matrix with shape ``(T, N)``.
+        alpha: Penalty parameter or ``"auto"`` to cross-validate.
+        assume_centered: If ``False`` center the data before estimation.
+        return_precision: If ``True`` also return the precision matrix.
+
+    Returns:
+        ArrayLike or tuple: Covariance estimate (and precision if requested).
+
+    References:
+        :cite:p:`friedman2008sparse`
+    """
     X = np.asarray(R, dtype=float)
     if X.ndim != 2:
         raise ValueError("Input `R` must be two-dimensional with shape (T, N).")
@@ -681,6 +800,14 @@ def sparse_precision_glasso(
     labels = _labels(R)
 
     def _fit(alpha_value: float) -> Tuple[np.ndarray, np.ndarray]:
+        """Fit graphical lasso for a single penalty value.
+
+        Args:
+            alpha_value: Penalty parameter.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Covariance and precision matrices.
+        """
         cov, precision, _ = _graphical_lasso_admm(emp_cov, alpha_value)
         return cov, precision
 
@@ -737,7 +864,20 @@ def shrink_mean_james_stein(
     T: int,
     target: str | np.ndarray | pd.Series = "grand_mean",
 ) -> ArrayLike:
-    """Return James-Stein shrinkage estimate for the mean vector."""
+    """Return James-Stein shrinkage estimate for the mean vector.
+
+    Args:
+        mu_hat: Sample mean vector.
+        S: Sample covariance matrix.
+        T: Number of observations.
+        target: Shrinkage target (``"grand_mean"`` or custom vector).
+
+    Returns:
+        ArrayLike: Shrunk mean estimate.
+
+    References:
+        :cite:p:`jorion1986bayes`
+    """
     mu_arr = np.asarray(mu_hat, dtype=float).reshape(-1)
     Sigma = np.asarray(S, dtype=float)
     if Sigma.ndim != 2 or Sigma.shape[0] != Sigma.shape[1]:
@@ -777,7 +917,20 @@ def robust_mean_huber(
     tol: float = 1e-6,
     max_iter: int = 200,
 ) -> ArrayLike:
-    """Return adaptive Huber mean estimator (per asset) for heavy-tailed data."""
+    """Return adaptive Huber mean estimator (per asset) for heavy-tailed data.
+
+    Args:
+        R: Scenario matrix with shape ``(T, N)``.
+        allow_vectorized: Must be ``True`` (scalar mode not implemented).
+        tol: Relative convergence tolerance.
+        max_iter: Maximum number of iterations per asset.
+
+    Returns:
+        ArrayLike: Robust mean vector.
+
+    References:
+        :cite:p:`huber1964robust`
+    """
     X = np.asarray(R, dtype=float)
     if X.ndim != 2:
         raise ValueError("Input `R` must be two-dimensional with shape (T, N).")
@@ -809,7 +962,16 @@ def robust_mean_median_of_means(
     n_blocks: int | str = "auto",
     random_state: Optional[int | np.random.Generator] = None,
 ) -> ArrayLike:
-    """Return coordinate-wise Median-of-Means mean estimator."""
+    """Return coordinate-wise Median-of-Means mean estimator.
+
+    Args:
+        R: Scenario matrix with shape ``(T, N)``.
+        n_blocks: Number of blocks or ``"auto"`` to use ``ceil(sqrt(T))``.
+        random_state: Optional random seed or Generator.
+
+    Returns:
+        ArrayLike: Robust mean vector.
+    """
     X = np.asarray(R, dtype=float)
     if X.ndim != 2:
         raise ValueError("Input `R` must be two-dimensional with shape (T, N).")
@@ -851,7 +1013,25 @@ def posterior_moments_black_litterman(
     omega: Any = "idzorek",
     **kwargs: Any,
 ) -> Tuple[ArrayLike, ArrayLike]:
-    """Return posterior (mu, Sigma) from :class:`BlackLittermanProcessor`."""
+    """Return posterior (mu, Sigma) from :class:`BlackLittermanProcessor`.
+
+    Args:
+        prior_cov: Prior covariance matrix.
+        prior_mean: Optional prior mean vector.
+        market_weights: Optional market-cap weights for implied equilibrium mean.
+        risk_aversion: Risk-aversion coefficient (defaults to ``1.0``).
+        tau: Prior covariance shrinkage parameter (defaults to ``0.05``).
+        mean_views: Mean views (absolute or relative).
+        view_confidences: Confidence levels for views (Idzorek).
+        omega: View covariance (``"idzorek"`` or array-like).
+        **kwargs: Additional arguments forwarded to ``BlackLittermanProcessor``.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: Posterior mean and covariance.
+
+    References:
+        :cite:p:`black1992global`
+    """
     from pyvallocation.views import BlackLittermanProcessor
 
     processor = BlackLittermanProcessor(
@@ -878,7 +1058,20 @@ def posterior_moments_niw(
     sample_sigma: ArrayLike,
     n_obs: int,
 ) -> Tuple[ArrayLike, ArrayLike]:
-    """Return NIW posterior classical-equivalent (mu, Sigma)."""
+    """Return NIW posterior classical-equivalent (mu, Sigma).
+
+    Args:
+        prior_mu: Prior mean vector.
+        prior_sigma: Prior covariance matrix.
+        t0: Prior strength (pseudo-observations for mean).
+        nu0: Prior degrees of freedom for covariance.
+        sample_mu: Sample mean vector.
+        sample_sigma: Sample covariance matrix.
+        n_obs: Number of observations.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: Posterior mean and covariance.
+    """
     from pyvallocation.bayesian import NIWPosterior
 
     niw = NIWPosterior(
@@ -895,6 +1088,41 @@ def posterior_moments_niw(
     return niw.get_mu_ce(), niw.get_sigma_ce()
 
 
+def posterior_moments_niw_with_uncertainty(
+    *,
+    prior_mu: ArrayLike,
+    prior_sigma: ArrayLike,
+    t0: int,
+    nu0: int,
+    sample_mu: ArrayLike,
+    sample_sigma: ArrayLike,
+    n_obs: int,
+) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
+    """Return NIW posterior moments plus mean-uncertainty covariance.
+
+    The returned ``S_mu`` corresponds to the NIW mean uncertainty
+    :cite:p:`meucci2005robust`:
+
+    .. math::
+
+        S_\\mu = \\frac{\\nu_1}{T_1 (\\nu_1 - 2)} \\Sigma_1.
+    """
+    from pyvallocation.bayesian import NIWPosterior
+
+    niw = NIWPosterior(
+        prior_mu=prior_mu,
+        prior_sigma=prior_sigma,
+        t0=int(t0),
+        nu0=int(nu0),
+    )
+    niw.update(
+        sample_mu=sample_mu,
+        sample_sigma=sample_sigma,
+        n_obs=int(n_obs),
+    )
+    return niw.get_mu_ce(), niw.get_sigma_ce(), niw.get_S_mu()
+
+
 def estimate_moments(
     R: ArrayLike,
     p: Optional[ArrayLike] = None,
@@ -904,7 +1132,19 @@ def estimate_moments(
     mean_kwargs: Optional[Dict[str, Any]] = None,
     cov_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Tuple[ArrayLike, ArrayLike]:
-    """Return (mu, Sigma) using configurable mean and covariance estimators."""
+    """Return (mu, Sigma) using configurable mean and covariance estimators.
+
+    Args:
+        R: Scenario matrix with shape ``(T, N)``.
+        p: Optional scenario probabilities aligned with ``R``.
+        mean_estimator: Mean estimator key (default ``"sample"``).
+        cov_estimator: Covariance estimator key (default ``"sample"``).
+        mean_kwargs: Optional keyword arguments for the mean estimator.
+        cov_kwargs: Optional keyword arguments for the covariance estimator.
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: Estimated mean and covariance.
+    """
     mean_kwargs = dict(mean_kwargs or {})
     cov_kwargs = dict(cov_kwargs or {})
     X = np.asarray(R, dtype=float)

@@ -17,6 +17,19 @@ LotSizeLike = Optional[Union[pd.Series, Mapping[str, int]]]
 
 
 def _to_series(data: SeriesLike, name: str) -> pd.Series:
+    """Coerce ``data`` into a non-empty pandas Series.
+
+    Args:
+        data: Series or mapping of asset -> value.
+        name: Label used for validation error messages.
+
+    Returns:
+        pd.Series: Series with ``float`` dtype.
+
+    Raises:
+        ValueError: If ``data`` is empty.
+        TypeError: If ``data`` is not a Series or mapping.
+    """
     if isinstance(data, pd.Series):
         if data.empty:
             raise ValueError(f"`{name}` must contain at least one asset.")
@@ -29,6 +42,19 @@ def _to_series(data: SeriesLike, name: str) -> pd.Series:
 
 
 def _lot_sizes_to_series(lot_sizes: LotSizeLike, index: Iterable[str]) -> pd.Series:
+    """Normalize lot size inputs into a validated Series.
+
+    Args:
+        lot_sizes: Optional mapping/Series of integer lot sizes.
+        index: Asset index that the resulting Series should align to.
+
+    Returns:
+        pd.Series: Integer lot sizes aligned to ``index`` with missing values set to 1.
+
+    Raises:
+        TypeError: If ``lot_sizes`` is not a mapping or Series.
+        ValueError: If any lot sizes are non-positive.
+    """
     if lot_sizes is None:
         return pd.Series(1, index=index, dtype=int)
     if isinstance(lot_sizes, pd.Series):
@@ -45,7 +71,14 @@ def _lot_sizes_to_series(lot_sizes: LotSizeLike, index: Iterable[str]) -> pd.Ser
 
 @dataclass
 class DiscreteAllocationInput:
-    """Container for validated discrete allocation inputs."""
+    """Container for validated discrete allocation inputs.
+
+    Key fields:
+        weights: Continuous target weights.
+        latest_prices: Latest asset prices.
+        total_value: Total portfolio value.
+        lot_sizes: Optional lot sizes per asset.
+    """
 
     weights: SeriesLike
     latest_prices: SeriesLike
@@ -53,6 +86,11 @@ class DiscreteAllocationInput:
     lot_sizes: LotSizeLike = None
 
     def __post_init__(self) -> None:
+        """Validate and normalize inputs after dataclass initialization.
+
+        Raises:
+            ValueError: If inputs are inconsistent or invalid.
+        """
         weights = _to_series(self.weights, "weights").astype(float)
         latest_prices = _to_series(self.latest_prices, "latest_prices").astype(float)
 
@@ -89,21 +127,49 @@ class DiscreteAllocationInput:
 
     @property
     def asset_names(self) -> Sequence[str]:
+        """Tuple of asset names inferred from the weights index.
+
+        Returns:
+            Sequence[str]: Asset labels.
+        """
         return tuple(self.weights.index)
 
 
 @dataclass
 class DiscreteAllocationResult:
+    """Discrete allocation output bundle.
+
+    Key fields:
+        shares: Non-zero share counts by asset.
+        leftover_cash: Uninvested cash amount.
+        achieved_weights: Realized weights from share allocation.
+        tracking_error: RMSE between target and achieved weights.
+    """
+
     shares: Dict[str, int]
     leftover_cash: float
     achieved_weights: pd.Series
     tracking_error: float
 
     def as_series(self) -> pd.Series:
+        """Return the allocated share counts as a pandas Series.
+
+        Returns:
+            pd.Series: Share counts indexed by asset.
+        """
         return pd.Series(self.shares, dtype=int)
 
 
 def _build_result(inputs: DiscreteAllocationInput, raw_shares: pd.Series) -> DiscreteAllocationResult:
+    """Assemble a :class:`DiscreteAllocationResult` from raw share counts.
+
+    Args:
+        inputs: Validated allocation inputs.
+        raw_shares: Raw share counts (possibly fractional).
+
+    Returns:
+        DiscreteAllocationResult: Normalized allocation summary.
+    """
     shares = raw_shares.astype(int)
     values = shares * inputs.latest_prices
     portfolio_value = float(values.sum())
@@ -264,7 +330,17 @@ def allocate_mip(
     max_cash: Optional[float] = None,
     solver_options: Optional[Dict[str, Union[int, float]]] = None,
 ) -> DiscreteAllocationResult:
-    """Mixed-integer allocation minimizing L1 tracking error and leftover cash."""
+    """Mixed-integer allocation minimizing L1 tracking error and leftover cash.
+
+    Args:
+        inputs: Validated allocation inputs.
+        cash_penalty: Penalty on leftover cash in the objective.
+        max_cash: Optional upper bound on leftover cash.
+        solver_options: Optional SciPy MILP solver options.
+
+    Returns:
+        DiscreteAllocationResult: Allocation result with share counts.
+    """
 
     if not hasattr(optimize, "milp"):
         raise RuntimeError(
@@ -366,7 +442,19 @@ def discretize_weights(
     lot_sizes: LotSizeLike = None,
     **kwargs,
 ) -> DiscreteAllocationResult:
-    """Routes to the requested discrete allocation algorithm."""
+    """Routes to the requested discrete allocation algorithm.
+
+    Args:
+        weights: Target weights.
+        latest_prices: Latest asset prices.
+        total_value: Total portfolio value.
+        method: ``"greedy"`` or ``"milp"``.
+        lot_sizes: Optional lot sizes per asset.
+        **kwargs: Extra keyword arguments forwarded to the allocator.
+
+    Returns:
+        DiscreteAllocationResult: Allocation result with share counts.
+    """
 
     inputs = DiscreteAllocationInput(
         weights=weights,

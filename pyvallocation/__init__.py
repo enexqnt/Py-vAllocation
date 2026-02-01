@@ -18,6 +18,8 @@ __all__ = [
     "sparse_precision_glasso",
     "posterior_moments_black_litterman",
     "posterior_moments_niw",
+    "posterior_moments_niw_with_uncertainty",
+    "RobustBayesPosterior",
     "generate_uniform_probabilities",
     "generate_exp_decay_probabilities",
     "silverman_bandwidth",
@@ -41,10 +43,18 @@ __all__ = [
     "exposure_stacking",
     "average_frontiers",
     "exposure_stack_frontiers",
+    "risk_percentile_selections",
     "assemble_portfolio_ensemble",
     "make_portfolio_spec",
     "stack_portfolios",
     "plot_frontiers",
+    "plot_frontiers_grid",
+    "plot_weights",
+    "plot_frontier_report",
+    "plot_robust_path",
+    "plot_param_impact",
+    "plot_robust_surface",
+    "plot_assumptions_3d",
     "stress_test",
     "exp_decay_stress",
     "kernel_focus_stress",
@@ -61,6 +71,7 @@ from .moments import (
     factor_covariance_poet,
     posterior_moments_black_litterman,
     posterior_moments_niw,
+    posterior_moments_niw_with_uncertainty,
     robust_covariance_tyler,
     robust_mean_huber,
     robust_mean_median_of_means,
@@ -71,6 +82,7 @@ from .moments import (
     shrink_mean_jorion,
     sparse_precision_glasso,
 )
+from .bayesian import RobustBayesPosterior
 from .optimization import MeanCVaR, MeanVariance, RelaxedRiskParity, RobustOptimizer
 from .probabilities import (
     compute_effective_number_scenarios,
@@ -93,10 +105,20 @@ from .ensembles import (
     assemble_portfolio_ensemble,
     exposure_stack_frontiers,
     exposure_stacking,
+    risk_percentile_selections,
     stack_portfolios,
     make_portfolio_spec,
 )
-from .plotting import plot_frontiers
+from .plotting import (
+    plot_frontiers,
+    plot_frontiers_grid,
+    plot_weights,
+    plot_frontier_report,
+    plot_robust_path,
+    plot_param_impact,
+    plot_robust_surface,
+    plot_assumptions_3d,
+)
 from .stress import (
     entropy_pooling_stress,
     exp_decay_stress,

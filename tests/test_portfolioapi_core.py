@@ -82,6 +82,13 @@ def test_robust_lambda_frontier_rejects_negative_lambdas():
         wrapper.robust_lambda_frontier(lambdas=[-0.1, 0.2])
 
 
+def test_robust_lambda_frontier_sorted_by_risk():
+    wrapper = _build_long_only_wrapper()
+    frontier = wrapper.robust_lambda_frontier(num_portfolios=4, max_lambda=1.0)
+    diffs = np.diff(frontier.risks)
+    assert np.all(diffs >= -1e-10)
+
+
 def test_relaxed_risk_parity_portfolio_returns_diagnostics():
     wrapper = _build_long_only_wrapper()
     weights, diagnostics = wrapper.relaxed_risk_parity_portfolio()
