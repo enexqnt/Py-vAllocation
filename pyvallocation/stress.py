@@ -110,7 +110,7 @@ def stress_test(
     probabilities: Optional[ProbabilityLike] = None,
     stressed_probabilities: Optional[ProbabilityLike] = None,
     transform: Optional[Callable[[np.ndarray], np.ndarray]] = None,
-    alpha: float = 0.95,
+    confidence: float = 0.95,
     demean: bool = False,
 ) -> pd.DataFrame:
     """
@@ -128,8 +128,8 @@ def stress_test(
             ``KL(p* || p)`` is reported.
         transform: Callable applied to ``R`` (after conversion to ``float``) to obtain
             stressed scenarios (e.g., shocks, factor projections).
-        alpha: Confidence level for VaR/CVaR metrics (default ``0.95``). Risk is reported
-            as a positive loss.
+        confidence: Confidence level for VaR/CVaR metrics (default ``0.95``).
+            E.g. 0.95 means 5% tail CVaR. Risk is reported as a positive loss.
         demean: When ``True`` the scenario P&L used for VaR/CVaR is demeaned by the
             respective probabilities.
 
@@ -146,9 +146,10 @@ def stress_test(
         >>> shock = linear_map(scale=1.5)  # magnify returns by 50%
         >>> df = stress_test(weights, scenarios, transform=shock)
     """
+    conf = confidence
 
-    if not 0.0 < alpha < 1.0:
-        raise ValueError("`alpha` must be in (0, 1).")
+    if not 0.0 < conf < 1.0:
+        raise ValueError("`confidence` must be in (0, 1).")
 
     if isinstance(scenarios, pd.DataFrame):
         R_arr = scenarios.to_numpy(dtype=float)
@@ -183,8 +184,8 @@ def stress_test(
         mu_vec = np.asarray(mu, dtype=float).reshape(-1, 1)
         sigma_mat = np.asarray(sigma, dtype=float)
         mean = (W.T @ mu_vec).reshape(-1)
-        var = np.asarray(portfolio_var(W, R_matrix, probs, alpha=alpha, demean=demean)).reshape(-1)
-        cvar = np.asarray(portfolio_cvar(W, R_matrix, probs, alpha=alpha, demean=demean)).reshape(-1)
+        var = np.asarray(portfolio_var(W, R_matrix, probs, confidence=conf, demean=demean)).reshape(-1)
+        cvar = np.asarray(portfolio_cvar(W, R_matrix, probs, confidence=conf, demean=demean)).reshape(-1)
         stdev = np.sqrt(np.einsum("ik,kl,il->i", W.T, sigma_mat, W.T))
         ens = compute_effective_number_scenarios(probs)
         return mean, stdev, var, cvar, ens
@@ -194,8 +195,8 @@ def stress_test(
     columns = {
         "return_nom": ret_nom,
         "stdev_nom": sd_nom,
-        f"VaR{int(round(alpha * 100))}_nom": var_nom,
-        f"CVaR{int(round(alpha * 100))}_nom": cvar_nom,
+        f"VaR{int(round(conf * 100))}_nom": var_nom,
+        f"CVaR{int(round(conf * 100))}_nom": cvar_nom,
         "ENS_nom": np.full_like(ret_nom, ens_nom, dtype=float),
     }
 
@@ -204,6 +205,8 @@ def stress_test(
         stressed_R = np.asarray(transform(R_arr), dtype=float)
         if stressed_R.shape != R_arr.shape:
             raise ValueError("`transform` must return an array with the same shape as `scenarios`.")
+        if not np.all(np.isfinite(stressed_R)):
+            raise ValueError("`transform` produced non-finite values in stressed scenarios.")
 
     if stressed_probabilities is not None or transform is not None:
         p_star = (
@@ -220,8 +223,8 @@ def stress_test(
             {
                 "return_stress": ret_st,
                 "stdev_stress": sd_st,
-                f"VaR{int(round(alpha * 100))}_stress": var_st,
-                f"CVaR{int(round(alpha * 100))}_stress": cvar_st,
+                f"VaR{int(round(conf * 100))}_stress": var_st,
+                f"CVaR{int(round(conf * 100))}_stress": cvar_st,
                 "ENS_stress": np.full_like(ret_st, ens_st, dtype=float),
             }
         )
@@ -240,7 +243,7 @@ def exp_decay_stress(
     *,
     probabilities: Optional[ProbabilityLike] = None,
     half_life: int = 60,
-    alpha: float = 0.95,
+    confidence: float = 0.95,
     demean: bool = False,
 ) -> pd.DataFrame:
     """
@@ -255,7 +258,7 @@ def exp_decay_stress(
         probabilities: Nominal scenario probabilities ``p``. Defaults to uniform.
         half_life: Half-life (in observations) of the exponential decay kernel.
             Defaults to ``60``.
-        alpha, demean: Risk settings forwarded to :func:`stress_test`.
+        confidence, demean: Risk settings forwarded to :func:`stress_test`.
 
     Returns:
         pd.DataFrame: Tidy comparison between nominal and stressed metrics.
@@ -274,7 +277,7 @@ def exp_decay_stress(
         scenarios,
         probabilities=probabilities,
         stressed_probabilities=p_star,
-        alpha=alpha,
+        confidence=confidence,
         demean=demean,
     )
 
@@ -287,7 +290,7 @@ def kernel_focus_stress(
     probabilities: Optional[ProbabilityLike] = None,
     bandwidth: Optional[float] = None,
     target: Optional[float] = None,
-    alpha: float = 0.95,
+    confidence: float = 0.95,
     demean: bool = False,
 ) -> pd.DataFrame:
     """
@@ -302,7 +305,7 @@ def kernel_focus_stress(
             :func:`pyvallocation.probabilities.generate_gaussian_kernel_probabilities`.
         target: Target state ``x_T`` around which probability mass is concentrated.
             When omitted, the last observation is used.
-        alpha, demean: Risk settings forwarded to :func:`stress_test`.
+        confidence, demean: Risk settings forwarded to :func:`stress_test`.
 
     Returns:
         pd.DataFrame: Tidy comparison between nominal and stressed metrics.
@@ -323,7 +326,7 @@ def kernel_focus_stress(
         scenarios,
         probabilities=probabilities,
         stressed_probabilities=p_star,
-        alpha=alpha,
+        confidence=confidence,
         demean=demean,
     )
 
@@ -334,7 +337,7 @@ def entropy_pooling_stress(
     *,
     posterior_probabilities: ProbabilityLike,
     probabilities: Optional[ProbabilityLike] = None,
-    alpha: float = 0.95,
+    confidence: float = 0.95,
     demean: bool = False,
 ) -> pd.DataFrame:
     """
@@ -346,7 +349,7 @@ def entropy_pooling_stress(
             :func:`pyvallocation.views.entropy_pooling` or
             :class:`pyvallocation.views.FlexibleViewsProcessor`.
         probabilities: Nominal probabilities ``p``. Defaults to uniform.
-        alpha, demean: Risk settings forwarded to :func:`stress_test`.
+        confidence, demean: Risk settings forwarded to :func:`stress_test`.
 
     Returns:
         pd.DataFrame: Tidy comparison between nominal and stressed metrics including
@@ -364,7 +367,7 @@ def entropy_pooling_stress(
         scenarios,
         probabilities=probabilities,
         stressed_probabilities=posterior_probabilities,
-        alpha=alpha,
+        confidence=confidence,
         demean=demean,
     )
 

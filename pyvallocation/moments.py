@@ -139,20 +139,30 @@ logger = logging.getLogger(__name__)
 
 
 def _labels(*objs: ArrayLike) -> Optional[Sequence[str]]:
-    """Return asset labels when the first pandas object is encountered.
+    """Return asset labels when pandas objects are present.
 
-    Args:
-        *objs: Candidate arrays/Series/DataFrames to inspect.
-
-    Returns:
-        Optional[Sequence[str]]: Asset labels if pandas objects are present.
+    Raises ValueError if multiple pandas inputs have different label orderings
+    for the *same* axis length (i.e. both represent asset-dimension labels).
+    Objects whose label length differs from a previously seen asset dimension
+    are silently skipped (e.g. a probability Series with T entries vs. an
+    N-column DataFrame).
     """
+    found: Optional[Sequence[str]] = None
     for obj in objs:
+        candidate = None
         if isinstance(obj, pd.DataFrame):
-            return obj.columns.to_list()
-        if isinstance(obj, pd.Series):
-            return obj.index.to_list()
-    return None
+            candidate = obj.columns.to_list()
+        elif isinstance(obj, pd.Series):
+            candidate = obj.index.to_list()
+        if candidate is not None:
+            if found is None:
+                found = candidate
+            elif len(candidate) == len(found) and candidate != found:
+                raise ValueError(
+                    f"Input label orderings differ: {found} vs {candidate}. "
+                    "Reindex inputs to a consistent ordering before calling."
+                )
+    return found
 
 
 def _wrap(x: np.ndarray, labels: Optional[Sequence[str]], vector: bool) -> ArrayLike:
@@ -409,8 +419,9 @@ def shrink_covariance_oas(R: ArrayLike, assume_centered: bool = True) -> ArrayLi
     alpha = np.mean(emp_cov**2)
     mu = np.trace(emp_cov) / N
     mu_sq = mu * mu
-    denom = (T + 1.0) * (alpha - mu_sq / N)
-    shrinkage = 1.0 if denom <= 0 else min((alpha + mu_sq) / denom, 1.0)
+    # Chen et al. (2010) OAS formula with (1 - 2/p) correction
+    denom = (T + 1.0 - 2.0 / N) * (alpha - mu_sq / N)
+    shrinkage = 1.0 if denom <= 0 else min(((1.0 - 2.0 / N) * alpha + mu_sq) / denom, 1.0)
     shrunk_cov = (1.0 - shrinkage) * emp_cov
     diag_idx = np.diag_indices(N)
     shrunk_cov[diag_idx] += shrinkage * mu
@@ -525,6 +536,11 @@ def factor_covariance_poet(
         if k <= 0:
             raise ValueError("`k` must be positive when provided as an integer.")
         k_sel = int(k)
+    if k_sel >= N:
+        logger.warning(
+            "Requested k=%d clipped to N=%d; POET provides no sparsity benefit at full rank.",
+            k_sel, N,
+        )
     k_sel = max(1, min(k_sel, N))
     loadings = eigvecs[:, :k_sel]
     sqrt_eigs = np.sqrt(np.maximum(eigvals[:k_sel], 0.0))
@@ -678,6 +694,12 @@ def robust_covariance_tyler(
         covariance = updated
         if delta / denom <= tol:
             break
+    else:
+        logger.warning(
+            "Tyler M-estimator did not converge in %d iterations "
+            "(relative delta=%.2e, tol=%.2e).",
+            max_iter, delta / denom, tol,
+        )
 
     covariance *= trace_target / N
     covariance = 0.5 * (covariance + covariance.T)
@@ -1155,7 +1177,8 @@ def estimate_moments(
 
     if p is None:
         mu_sample = X.mean(axis=0)
-        S_sample = np.cov(X, rowvar=False, ddof=1)
+        # Use ddof=0 (MLE) for consistency with estimate_sample_moments
+        S_sample = np.cov(X, rowvar=False, ddof=0)
         mu_sample_wrapped = _wrap(mu_sample, labels, True)
         S_sample_wrapped = _wrap(S_sample, labels, False)
     else:
@@ -1180,7 +1203,10 @@ def estimate_moments(
     elif mean_choice in {"median_of_means", "mom"}:
         mu = robust_mean_median_of_means(R, **mean_kwargs)
     else:
-        raise ValueError(f"Unsupported mean estimator '{mean_estimator}'.")
+        raise ValueError(
+            f"Unsupported mean estimator '{mean_estimator}'. "
+            f"Valid options: {sorted({'sample', 'jorion', 'james_stein', 'huber', 'median_of_means'})}."
+        )
 
     cov_choice = cov_estimator.lower()
     if cov_choice in {"sample", "empirical"}:
@@ -1202,6 +1228,9 @@ def estimate_moments(
         cov_kwargs["return_precision"] = False
         Sigma = sparse_precision_glasso(R, **cov_kwargs)
     else:
-        raise ValueError(f"Unsupported covariance estimator '{cov_estimator}'.")
+        raise ValueError(
+            f"Unsupported covariance estimator '{cov_estimator}'. "
+            f"Valid options: {sorted({'sample', 'ledoit_wolf', 'oas', 'nls', 'poet', 'tyler', 'glasso'})}."
+        )
 
     return mu, Sigma

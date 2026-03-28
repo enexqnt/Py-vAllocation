@@ -58,6 +58,19 @@ class TestSmoke(unittest.TestCase):
         ens_concentrated = probabilities.compute_effective_number_scenarios(p_concentrated)
         self.assertAlmostEqual(ens_concentrated, 1.0)
 
+        # Verify entropy-based ENS differs from HHI for non-uniform probabilities
+        p_skewed = np.array([0.7, 0.1, 0.1, 0.1])
+        ens_entropy = probabilities.compute_effective_number_scenarios(p_skewed)
+        ens_hhi = probabilities.compute_effective_number_scenarios_hhi(p_skewed)
+        # Entropy-based: exp(-sum(p*ln(p)))
+        expected_entropy = np.exp(-np.sum(p_skewed * np.log(p_skewed)))
+        self.assertAlmostEqual(ens_entropy, expected_entropy, places=10)
+        # HHI: 1/sum(p^2)
+        expected_hhi = 1.0 / np.sum(p_skewed**2)
+        self.assertAlmostEqual(ens_hhi, expected_hhi, places=10)
+        # They should be different
+        self.assertNotAlmostEqual(ens_entropy, ens_hhi, places=1)
+
     def test_estimate_sample_moments(self):
         p_uniform = probabilities.generate_uniform_probabilities(self.T)
         mu, cov = moments.estimate_sample_moments(self.returns_df, p_uniform)

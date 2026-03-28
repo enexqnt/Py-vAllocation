@@ -40,7 +40,7 @@ def main() -> None:
     weights = build_tangency_portfolio(returns)
 
     print("=== Nominal performance ===")
-    report = performance_report(weights, returns.values, alpha=0.95)
+    report = performance_report(weights, returns.values, confidence=0.95)
     print(report.round(4))
 
     print("\n=== Half-life stress (60 weeks) ===")

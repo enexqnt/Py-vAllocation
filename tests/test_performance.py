@@ -44,7 +44,7 @@ def test_performance_report_matches_manual_metrics():
     pnl = scenarios @ weights
     probs = np.array([0.2, 0.3, 0.5])
 
-    report = performance_report(weights, scenarios, probabilities=probs, alpha=0.95)
+    report = performance_report(weights, scenarios, probabilities=probs, confidence=0.95)
 
     mean_expected = float(np.dot(probs, pnl))
     demeaned = pnl - mean_expected
@@ -58,8 +58,10 @@ def test_performance_report_matches_manual_metrics():
     assert np.isclose(report["stdev"], stdev_expected)
     assert np.isclose(report["VaR95"], var_expected)
     assert np.isclose(report["CVaR95"], cvar_expected)
+    mask = probs > 0
+    expected_ens = np.exp(-np.sum(probs[mask] * np.log(probs[mask])))
     assert np.isclose(
         report["ENS"],
-        1.0 / np.sum(probs**2),
+        expected_ens,
     )
 

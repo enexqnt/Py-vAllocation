@@ -83,6 +83,12 @@ from cvxopt import matrix, solvers
 
 from .bayesian import _cholesky_pd
 
+
+class InfeasibleOptimizationError(RuntimeError):
+    """Raised when a portfolio optimisation problem has no feasible solution."""
+    pass
+
+
 # ------------------------------------------------------------------ #
 # Solver settings & logging
 # ------------------------------------------------------------------ #
@@ -178,7 +184,7 @@ class RelaxedRiskParityResult:
     weights :
         Optimal long-only allocations :math:`x^{\\star}` (shape ``(n,)``).
     marginal_risk :
-        Marginal risk vector :math:`\\zeta^{\\star} = \\Sigma x^{\\star}`.
+        Gradient vector :math:`\\zeta^{\\star} = \\Sigma x^{\\star}` (variance-scale, not Roncalli's volatility-normalised marginal risk).
     psi :
         Optimal average-risk proxy :math:`\\psi^{\\star}`.
     gamma :

@@ -14,6 +14,7 @@ from .discrete_allocation import DiscreteAllocationResult, discretize_weights
 from .ensembles import average_exposures
 from .moments import estimate_sample_moments
 from .optimization import (
+    InfeasibleOptimizationError,
     MeanCVaR,
     MeanVariance,
     RelaxedRiskParity,
@@ -154,10 +155,15 @@ class AssetsDistribution:
             if not np.isfinite(prob_sum) or prob_sum <= 0:
                 raise ValueError("Scenario probabilities must sum to a positive finite value.")
             if not np.isclose(prob_sum, 1.0):
-                logger.debug("Normalising scenario probabilities (sum=%s).", prob_sum)
+                logger.warning("Normalising scenario probabilities (sum=%s).", prob_sum)
             probs = probs / prob_sum
 
             if mu is None or cov is None:
+                logger.warning(
+                    "Estimating %s from scenarios (no explicit values provided).",
+                    "mu and cov" if mu is None and cov is None
+                    else ("mu" if mu is None else "cov"),
+                )
                 estimated_mu, estimated_cov = estimate_sample_moments(scenarios, probs)
                 if mu is None:
                     mu = np.asarray(estimated_mu, dtype=float)
@@ -215,11 +221,8 @@ class PortfolioFrontier:
         metadata (Optional[List[Dict[str, Any]]]): Optional per-portfolio diagnostics. Each entry
             maps diagnostic field names (e.g., ``target_multiplier``) to their values.
         alternate_risks (Dict[str, np.ndarray]): Optional auxiliary risk grids keyed by label
-            (e.g., ``\"Volatility\"`` when the frontier is built on CVaR). Shapes must
+            (e.g., ``"Volatility"`` when the frontier is built on CVaR). Shapes must
             match ``(M,)``. Access via ``risk_label=...`` parameters.
-        alternate_risks (Dict[str, np.ndarray]): Optional auxiliary risk measures
-            keyed by label (e.g., ``\"Volatility\"`` when the frontier was
-            built on CVaR). Each array must have shape ``(M,)``.
     """
     weights: npt.NDArray[np.floating]
     returns: npt.NDArray[np.floating]
@@ -399,9 +402,9 @@ class PortfolioFrontier:
                 -   **risk** (float): The risk of the tangency portfolio.
         """
         if np.all(np.isclose(self.risks, 0)):
-            logger.warning("All portfolios on the frontier have zero risk. Sharpe ratio is undefined.")
-            nan_weights = np.full(self.weights.shape[0], np.nan)
-            return self._to_pandas(nan_weights, "Undefined"), np.nan, np.nan
+            raise InfeasibleOptimizationError(
+                "All portfolios on the frontier have zero risk. Sharpe ratio is undefined."
+            )
 
         with np.errstate(divide='ignore', invalid='ignore'):
             sharpe_ratios = (self.returns - risk_free_rate) / self.risks
@@ -437,8 +440,9 @@ class PortfolioFrontier:
         risks = self._risk_vector(risk_label)
         feasible_indices = np.where(risks <= max_risk)[0]
         if feasible_indices.size == 0:
-            nan_weights = np.full(self.weights.shape[0], np.nan)
-            return self._to_pandas(nan_weights, "Infeasible"), np.nan, np.nan
+            raise InfeasibleOptimizationError(
+                "No valid portfolio found matching the criteria."
+            )
         
         optimal_idx = feasible_indices[np.argmax(self.returns[feasible_indices])]
         w, ret, risk_value = (
@@ -490,8 +494,9 @@ class PortfolioFrontier:
         """
         feasible_indices = np.where(self.returns >= min_return)[0]
         if feasible_indices.size == 0:
-            nan_weights = np.full(self.weights.shape[0], np.nan)
-            return self._to_pandas(nan_weights, "Infeasible"), np.nan, np.nan
+            raise InfeasibleOptimizationError(
+                "No valid portfolio found matching the criteria."
+            )
 
         risks = self._risk_vector(risk_label)
         optimal_idx = feasible_indices[np.argmin(risks[feasible_indices])]
@@ -744,11 +749,13 @@ class PortfolioWrapper:
 
                 * ``"long_only"`` (bool): If True, enforces non-negative weights (w >= 0).
                 * ``"total_weight"`` (float): Sets the sum of weights (sum(w) = value).
-                * ``"box_constraints"`` (Tuple[np.ndarray, np.ndarray]): A tuple (lower_bounds, upper_bounds)
-                    for individual asset weights.
-                * ``"group_constraints"`` (List[Dict[str, Any]]): A list of dictionaries,
-                    each defining a group constraint (e.g., min/max weight for a subset of assets).
-                * Any other parameters supported by `pyvallocation.utils.constraints.build_G_h_A_b`.
+                * ``"bounds"`` (Tuple or Sequence of Tuples): Per-asset ``(lower, upper)``
+                    weight bounds.
+                * ``"relative_bounds"`` (Sequence of Tuples): Triples ``(i, j, bound)``
+                    implementing ``w_i - w_j <= bound``.
+                * ``"additional_G_h"`` (Sequence of Tuples): Extra inequality rows ``(row, rhs)``.
+                * ``"additional_A_b"`` (Sequence of Tuples): Extra equality rows ``(row, rhs)``.
+                * See :func:`pyvallocation.utils.constraints.build_G_h_A_b` for full details.
 
         Raises:
             RuntimeError: If constraint building fails due to invalid parameters or other issues.
@@ -873,18 +880,21 @@ class PortfolioWrapper:
         Defaults to long-only, fully-invested constraints.
         """
         if self.G is None and self.A is None:
-            logger.debug("Injecting default long-only, fully-invested constraints.")
+            logger.warning("Injecting default long-only, fully-invested constraints.")
             self.set_constraints({"long_only": True, "total_weight": 1.0})
 
     def _scenario_inputs(
         self,
         *,
         n_simulations: int = 5000,
+        seed: Optional[int] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return scenarios, probabilities, and an expected-return vector.
 
         Args:
             n_simulations: Number of simulated scenarios when sampling is required.
+            seed: Random seed for reproducibility. If ``None``, a warning is
+                logged because the simulation will not be reproducible.
 
         Returns:
             Tuple[np.ndarray, np.ndarray, np.ndarray]: Scenarios, probabilities, and mean vector.
@@ -898,11 +908,13 @@ class PortfolioWrapper:
                 raise ValueError("Cannot simulate scenarios without both `mu` and `cov`.")
             if n_simulations <= 0:
                 raise ValueError("`n_simulations` must be a positive integer.")
+            if seed is None:
+                logger.warning("Scenario simulation is non-reproducible (no seed). Pass seed= for reproducibility.")
             logger.info(
                 "No scenarios supplied. Simulating %d multivariate normal scenarios for CVaR calculations.",
                 n_simulations,
             )
-            rng = np.random.default_rng()
+            rng = np.random.default_rng(seed)
             scenarios = rng.multivariate_normal(self.dist.mu, self.dist.cov, n_simulations)
             probs = generate_uniform_probabilities(n_simulations)
         else:
@@ -1005,6 +1017,8 @@ class PortfolioWrapper:
         """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Mean-Variance optimization requires `mu` and `cov`.")
+        if self.proportional_costs is not None:
+            logger.warning("proportional_costs are ignored by mean-variance; use market_impact_costs instead.")
         self._ensure_default_constraints()
         
         if self.initial_weights is not None and self.market_impact_costs is not None:
@@ -1028,8 +1042,8 @@ class PortfolioWrapper:
                     if self.dist.probabilities is not None
                     else generate_uniform_probabilities(scen.shape[0])
                 )
-                alt_cvar = np.abs(np.asarray(portfolio_cvar(weights, scen, probs, 0.05))).reshape(-1)
-                alternate_risks[f"CVaR (alpha={0.05:.2f})"] = alt_cvar
+                alt_cvar = np.abs(np.asarray(portfolio_cvar(weights, scen, probs, confidence=0.95))).reshape(-1)
+                alternate_risks["CVaR (95%)"] = alt_cvar
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Skipping CVaR overlay for MV frontier: %s", exc)
         
@@ -1058,7 +1072,7 @@ class PortfolioWrapper:
         )
         return self.cvar_frontier(num_portfolios=num_portfolios, alpha=alpha)
 
-    def cvar_frontier(self, num_portfolios: int = 10, alpha: float = 0.05) -> PortfolioFrontier:
+    def cvar_frontier(self, num_portfolios: int = 10, alpha: float = 0.05, seed: Optional[int] = None) -> PortfolioFrontier:
         r"""Compute the Mean-CVaR efficient frontier.
 
         Implementation Notes:
@@ -1069,6 +1083,7 @@ class PortfolioWrapper:
         Args:
             num_portfolios: The number of portfolios to compute. Defaults to 10.
             alpha: The tail probability for CVaR. Defaults to 0.05.
+            seed: Random seed for scenario simulation reproducibility.
 
         Returns:
             A :class:`PortfolioFrontier` object whose columns are sorted by
@@ -1077,7 +1092,9 @@ class PortfolioWrapper:
             auxiliary ``alternate_risks['Volatility']`` is attached for
             variance-based selection.
         """
-        scenarios, probs, mu_for_frontier = self._scenario_inputs()
+        scenarios, probs, mu_for_frontier = self._scenario_inputs(seed=seed)
+        if self.market_impact_costs is not None:
+            logger.warning("market_impact_costs are ignored by mean-CVaR; use proportional_costs instead.")
         self._ensure_default_constraints()
         if self.initial_weights is not None and self.proportional_costs is not None:
             logger.info("Computing Mean-CVaR frontier with proportional transaction costs.")
@@ -1089,7 +1106,7 @@ class PortfolioWrapper:
         )
         weights = optimizer.efficient_frontier(num_portfolios)
         returns = mu_for_frontier @ weights
-        risks = np.abs(np.asarray(portfolio_cvar(weights, scenarios, probs, alpha))).reshape(-1)
+        risks = np.abs(np.asarray(portfolio_cvar(weights, scenarios, probs, confidence=1.0 - alpha))).reshape(-1)
         raw_risks = risks.copy()
         alternate_risks: Dict[str, np.ndarray] = {}
         try:
@@ -1163,14 +1180,11 @@ class PortfolioWrapper:
               and the posterior scale matrix (for uncertainty), respectively.
 
         Args:
-            num_portfolios: The number of portfolios to compute. Defaults to 20.
+            num_portfolios: The number of portfolios to compute. Defaults to 10.
             max_lambda: The maximum value for the risk aversion parameter lambda,
               which controls the trade-off between nominal return and robustness.
             lambdas: Optional explicit sequence of \lambda values. When provided, it takes
               precedence over ``num_portfolios``/``max_lambda``.
-            return_cov: Optional return covariance used to compute a volatility overlay.
-              When provided, the resulting frontier exposes ``alternate_risks["Volatility"]``
-              for risk targeting and plotting.
             return_cov: Optional covariance matrix of returns used to compute a
               volatility overlay for risk targeting/plotting. This is distinct from
               ``dist.cov``, which is treated as the uncertainty covariance.
@@ -1252,8 +1266,8 @@ class PortfolioWrapper:
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Unable to compute volatility overlay for robust frontier: %s", exc)
             try:
-                alt_cvar = np.abs(np.asarray(portfolio_cvar(weights_arr, scen, probs, 0.05))).reshape(-1)
-                alternate_risks[f"CVaR (alpha={0.05:.2f})"] = alt_cvar
+                alt_cvar = np.abs(np.asarray(portfolio_cvar(weights_arr, scen, probs, confidence=0.95))).reshape(-1)
+                alternate_risks["CVaR (95%)"] = alt_cvar
             except Exception as exc:  # pragma: no cover
                 logger.debug("Unable to compute CVaR overlay for robust frontier: %s", exc)
 
@@ -1354,9 +1368,9 @@ class PortfolioWrapper:
             # The efficient_portfolio method in the optimizer is an alias for _solve_target
             weights = optimizer.efficient_portfolio(return_target)
         except RuntimeError as e:
-            logger.error(f"Optimization failed for target return {return_target}. This may be because the target is infeasible (e.g., too high). Details: {e}", exc_info=True)
-            nan_weights = np.full(self.dist.N, np.nan)
-            return pd.Series(nan_weights, index=self.dist.asset_names, name="Infeasible"), np.nan, np.nan
+            raise InfeasibleOptimizationError(
+                f"Optimization infeasible for target return {return_target}: {e}"
+            ) from e
 
         actual_return = self.dist.mu @ weights
         risk = np.sqrt(weights.T @ self.dist.cov @ weights)
@@ -1386,7 +1400,7 @@ class PortfolioWrapper:
         )
         return self.min_cvar_at_return(return_target, alpha=alpha)
 
-    def min_cvar_at_return(self, return_target: float, alpha: float = 0.05) -> Tuple[pd.Series, float, float]:
+    def min_cvar_at_return(self, return_target: float, alpha: float = 0.05, seed: Optional[int] = None) -> Tuple[pd.Series, float, float]:
         """
         Solve for the minimum CVaR portfolio that achieves a given expected return.
 
@@ -1396,17 +1410,18 @@ class PortfolioWrapper:
         Args:
             return_target (float): The desired minimum expected return.
             alpha (float): The tail probability for CVaR. Defaults to 0.05.
+            seed: Random seed for scenario simulation reproducibility.
 
         Returns:
             Tuple[pd.Series, float, float]: A tuple containing:
                 - **weights** (:class:`pandas.Series`): The weights of the optimal portfolio.
                 - **return** (float): The expected return of the portfolio.
                 - **risk** (float): The CVaR of the portfolio.
-                
+
         Raises:
             ValueError: If scenarios cannot be used or generated.
         """
-        scenarios, probs, mu_for_cvar = self._scenario_inputs()
+        scenarios, probs, mu_for_cvar = self._scenario_inputs(seed=seed)
         
         self._ensure_default_constraints()
         
@@ -1422,12 +1437,12 @@ class PortfolioWrapper:
             # The efficient_portfolio method in the optimizer is an alias for _solve_target
             weights = optimizer.efficient_portfolio(return_target)
         except RuntimeError as e:
-            logger.error(f"Optimization failed for target return {return_target}. This may be because the target is infeasible. Details: {e}", exc_info=True)
-            nan_weights = np.full(self.dist.N, np.nan)
-            return pd.Series(nan_weights, index=self.dist.asset_names, name="Infeasible"), np.nan, np.nan
+            raise InfeasibleOptimizationError(
+                f"Optimization infeasible for target return {return_target}: {e}"
+            ) from e
 
         actual_return = mu_for_cvar @ weights
-        risk = float(np.abs(portfolio_cvar(weights, scenarios, probs, alpha)))
+        risk = float(np.abs(portfolio_cvar(weights, scenarios, probs, confidence=1.0 - alpha)))
         
         w_series = pd.Series(weights, index=self.dist.asset_names, name=f"CVaR Portfolio (Return >= {return_target:.4f})")
 
@@ -1443,7 +1458,28 @@ class PortfolioWrapper:
         lambda_reg: float = 0.2,
         target_multiplier: Optional[float] = 1.2,
         return_target: Optional[float] = None,
-    ) -> Tuple[pd.Series, Dict[str, Any]]:
+    ) -> Tuple[pd.Series, float, float]:
+        """Compute a relaxed risk parity allocation.
+
+        Returns the same triple as other portfolio methods: (weights, return, risk).
+        For full diagnostics, use :meth:`relaxed_risk_parity_portfolio_with_diagnostics`.
+
+        Args/Returns: See :meth:`relaxed_risk_parity_portfolio_with_diagnostics`.
+        """
+        w, ret, risk, _ = self.relaxed_risk_parity_portfolio_with_diagnostics(
+            lambda_reg=lambda_reg,
+            target_multiplier=target_multiplier,
+            return_target=return_target,
+        )
+        return w, ret, risk
+
+    def relaxed_risk_parity_portfolio_with_diagnostics(
+        self,
+        *,
+        lambda_reg: float = 0.2,
+        target_multiplier: Optional[float] = 1.2,
+        return_target: Optional[float] = None,
+    ) -> Tuple[pd.Series, float, float, Dict[str, Any]]:
         r"""
         Compute a single relaxed risk parity allocation and expose solver diagnostics.
 
@@ -1465,10 +1501,10 @@ class PortfolioWrapper:
                 region if necessary. Defaults to ``None``.
 
         Returns:
-            Tuple[pd.Series, Dict[str, Any]]: Optimal portfolio weights (Series) and
-            rich diagnostics including achieved return, variance, marginal risks,
-            risk contributions, target information, and any solver warning emitted
-            during target clipping.
+            Tuple[pd.Series, float, float, Dict[str, Any]]: Optimal portfolio weights
+            (Series), achieved return, portfolio volatility, and rich diagnostics
+            including variance, marginal risks, risk contributions, target information,
+            and any solver warning emitted during target clipping.
         """
         if self.dist.mu is None or self.dist.cov is None:
             raise ValueError("Relaxed risk parity requires `mu` and `cov`.")
@@ -1527,6 +1563,8 @@ class PortfolioWrapper:
         achieved_return = float(self.dist.mu @ weights)
         portfolio_variance = float(weights @ (self.dist.cov @ weights))
         risk_contributions = weights * np.asarray(solution.marginal_risk, dtype=float)
+        sigma_w = np.sqrt(portfolio_variance)
+        risk_contributions_pct = (risk_contributions / sigma_w) / sigma_w * 100 if sigma_w > 0 else risk_contributions * 0
 
         target_clipped = (
             solution.target_return is not None
@@ -1548,6 +1586,7 @@ class PortfolioWrapper:
             "rho": solution.rho,
             "objective": solution.objective,
             "risk_contributions": risk_contributions,
+            "risk_contributions_pct": risk_contributions_pct,
             "marginal_risk": np.asarray(solution.marginal_risk, dtype=float),
             "risk_parity_weights": rp_weights,
             "solver_warning": solver_warning,
@@ -1560,7 +1599,7 @@ class PortfolioWrapper:
             portfolio_variance,
         )
 
-        return w_series, diagnostics
+        return w_series, achieved_return, np.sqrt(portfolio_variance), diagnostics
 
     def relaxed_risk_parity_frontier(
         self,

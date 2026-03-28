@@ -1,5 +1,6 @@
 # entropy_pooling and _dual_objective functions are adapted from fortitudo-tech https://github.com/fortitudo-tech/fortitudo.tech
 
+import warnings
 from collections.abc import Sequence
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -1180,6 +1181,9 @@ class BlackLittermanProcessor:
         if isinstance(omega, str) and omega.lower() == "idzorek":
             if self._conf is None:
                 raise ValueError("Idzorek requires view_confidences.")
+            # Simplified closed-form Idzorek approximation (Walters 2014).
+            # For the full iterative 7-step procedure, see Idzorek (2005) Eqs. 12-18.
+            # Note: multi-asset basket views in P are not yet supported (pair-wise only).
             diag = []
             base_sigma = tau_sigma if self._idzorek_use_tau else self._sigma
             for i, conf in enumerate(self._conf):

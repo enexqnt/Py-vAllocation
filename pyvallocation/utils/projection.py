@@ -1,6 +1,10 @@
+import logging
+from typing import Union
+
 import numpy as np
 import pandas as pd
-from typing import Union
+
+logger = logging.getLogger(__name__)
 
 
 def project_mean_covariance(
@@ -36,16 +40,25 @@ def convert_scenarios_compound_to_simple(scenarios: np.ndarray) -> np.ndarray:
 
 
 def convert_scenarios_simple_to_compound(scenarios: np.ndarray) -> np.ndarray:
-    """Convert simple returns to compound returns.
+    """Convert simple returns to compound (log) returns.
 
     Args:
-        scenarios: Simple return scenarios.
+        scenarios: Simple return scenarios. All values must be strictly
+            greater than -1 (i.e., ``1 + r > 0``).
 
     Returns:
         np.ndarray: Log/compound return scenarios.
-    """
 
-    return np.log(1 + scenarios)
+    Raises:
+        ValueError: If any scenario has a return <= -1.
+    """
+    arr = np.asarray(scenarios, dtype=float)
+    if np.any(arr <= -1.0):
+        raise ValueError(
+            "Simple returns must be > -1 for log transformation "
+            f"(min value: {float(np.min(arr)):.6f})."
+        )
+    return np.log(1 + arr)
 
 
 def _to_numpy(x):
@@ -133,6 +146,11 @@ def simple2log(mu_r, cov_r):
     cov_r_np = _to_numpy(cov_r)
 
     m = mu_r_np + 1.0
+    if np.any(m <= 0):
+        raise ValueError(
+            "Mean simple returns must be > -1 for log transformation "
+            f"(min 1+mu: {float(np.min(m)):.6f})."
+        )
     var_g = np.log1p(np.diag(cov_r_np) / m**2)
     mu_g_np = np.log(m) - 0.5 * var_g
 
@@ -176,6 +194,10 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
         >>> project_scenarios(df, investment_horizon=2, n_simulations=3).shape
         (3, 2)
     """
+
+    if not isinstance(investment_horizon, (int, np.integer)):
+        investment_horizon = int(investment_horizon)
+        logger.warning("investment_horizon cast to int: %d", investment_horizon)
 
     if investment_horizon <= 0:
         raise ValueError("`investment_horizon` must be a positive integer.")

@@ -18,8 +18,12 @@ def main() -> None:
         ]
     )
 
-    wrapper = build_wrapper_from_moments(mu, cov)
-    wrapper.dist.asset_names = ["Tech", "Health", "Value", "Bonds"]
+    from pyvallocation import AssetsDistribution, PortfolioWrapper
+
+    asset_names = ["Tech", "Health", "Value", "Bonds"]
+    dist = AssetsDistribution(mu=mu, cov=cov, asset_names=asset_names)
+    wrapper = PortfolioWrapper(dist)
+    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
 
     frontier = wrapper.relaxed_risk_parity_frontier(
         num_portfolios=4,

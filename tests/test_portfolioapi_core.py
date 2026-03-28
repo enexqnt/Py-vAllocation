@@ -91,7 +91,7 @@ def test_robust_lambda_frontier_sorted_by_risk():
 
 def test_relaxed_risk_parity_portfolio_returns_diagnostics():
     wrapper = _build_long_only_wrapper()
-    weights, diagnostics = wrapper.relaxed_risk_parity_portfolio()
+    weights, ret, risk, diagnostics = wrapper.relaxed_risk_parity_portfolio_with_diagnostics()
 
     assert isinstance(weights, pd.Series)
     assert pytest.approx(weights.sum(), abs=1e-8) == 1.0
@@ -99,11 +99,22 @@ def test_relaxed_risk_parity_portfolio_returns_diagnostics():
     assert diagnostics["risk_contributions"].shape == (2,)
     assert diagnostics["target_return"] is not None
     assert diagnostics["achieved_return"] >= diagnostics["target_return"] - 1e-6
+    assert isinstance(ret, float)
+    assert isinstance(risk, float)
+    assert risk >= 0.0
+
+
+def test_relaxed_risk_parity_portfolio_triple_return():
+    wrapper = _build_long_only_wrapper()
+    weights, ret, risk = wrapper.relaxed_risk_parity_portfolio()
+    assert isinstance(weights, pd.Series)
+    assert isinstance(ret, float)
+    assert isinstance(risk, float)
 
 
 def test_relaxed_risk_parity_portfolio_allows_risk_parity_fallback():
     wrapper = _build_long_only_wrapper()
-    weights, diagnostics = wrapper.relaxed_risk_parity_portfolio(lambda_reg=0.0, target_multiplier=None)
+    weights, ret, risk, diagnostics = wrapper.relaxed_risk_parity_portfolio_with_diagnostics(lambda_reg=0.0, target_multiplier=None)
 
     assert diagnostics["target_return"] is None
     contributions = diagnostics["risk_contributions"]

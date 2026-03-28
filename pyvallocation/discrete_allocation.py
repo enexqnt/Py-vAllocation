@@ -1,11 +1,14 @@
 """Discrete allocation helpers transforming continuous weights into share counts."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 try:
     from scipy import optimize
@@ -142,8 +145,8 @@ class DiscreteAllocationResult:
     Key fields:
         shares: Non-zero share counts by asset.
         leftover_cash: Uninvested cash amount.
-        achieved_weights: Realized weights from share allocation.
-        tracking_error: RMSE between target and achieved weights.
+        achieved_weights: Realized weights from share allocation (relative to total portfolio value).
+        tracking_error: L1 weight deviation (sum of absolute differences between target and achieved weights).
     """
 
     shares: Dict[str, int]
@@ -180,13 +183,10 @@ def _build_result(inputs: DiscreteAllocationInput, raw_shares: pd.Series) -> Dis
     elif leftover < 0:
         raise RuntimeError("Allocation exceeded available funds by more than tolerance.")
 
-    if portfolio_value > 0:
-        achieved = values / portfolio_value
-    else:
-        achieved = pd.Series(0.0, index=inputs.weights.index)
+    achieved = values / inputs.total_value
 
     achieved = achieved.reindex(inputs.weights.index, fill_value=0.0)
-    tracking_error = float(np.sqrt(np.mean((inputs.weights - achieved) ** 2)))
+    tracking_error = float(np.sum(np.abs(inputs.weights - achieved)))
 
     non_zero = shares[shares != 0]
     shares_dict = {asset: int(count) for asset, count in non_zero.items()}
@@ -242,6 +242,13 @@ def allocate_greedy(
         shares[asset] += lots * lot_size
         available_cash -= cost
 
+    if shares.sum() == 0 and available_cash > 0:
+        logger.warning(
+            "Floor pass allocated zero shares. Minimum lot cost (%.2f) may exceed "
+            "per-asset target values.",
+            float(cost_per_lot.min()),
+        )
+
     min_cost = float(cost_per_lot.min())
     if max_iterations is None:
         max_iterations = max(len(weights) * 100, 1)
@@ -253,13 +260,8 @@ def allocate_greedy(
 
     while available_cash + tolerance >= min_cost and iteration < max_iterations:
         values = shares * prices
-        invested = float(values.sum())
-        if invested <= 0:
-            current_weights = pd.Series(0.0, index=weights.index)
-            deficits = weights.copy()
-        else:
-            current_weights = values / invested
-            deficits = weights - current_weights
+        current_weights = values / inputs.total_value
+        deficits = weights - current_weights
 
         deficits[deficits < 0] = 0.0
         if unaffordable:

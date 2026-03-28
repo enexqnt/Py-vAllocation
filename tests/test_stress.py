@@ -61,6 +61,7 @@ def test_entropy_pooling_stress_custom_probabilities():
     R, w = _sample_data()
     posterior = np.array([0.05, 0.1, 0.15, 0.3, 0.4])
     df = entropy_pooling_stress(w, R, posterior_probabilities=posterior)
-    np.testing.assert_allclose(df["ENS_stress"], 1 / np.sum(posterior**2))
+    expected_ens = np.exp(-np.sum(posterior * np.log(posterior)))
+    np.testing.assert_allclose(df["ENS_stress"], expected_ens)
     assert df["KL_q_p"].iloc[0] > 0.0
 

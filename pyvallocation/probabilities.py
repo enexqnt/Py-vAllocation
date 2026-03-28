@@ -164,13 +164,50 @@ def generate_gaussian_kernel_probabilities(
 
 
 def compute_effective_number_scenarios(probabilities: np.ndarray) -> float:
-    """Return the effective number of scenarios given a probability vector.
+    """Return the effective number of scenarios (entropy-based).
+
+    Computes the exponential of the Shannon entropy of the probability vector,
+    following Meucci (2012) and Vorobets (2025, Eq. 5.1.3):
+
+    .. math::
+
+       \\hat{S} = \\exp\\left\\{-\\sum_{s=1}^{S} q_s \\ln q_s\\right\\}.
+
+    Equals *S* when probabilities are uniform and approaches 1 when all mass
+    is concentrated on a single scenario.  Uses the convention
+    :math:`0 \\ln 0 = 0`.
 
     Args:
         probabilities: Probability vector.
 
     Returns:
-        float: Effective number of scenarios ``1 / sum(p^2)``.
-    """
+        float: Effective number of scenarios.
 
-    return 1 / np.sum(probabilities**2)
+    See Also:
+        :func:`compute_effective_number_scenarios_hhi` for the Herfindahl-based
+        alternative :math:`1 / \\sum p_s^2`.
+
+    References:
+        :cite:p:`meucci2012ens`
+    """
+    p = np.asarray(probabilities, dtype=float).ravel()
+    # Use convention 0*log(0) = 0 via masking
+    mask = p > 0
+    entropy = -np.sum(p[mask] * np.log(p[mask]))
+    return float(np.exp(entropy))
+
+
+def compute_effective_number_scenarios_hhi(probabilities: np.ndarray) -> float:
+    """Return the Herfindahl-based effective number of scenarios.
+
+    Computes :math:`1 / \\sum p_s^2` (inverse Herfindahl-Hirschman index).
+    This is an alternative concentration measure that differs numerically
+    from the entropy-based definition in :func:`compute_effective_number_scenarios`.
+
+    Args:
+        probabilities: Probability vector.
+
+    Returns:
+        float: Herfindahl-based effective number of scenarios.
+    """
+    return float(1.0 / np.sum(np.asarray(probabilities, dtype=float).ravel() ** 2))

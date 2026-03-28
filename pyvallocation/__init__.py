@@ -25,10 +25,12 @@ __all__ = [
     "silverman_bandwidth",
     "generate_gaussian_kernel_probabilities",
     "compute_effective_number_scenarios",
+    "compute_effective_number_scenarios_hhi",
     "entropy_pooling",
     "FlexibleViewsProcessor",
     "BlackLittermanProcessor",
     # "Optimization",
+    "InfeasibleOptimizationError",
     "MeanVariance",
     "MeanCVaR",
     "RelaxedRiskParity",
@@ -83,9 +85,10 @@ from .moments import (
     sparse_precision_glasso,
 )
 from .bayesian import RobustBayesPosterior
-from .optimization import MeanCVaR, MeanVariance, RelaxedRiskParity, RobustOptimizer
+from .optimization import InfeasibleOptimizationError, MeanCVaR, MeanVariance, RelaxedRiskParity, RobustOptimizer
 from .probabilities import (
     compute_effective_number_scenarios,
+    compute_effective_number_scenarios_hhi,
     generate_exp_decay_probabilities,
     generate_gaussian_kernel_probabilities,
     generate_uniform_probabilities,

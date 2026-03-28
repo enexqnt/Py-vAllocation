@@ -35,7 +35,7 @@ def test_mean_variance_frontier_exposes_cvar_overlay_when_scenarios_present():
     port = _basic_wrapper_with_scenarios()
     frontier = port.variance_frontier(num_portfolios=6)
 
-    cvar_label = "CVaR (alpha=0.05)"
+    cvar_label = "CVaR (95%)"
     assert cvar_label in frontier.alternate_risks
     cvar_vals = frontier.alternate_risks[cvar_label]
     assert cvar_vals.shape == frontier.risks.shape

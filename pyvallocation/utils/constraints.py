@@ -90,6 +90,8 @@ def build_G_h_A_b(
 
     if total_weight is not None:
         _check_number(total_weight, "total_weight")
+        if total_weight == 0:
+            logger.warning("total_weight=0 creates a degenerate all-zero portfolio.")
 
     G_rows: List[np.ndarray] = []
     h_vals: List[Number] = []
@@ -201,15 +203,15 @@ def build_G_h_A_b(
             if not (0 <= i < n_assets and 0 <= j < n_assets):
                 logger.error("relative_bounds indices %d,%d out of range", i, j)
                 raise IndexError(f"relative_bounds indices {i},{j} out of range")
-            _check_number(k, "k in relative bound")
-            if k < 0:
-                logger.error("k in relative bound must be non-negative, got %s", k)
-                raise ValueError("k in relative bound must be non-negative")
+            if i == j:
+                logger.error("relative_bounds: i and j must differ, got i=j=%d", i)
+                raise ValueError(f"relative_bounds: i and j must differ (got i=j={i})")
+            _check_number(k, "bound in relative_bounds")
             row = np.zeros(n_assets)
             row[i] = 1
-            row[j] = -k
+            row[j] = -1
             G_rows.append(row)
-            h_vals.append(0.0)
+            h_vals.append(float(k))
 
     if additional_G_h is not None:
         for row, rhs in additional_G_h:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 import numpy as np
@@ -322,6 +322,11 @@ class NIWPosterior:
             ValueError: If sample statistics have inconsistent shapes or ``n_obs``
                 is not a positive integer.
         """
+        if self._posterior is not None:
+            raise RuntimeError(
+                "Posterior already computed. Create a new NIWPosterior for a fresh update."
+            )
+
         # Convert pandas inputs if present
         if isinstance(sample_mu, pd.Series):
             smu = sample_mu.values.astype(float)
@@ -437,7 +442,11 @@ class NIWPosterior:
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
         if self._posterior.nu1 <= 2:
-            raise ValueError(r"Posterior degrees of freedom \nu_1 must be greater than 2 to compute S_\mu.")
+            raise ValueError(
+                f"Posterior nu1={self._posterior.nu1} must be > 2 for S_mu "
+                f"(nu1 = nu0 + T = {self._posterior.nu1}). "
+                "Increase prior nu0 or provide more observations."
+            )
         factor = self._posterior.nu1 / (self._posterior.T1 * (self._posterior.nu1 - 2.0))
         # Ensure underlying data is array for multiplication
         sigma1_array = self._posterior.sigma1
@@ -604,6 +613,8 @@ class RobustBayesPosterior:
     mu: Union[npt.NDArray[np.floating], pd.Series]
     sigma: Union[npt.NDArray[np.floating], pd.DataFrame]
     s_mu: Union[npt.NDArray[np.floating], pd.DataFrame]
+    _nu1: Optional[float] = field(default=None, repr=False)
+    _n_assets: Optional[int] = field(default=None, repr=False)
 
     @classmethod
     def from_niw(
@@ -642,6 +653,8 @@ class RobustBayesPosterior:
             mu=niw.get_mu_ce(),
             sigma=niw.get_sigma_ce(),
             s_mu=niw.get_S_mu(),
+            _nu1=float(niw._posterior.nu1),
+            _n_assets=int(niw.N),
         )
 
     def mean_uncertainty_cov_log(
@@ -661,10 +674,32 @@ class RobustBayesPosterior:
         scaled = s_mu_np * (annualization_factor ** 2)
         return _wrap_matrix_like(scaled, self.s_mu)
 
+    @property
+    def sigma1(self) -> Union[npt.NDArray[np.floating], pd.DataFrame]:
+        """Return the raw posterior scale matrix Sigma_1 (Meucci Eq. 7.31).
+
+        ``sigma`` stores the classical-equivalent Sigma_ce = nu1/(nu1+N+1) * Sigma_1.
+        This property recovers Sigma_1 = (nu1+N+1)/nu1 * Sigma_ce for use
+        in the robust Bayesian formulation (Meucci Eq. 9.155).
+
+        Returns:
+            Posterior scale matrix Sigma_1.
+
+        Raises:
+            ValueError: If the posterior was not constructed via ``from_niw``.
+        """
+        if self._nu1 is None or self._n_assets is None:
+            raise ValueError("sigma1 requires NIW posterior params; use RobustBayesPosterior.from_niw().")
+        factor = (self._nu1 + self._n_assets + 1.0) / self._nu1
+        sigma_ce_np = _to_numpy(self.sigma)
+        sigma1_np = factor * sigma_ce_np
+        return _wrap_matrix_like(sigma1_np, self.sigma)
+
     def mean_uncertainty_cov_simple(
         self,
         *,
         annualization_factor: float = 1.0,
+        exact: bool = False,
     ) -> Union[npt.NDArray[np.floating], pd.DataFrame]:
         """Return mean-uncertainty covariance in simple-return units.
 
@@ -676,11 +711,23 @@ class RobustBayesPosterior:
            r \\approx \\exp(\\mu_g) - 1, \\quad
            S_{\\mu,r} \\approx J\\,S_{\\mu,g}\\,J^{\\top}, \\quad
            J = \\operatorname{diag}(\\exp(\\mu_g)).
+
+        Args:
+            annualization_factor: Horizon scaling factor (e.g. 12 for monthly -> annual).
+            exact: When ``True``, use the exact delta-method Jacobian
+                ``J = diag(exp(mu_g + 0.5 * diag(Sigma_g)))`` which accounts for
+                the Jensen inequality correction. Default ``False`` uses the
+                simpler ``J = diag(exp(mu_g))``.
         """
         mu_np = _to_numpy(self.mu)
         s_mu_np = _to_numpy(self.s_mu)
+        sigma_np = _to_numpy(self.sigma)
         mu_log = mu_np * annualization_factor
         s_mu_log = s_mu_np * (annualization_factor ** 2)
-        scale = np.exp(mu_log)
+        if exact:
+            sigma_log = sigma_np * (annualization_factor ** 2)
+            scale = np.exp(mu_log + 0.5 * np.diag(sigma_log))
+        else:
+            scale = np.exp(mu_log)
         cov_simple = (scale[:, None] * s_mu_log) * scale[None, :]
         return _wrap_matrix_like(cov_simple, self.s_mu)

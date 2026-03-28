@@ -99,7 +99,7 @@ def performance_report(
     scenarios: ArrayLike,
     *,
     probabilities: Optional[ProbabilityLike] = None,
-    alpha: float = 0.95,
+    confidence: float = 0.95,
     demean: bool = False,
 ) -> pd.Series:
     """
@@ -111,7 +111,8 @@ def performance_report(
         scenarios: Scenario matrix ``R`` with shape ``(T, N)`` (NumPy or pandas).
         probabilities: Optional scenario weights ``p``. When omitted a uniform
             distribution is used.
-        alpha: Confidence level used for VaR/CVaR (default ``0.95``).
+        confidence: Confidence level for VaR/CVaR (e.g. 0.95 means 5% tail).
+            Defaults to 0.95.
         demean: If ``True`` the scenario P&L is demeaned before VaR/CVaR are computed.
 
     Returns:
@@ -138,8 +139,9 @@ def performance_report(
         ENS       2.0000
         dtype: float64
     """
-    if not 0.0 < alpha < 1.0:
-        raise ValueError("`alpha` must be in (0, 1).")
+    conf = confidence
+    if not 0.0 < conf < 1.0:
+        raise ValueError("`confidence` must be in (0, 1).")
 
     if isinstance(scenarios, pd.DataFrame):
         R_arr = scenarios.to_numpy(dtype=float)
@@ -155,12 +157,20 @@ def performance_report(
     if isinstance(weights, pd.Series):
         if asset_names is not None and list(weights.index) != asset_names:
             weights = weights.reindex(asset_names)
+        if weights.isna().any():
+            raise ValueError(
+                "Weight labels do not match scenario asset names after reindexing."
+            )
         w = weights.to_numpy(dtype=float).reshape(-1, 1)
     elif isinstance(weights, pd.DataFrame):
         if weights.shape[1] != 1:
             raise ValueError("`weights` must represent a single allocation.")
         if asset_names is not None and list(weights.index) != asset_names:
             weights = weights.reindex(asset_names)
+        if weights.isna().any().any():
+            raise ValueError(
+                "Weight labels do not match scenario asset names after reindexing."
+            )
         w = weights.to_numpy(dtype=float)
     else:
         arr_w = np.asarray(weights, dtype=float)
@@ -181,16 +191,16 @@ def performance_report(
     mean = float(np.dot(w_vec, mu_vec.reshape(-1)))
     stdev = float(np.sqrt(w_vec @ cov_mat @ w_vec))
     w_matrix = w_vec.reshape(-1, 1)
-    var = float(portfolio_var(w_matrix, R_arr, p, alpha=alpha, demean=demean))
-    cvar = float(portfolio_cvar(w_matrix, R_arr, p, alpha=alpha, demean=demean))
+    var = float(portfolio_var(w_matrix, R_arr, p, confidence=conf, demean=demean))
+    cvar = float(portfolio_cvar(w_matrix, R_arr, p, confidence=conf, demean=demean))
     ens = compute_effective_number_scenarios(p)
 
     return pd.Series(
         {
             "mean": mean,
             "stdev": stdev,
-            f"VaR{int(round(alpha * 100))}": var,
-            f"CVaR{int(round(alpha * 100))}": cvar,
+            f"VaR{int(round(conf * 100))}": var,
+            f"CVaR{int(round(conf * 100))}": cvar,
             "ENS": ens,
         }
     )
