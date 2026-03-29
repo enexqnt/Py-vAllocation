@@ -96,11 +96,15 @@ def portfolio_cvar(
     var_indices = (np.cumsum(sorted_p, axis=0) >= (1.0 - conf)).argmax(axis=0)
     var = np.take_along_axis(sorted_pnl, var_indices[np.newaxis, :], axis=0)
 
-    tail_mask = pf_pnl <= var
-    denominator = np.sum(p * tail_mask, axis=0)
-    numerator = np.sum(p * pf_pnl * tail_mask, axis=0)
-    cvar = np.full_like(denominator, np.nan)
-    np.divide(numerator, denominator, out=cvar, where=denominator != 0)
+    # Exact Rockafellar-Uryasev discrete CVaR with quantile boundary correction.
+    # Handles probability mass concentrated at VaR by splitting strict-tail
+    # from the at-boundary contribution.
+    tail_alpha = 1.0 - conf
+    strict_mask = pf_pnl < var            # strictly below VaR
+    strict_prob = np.sum(p * strict_mask, axis=0)
+    strict_sum = np.sum(p * pf_pnl * strict_mask, axis=0)
+    # Exact: CVaR = -(1/alpha) * [E[PnL * 1{PnL<VaR}] + VaR * (alpha - P(PnL<VaR))]
+    cvar = (strict_sum + var.reshape(-1) * (tail_alpha - strict_prob)) / tail_alpha
 
     risk = -cvar.reshape(-1)
     return risk.item() if risk.size == 1 else risk

@@ -414,9 +414,11 @@ class MeanVariance(_FrontierMixin, _BaseOptimization):
                 np.append(np.asarray(h).ravel(), -return_target)
             )
         sol = solvers.qp(self._P, self._q, G, h, self._A, self._b)
-        if sol["status"] != "optimal":  # mild ridge regularisation fallback
-            ridge = 1e-8
-            P_reg = matrix(np.asarray(self._P)) + matrix(np.eye(self._I) * ridge)
+        if sol["status"] != "optimal":  # scale-adaptive ridge regularisation fallback
+            P_np = np.asarray(self._P)
+            ridge = max(1e-8, 1e-8 * np.trace(P_np) / max(self._I, 1))
+            P_reg = matrix(P_np + np.eye(self._I) * ridge)
+            _LOGGER.debug("QP retry with ridge=%.2e", ridge)
             sol = solvers.qp(P_reg, self._q, G, h, self._A, self._b)
         self._assert_optimal(sol, "QP")
         return np.asarray(sol["x"]).ravel()

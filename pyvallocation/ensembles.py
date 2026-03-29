@@ -173,8 +173,8 @@ def exposure_stacking(
     """
     exposures, asset_names, _ = ensure_samples_matrix(sample_portfolios)
     _, num_samples = exposures.shape
-    if L <= 0:
-        raise ValueError("`L` must be a positive integer.")
+    if L < 2:
+        raise ValueError("`L` must be >= 2 for cross-validation (L=1 degenerates to simple averaging).")
     if L > num_samples:
         raise ValueError("`L` cannot exceed the number of sample portfolios.")
 
