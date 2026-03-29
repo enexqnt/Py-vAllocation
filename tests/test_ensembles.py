@@ -3,14 +3,13 @@ import unittest
 import numpy as np
 import pandas as pd
 from pyvallocation import (
-    average_exposures,
     average_frontiers,
     exposure_stack_frontiers,
-    exposure_stacking,
     assemble_portfolio_ensemble,
     make_portfolio_spec,
     stack_portfolios,
 )
+from pyvallocation.ensembles import average_exposures, exposure_stacking
 from pyvallocation.portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper
 
 
@@ -85,16 +84,6 @@ class TestEnsembleUtilities(unittest.TestCase):
         combined = np.column_stack([weights1[:, 0], weights2[:, 0]]).mean(axis=1)
         self.assertTrue(np.allclose(result.values, combined))
         self.assertEqual(list(result.index), ["A", "B"])
-
-    def test_portfolio_frontier_average(self):
-        weights = np.array([[0.6, 0.5, 0.4, 0.3], [0.4, 0.5, 0.6, 0.7]])
-        returns = np.array([0.1, 0.12, 0.13, 0.14])
-        risks = np.array([0.15, 0.18, 0.2, 0.25])
-        frontier = PortfolioFrontier(weights=weights, returns=returns, risks=risks, risk_measure="Vol", asset_names=["A", "B"])
-
-        avg_series = frontier.ensemble_average(columns=[0, 3])
-        expected_avg = average_exposures(weights[:, [0, 3]])
-        self.assertTrue(np.allclose(avg_series.values, expected_avg))
 
     def test_exposure_stack_frontiers(self):
         weights1 = np.array([[0.6, 0.5], [0.4, 0.5]])

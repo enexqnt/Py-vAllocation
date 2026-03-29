@@ -58,7 +58,7 @@ End-to-end ensemble construction typically follows these steps:
 1. **Generate candidate portfolios.** Optimise frontiers or run bespoke models
    to obtain a set of column-organised sample weights.
 2. **Select representatives.** Use methods such as
-   :meth:`pyvallocation.portfolioapi.PortfolioFrontier.portfolio_at_risk_target`
+   :meth:`pyvallocation.portfolioapi.PortfolioFrontier.at_risk`
    or :func:`pyvallocation.ensembles.make_portfolio_spec` to standardise inputs.
 3. **Blend exposures.** Apply :func:`average_exposures` for a linear average or
    :func:`exposure_stacking` to damp idiosyncratic bets while keeping the common
@@ -76,7 +76,7 @@ handy shortcuts:
 
    wrapper = PortfolioWrapper(AssetsDistribution(scenarios=returns))
    frontier = wrapper.variance_frontier(num_portfolios=21)
-   another = wrapper.mean_cvar_frontier(num_portfolios=21)
+   another = wrapper.cvar_frontier(num_portfolios=21)
 
    avg_portfolio = average_frontiers([frontier, another])
    stacked_portfolio = exposure_stack_frontiers([frontier, another], L=3)

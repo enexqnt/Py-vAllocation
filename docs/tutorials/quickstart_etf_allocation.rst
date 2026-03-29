@@ -117,7 +117,7 @@ The quickstart showcases four complementary approaches:
    mu_bl, sigma_bl = bl_posterior.get_posterior()
 
    flex_processor = FlexibleViewsProcessor(
-       prior_returns=weekly_returns,
+       prior_risk_drivers=weekly_returns,
        mean_views={"SPY": (">=", 0.0001), ("SPY", "TLT"): (">=", 0.0)},
        corr_views={("SPY", "TLT"): ("<=", -0.05)},
        sequential=True,
@@ -344,7 +344,7 @@ shows the change in optimal weights relative to the baseline stack:
 .. code-block:: python
 
    stress_processor = FlexibleViewsProcessor(
-       prior_returns=weekly_returns,
+       prior_risk_drivers=weekly_returns,
        mean_views={"SPY": ("<=", -0.0002)},
        corr_views={("SPY", "TLT"): (">=", -0.02)},
        sequential=True,
@@ -358,10 +358,9 @@ shows the change in optimal weights relative to the baseline stack:
    ))
    from pyvallocation.portfolioapi import PortfolioWrapper
 
-   stress_wrapper = PortfolioWrapper(AssetsDistribution(mu=mu_stress_1y, cov=sigma_stress_1y))
-   stress_wrapper.set_constraints(long_only)
+   stress_wrapper = PortfolioWrapper.from_moments(mu_stress_1y, sigma_stress_1y)
    stress_frontier = stress_wrapper.variance_frontier(num_portfolios=21)
-   stress_weights, *_ = stress_frontier.portfolio_at_risk_target(max_risk=0.12)
+   stress_weights, *_ = stress_frontier.at_risk(max_risk=0.12)
    drift = (stress_weights - ensemble.stacked).dropna()
    print(drift.reindex(drift.abs().sort_values(ascending=False).head().index))
 

@@ -59,23 +59,22 @@ Or use the API directly:
 
 ```python
 import pandas as pd
-from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+from pyvallocation.portfolioapi import PortfolioWrapper
 
 scenarios = pd.DataFrame({
     "Stock_A": [0.01, -0.02, 0.015],
     "Stock_B": [0.007, 0.003, 0.004]
 })
 
-port = PortfolioWrapper(AssetsDistribution(scenarios=scenarios))
-port.set_constraints({"long_only": True, "total_weight": 1.0})
+port = PortfolioWrapper.from_scenarios(scenarios)
 
 frontier = port.variance_frontier(num_portfolios=20)
-weights, ret, risk = frontier.get_tangency_portfolio(risk_free_rate=0.01)
+weights, ret, risk = frontier.tangency(risk_free_rate=0.01)
 print(weights)
 
 # Pick a portfolio by CVaR even on a variance frontier (scenarios required)
-weights_cvar, ret_cvar, cvar_val = frontier.portfolio_at_risk_target(
-    max_risk=0.02, risk_label="CVaR (alpha=0.05)"
+weights_cvar, ret_cvar, cvar_val = frontier.at_risk(
+    max_risk=0.02, risk_label="CVaR (95%)"
 )
 print(weights_cvar)
 ```

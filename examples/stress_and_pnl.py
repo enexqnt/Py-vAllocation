@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from data_utils import load_prices
-from example_utils import build_wrapper_from_moments
+from pyvallocation import PortfolioWrapper
 from pyvallocation.stress import exp_decay_stress, kernel_focus_stress, linear_map, stress_test
 from pyvallocation.utils.performance import performance_report
 
@@ -29,9 +29,9 @@ def load_weekly_returns() -> pd.DataFrame:
 
 
 def build_tangency_portfolio(returns: pd.DataFrame) -> pd.Series:
-    wrapper = build_wrapper_from_moments(returns.mean(), returns.cov())
+    wrapper = PortfolioWrapper.from_moments(returns.mean(), returns.cov())
     frontier = wrapper.variance_frontier(num_portfolios=25)
-    weights, *_ = frontier.get_tangency_portfolio(risk_free_rate=0.01)
+    weights, *_ = frontier.tangency(risk_free_rate=0.01)
     return weights
 
 

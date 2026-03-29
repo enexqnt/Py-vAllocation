@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+from pyvallocation.portfolioapi import PortfolioWrapper
 from data_utils import load_returns
 from example_utils import ensure_psd, print_portfolio
 
@@ -17,10 +17,7 @@ def main() -> None:
     # Robust optimiser expects uncertainty covariance of the mean.
     # Under i.i.d. sampling, Var(mean) ≈ Sigma / T.
     uncertainty_cov = cov / max(len(returns), 1)
-    distribution = AssetsDistribution(mu=mu, cov=uncertainty_cov)
-
-    wrapper = PortfolioWrapper(distribution)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+    wrapper = PortfolioWrapper.from_moments(mu, uncertainty_cov)
 
     lambdas = np.geomspace(0.05, 1.5, 6)
     frontier = wrapper.robust_lambda_frontier(
@@ -28,8 +25,8 @@ def main() -> None:
         lambdas=lambdas,
         return_cov=cov,
     )
-    min_risk_weights, min_risk_return, min_risk_radius = frontier.get_min_risk_portfolio()
-    max_return_weights, max_return_return, max_return_radius = frontier.get_max_return_portfolio()
+    min_risk_weights, min_risk_return, min_risk_radius = frontier.min_risk()
+    max_return_weights, max_return_return, max_return_radius = frontier.max_return()
 
     print("=== Robust frontier summary ===")
     print("Lambda grid:", np.round(lambdas, 3))

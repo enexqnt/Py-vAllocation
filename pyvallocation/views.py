@@ -292,19 +292,17 @@ class FlexibleViewsProcessor:
         prior_risk_drivers (np.ndarray or pd.DataFrame, optional): Prior
             *risk-driver* scenarios (returns, factors, spreads, vol surfaces, etc.).
             If supplied, ``prior_mean`` and ``prior_cov`` are ignored.
-        prior_returns (np.ndarray or pd.DataFrame, optional): Deprecated alias for
-            ``prior_risk_drivers`` (backward compatibility only).
         prior_probabilities (array-like, optional): Prior scenario weights. If omitted,
             uniform probabilities ``1/S`` are used.
         prior_mean (array-like, optional): Mean vector used to synthesize scenarios
-            when ``prior_returns`` is not supplied.
+            when ``prior_risk_drivers`` is not supplied.
         prior_cov (array-like, optional): Covariance matrix used to synthesize scenarios
-            when ``prior_returns`` is not supplied.
+            when ``prior_risk_drivers`` is not supplied.
         distribution_fn (callable, optional): Custom scenario generator with signature
             ``f(mu, cov, n, rng) -> np.ndarray`` returning shape ``(n, N)``. Defaults to
             ``numpy.random.Generator.multivariate_normal``.
         num_scenarios (int, optional): Number of synthetic scenarios when
-            ``prior_returns`` is missing. Defaults to ``10000``.
+            ``prior_risk_drivers`` is missing. Defaults to ``10000``.
         random_state (int or np.random.Generator, optional): Seed or RNG used by
             ``distribution_fn`` / ``multivariate_normal``.
         mean_views, vol_views, corr_views, skew_views (mapping or array-like, optional):
@@ -332,7 +330,7 @@ class FlexibleViewsProcessor:
         >>>
         >>> # Initialize with historical returns and views
         >>> fp_hist = FlexibleViewsProcessor(
-        ...     prior_returns=return_df,
+        ...     prior_risk_drivers=return_df,
         ...     mean_views={"Asset A": 0.05, "Asset B": (">=", 0.01)},
         ...     vol_views={"Asset A": ("<=", 0.15)},
         ...     sequential=True,  # Apply views sequentially
@@ -361,10 +359,9 @@ class FlexibleViewsProcessor:
     """
     def __init__(
         self,
-        prior_returns: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
+        prior_risk_drivers: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
         prior_probabilities: Optional[Union[np.ndarray, "pd.Series"]] = None,
         *,
-        prior_risk_drivers: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
         prior_mean: Optional[Union[np.ndarray, "pd.Series"]] = None,
         prior_cov: Optional[Union[np.ndarray, "pd.DataFrame"]] = None,
         distribution_fn: Optional[
@@ -376,14 +373,14 @@ class FlexibleViewsProcessor:
         vol_views: Any = None,
         corr_views: Any = None,
         skew_views: Any = None,
+        cvar_views: Any = None,
         sequential: bool = False,
     ):
         """Initialise the flexible-views processor.
 
         Args:
-            prior_returns: Scenario matrix of returns (deprecated alias for ``prior_risk_drivers``).
+            prior_risk_drivers: Scenario matrix of risk drivers (returns, factors, etc.).
             prior_probabilities: Optional scenario probabilities aligned to scenarios.
-            prior_risk_drivers: Scenario matrix of risk drivers (preferred).
             prior_mean: Prior mean vector used when scenarios are not provided.
             prior_cov: Prior covariance matrix used when scenarios are not provided.
             distribution_fn: Optional callable to draw scenarios from moments.
@@ -395,13 +392,7 @@ class FlexibleViewsProcessor:
             skew_views: Views on skewness.
             sequential: Whether to apply views sequentially (default ``False``).
         """
-        if prior_returns is not None and prior_risk_drivers is not None:
-            raise ValueError(
-                "Provide either `prior_risk_drivers` or `prior_returns`, not both. "
-                "`prior_returns` is kept for backward compatibility."
-            )
-
-        risk_drivers = prior_risk_drivers if prior_risk_drivers is not None else prior_returns
+        risk_drivers = prior_risk_drivers
 
         if risk_drivers is not None:
             if isinstance(risk_drivers, pd.DataFrame):
@@ -432,7 +423,7 @@ class FlexibleViewsProcessor:
         else:
             if prior_mean is None or prior_cov is None:
                 raise ValueError(
-                    "Provide either `prior_returns` or both `prior_mean` and `prior_cov`."
+                    "Provide either `prior_risk_drivers` or both `prior_mean` and `prior_cov`."
                 )
 
             if not isinstance(num_scenarios, int) or num_scenarios <= 0:
@@ -489,7 +480,7 @@ class FlexibleViewsProcessor:
             self.p0 = np.full((S, 1), 1.0 / S)
 
         self.mu0 = (self.R.T @ self.p0).flatten()
-        self.cov0 = np.cov(self.R.T, aweights=self.p0.flatten())
+        self.cov0 = np.cov(self.R.T, aweights=self.p0.flatten(), bias=True)
         self.var0 = np.diag(self.cov0)
 
         def _vec_to_dict(vec_like, name):
@@ -515,6 +506,10 @@ class FlexibleViewsProcessor:
         self.vol_views = _vec_to_dict(vol_views, "vol_views")
         self.skew_views = _vec_to_dict(skew_views, "skew_views")
         self.corr_views = corr_views or {}
+        if cvar_views is not None:
+            self.cvar_views = _vec_to_dict(cvar_views, "cvar_views") if not isinstance(cvar_views, dict) else cvar_views
+        else:
+            self.cvar_views = None
         self.sequential = bool(sequential)
 
         self.posterior_probabilities = self._compute_posterior_probabilities()
@@ -695,6 +690,8 @@ class FlexibleViewsProcessor:
         elif moment_type == "vol":
             for asset, vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
+                if tgt <= 0:
+                    raise ValueError(f"Volatility target for '{asset}' must be positive (got {tgt}).")
                 idx = self._asset_idx(asset)
                 raw = tgt**2 + mu[idx] ** 2
                 add(op, R[:, idx] ** 2, raw)
@@ -703,6 +700,8 @@ class FlexibleViewsProcessor:
             for asset, vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
                 idx = self._asset_idx(asset)
+                if var[idx] < 1e-12:
+                    raise ValueError(f"Variance of '{asset}' is near-zero ({var[idx]:.2e}); skewness view is numerically unstable.")
                 s = np.sqrt(var[idx])
                 raw = tgt * s**3 + 3 * mu[idx] * var[idx] + mu[idx] ** 3
                 add(op, R[:, idx] ** 3, raw)
@@ -710,6 +709,8 @@ class FlexibleViewsProcessor:
         elif moment_type == "corr":
             for (a1, a2), vw in view_dict.items():
                 op, tgt = self._parse_view(vw)
+                if not -1.0 <= tgt <= 1.0:
+                    raise ValueError(f"Correlation target for ('{a1}', '{a2}') must be in [-1, 1] (got {tgt}).")
                 i = self._asset_idx(a1)
                 j = self._asset_idx(a2)
                 s_i, s_j = np.sqrt(var[i]), np.sqrt(var[j])
@@ -720,6 +721,126 @@ class FlexibleViewsProcessor:
             raise ValueError(f"Unknown moment type '{moment_type}'.")
 
         return A_eq, b_eq, G_ineq, h_ineq
+
+    def _solve_cvar_view(
+        self,
+        asset_idx: int,
+        gamma: float,
+        cvar_target: float,
+        prior_probs: np.ndarray,
+        other_A: List[np.ndarray] = None,
+        other_b: List[float] = None,
+        other_G: List[np.ndarray] = None,
+        other_h: List[float] = None,
+        max_newton_iter: int = 20,
+    ) -> np.ndarray:
+        """Solve CVaR view via Meucci (2011) recursive EP (Eqs 9-15).
+
+        For a view E[X | X <= VaR_gamma] = cvar_target, we search over
+        possible VaR thresholds (index s) using Newton-Raphson on the
+        relative entropy profile.
+
+        Args:
+            asset_idx: Index of the asset for the CVaR view.
+            gamma: Tail probability (e.g. 0.05 for 95% CVaR).
+            cvar_target: Target CVaR value (negative = loss).
+            prior_probs: Current prior probability vector (S, 1).
+            other_A, other_b: Additional equality constraints.
+            other_G, other_h: Additional inequality constraints.
+            max_newton_iter: Maximum Newton-Raphson iterations.
+
+        Returns:
+            np.ndarray: Posterior probability vector (S, 1).
+        """
+        R = self.R
+        x = R[:, asset_idx]  # marginal scenarios for this asset
+        S = len(x)
+        p = prior_probs.flatten()
+
+        # Sort scenarios ascending
+        order = np.argsort(x)
+        x_sorted = x[order]
+        p_sorted = p[order]
+
+        # Initialize s_bar from prior: find s where cumulative prob first reaches gamma
+        cum_p = np.cumsum(p_sorted)
+        s_bar = int(np.searchsorted(cum_p, gamma, side='left'))
+        s_bar = max(1, min(s_bar, S - 1))
+
+        def _solve_for_s(s):
+            """Solve EP with VaR at index s (Eq 9-10)."""
+            # Constraints: sum(q_1..q_s * x_1..x_s) = gamma * cvar_target
+            #              sum(q_1..q_s) = gamma
+            A_cvar = []
+            b_cvar = []
+
+            # Constraint 1: sum of tail probs = gamma
+            row_sum = np.zeros(S)
+            row_sum[:s + 1] = 1.0
+            A_cvar.append(row_sum[np.argsort(order)])  # unsort back to original order
+            b_cvar.append(gamma)
+
+            # Constraint 2: weighted tail mean = gamma * cvar_target
+            row_mean = np.zeros(S)
+            row_mean[:s + 1] = x_sorted[:s + 1]
+            A_cvar.append(row_mean[np.argsort(order)])  # unsort
+            b_cvar.append(gamma * cvar_target)
+
+            # Combine with other constraints
+            all_A = list(other_A or []) + A_cvar
+            all_b = list(other_b or []) + b_cvar
+            all_G = list(other_G or [])
+            all_h = list(other_h or [])
+
+            try:
+                q = entropy_pooling(
+                    prior_probs.flatten(),
+                    A=np.vstack(all_A) if all_A else None,
+                    b=np.array(all_b) if all_b else None,
+                    G=np.vstack(all_G) if all_G else None,
+                    h=np.array(all_h) if all_h else None,
+                )
+                # Compute relative entropy
+                mask = q > 0
+                kl = float(np.sum(q[mask] * np.log(q[mask] / p[mask])))
+                return q, kl
+            except Exception:
+                return None, np.inf
+
+        # Newton-Raphson search (Eqs 12-15)
+        s = s_bar
+        best_q, best_kl = _solve_for_s(s)
+
+        for _ in range(max_newton_iter):
+            # Compute D(s) = E(s+1) - E(s) and D2(s) = D(s+1) - D(s)
+            s_lo = max(1, s - 1)
+            s_hi = min(S - 2, s + 1)
+
+            _, kl_lo = _solve_for_s(s_lo)
+            _, kl_mid = _solve_for_s(s)
+            _, kl_hi = _solve_for_s(s_hi)
+
+            d1 = kl_hi - kl_mid  # first difference
+            d2 = (kl_hi - 2 * kl_mid + kl_lo)  # second difference
+
+            if abs(d2) < 1e-14:
+                break
+
+            s_new = int(round(s - d1 / d2))
+            s_new = max(1, min(s_new, S - 2))
+
+            if s_new == s:
+                break
+
+            s = s_new
+            q_new, kl_new = _solve_for_s(s)
+            if q_new is not None and kl_new < best_kl:
+                best_q, best_kl = q_new, kl_new
+
+        if best_q is None:
+            raise RuntimeError(f"CVaR view solve failed for asset {asset_idx}.")
+
+        return best_q.reshape(-1, 1)
 
     def _compute_posterior_probabilities(self) -> np.ndarray:
         """
@@ -768,11 +889,11 @@ class FlexibleViewsProcessor:
 
             return entropy_pooling(prior_probs, A, b, G, h)
 
-        if not any((self.mean_views, self.vol_views, self.skew_views, self.corr_views)):
+        if not any((self.mean_views, self.vol_views, self.skew_views, self.corr_views, self.cvar_views)):
             return p0
 
         if self.sequential:
-            q_last = p0
+            q_result = p0
             view_blocks = [
                 ("mean", self.mean_views),
                 ("vol", self.vol_views),
@@ -783,13 +904,11 @@ class FlexibleViewsProcessor:
             for mtype, vd in view_blocks:
                 if vd:
                     Aeq, beq, G, h = self._build_constraints(vd, mtype, mu_cur, var_cur)
-                    q_last = do_ep(q_last, Aeq, beq, G, h)
+                    q_result = do_ep(q_result, Aeq, beq, G, h)
 
-                    mu_cur = (R.T @ q_last).flatten()
-                    var_cur = ((R - mu_cur) ** 2).T @ q_last
+                    mu_cur = (R.T @ q_result).flatten()
+                    var_cur = ((R - mu_cur) ** 2).T @ q_result
                     var_cur = var_cur.flatten()
-
-            return q_last
 
         else:
             A_all, b_all, G_all, h_all = [], [], [], []
@@ -807,7 +926,27 @@ class FlexibleViewsProcessor:
                     G_all.extend(G)
                     h_all.extend(h)
 
-            return do_ep(p0, A_all, b_all, G_all, h_all)
+            if A_all or G_all:
+                q_result = do_ep(p0, A_all, b_all, G_all, h_all)
+            else:
+                q_result = p0
+
+        # --- CVaR views (recursive EP, Meucci 2011 ssrn-1542083) ---
+        if self.cvar_views:
+            for asset_key, vw in self.cvar_views.items():
+                idx = self._asset_idx(asset_key)
+                if isinstance(vw, (list, tuple)) and len(vw) >= 2:
+                    cvar_target = float(vw[0])
+                    gamma = float(vw[1])
+                else:
+                    cvar_target = float(vw)
+                    gamma = 0.05
+                q_result = self._solve_cvar_view(
+                    asset_idx=idx, gamma=gamma, cvar_target=cvar_target,
+                    prior_probs=q_result,
+                )
+
+        return q_result
 
     def get_posterior_probabilities(self) -> np.ndarray:
         """Return the (S x 1) posterior probability vector.
@@ -1082,10 +1221,15 @@ class BlackLittermanProcessor:
         """
         if label in self._assets:
             return self._assets.index(label)
-        if isinstance(label, str) and label.isdigit():
-            idx = int(label)
-            if idx < len(self._assets):
-                return idx
+        if isinstance(label, (int, np.integer)):
+            if 0 <= label < len(self._assets):
+                return int(label)
+        elif isinstance(label, str) and label.isdigit():
+            k_int = int(label)
+            if k_int in self._assets:
+                return self._assets.index(k_int)
+            if 0 <= k_int < len(self._assets):
+                return k_int
         raise ValueError(f"Unknown asset label '{label}'.")
 
     # ---- views --------------------------------------------------------
@@ -1155,7 +1299,17 @@ class BlackLittermanProcessor:
         if isinstance(conf, (int, float)):
             return np.full(len(keys), float(conf))
         if isinstance(conf, dict):
-            return np.array([float(conf.get(k, 1.0)) for k in keys])
+            result = []
+            for k in keys:
+                if k not in conf:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "No confidence found for view key %r; defaulting to 1.0. "
+                        "Ensure confidence keys match view keys exactly (e.g. tuple for relative views).",
+                        k,
+                    )
+                result.append(float(conf.get(k, 1.0)))
+            return np.array(result)
         arr = np.asarray(conf, dtype=float).ravel()
         if arr.size != len(keys):
             raise ValueError("view_confidences length mismatch.")

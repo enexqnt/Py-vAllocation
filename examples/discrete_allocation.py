@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from data_utils import load_prices
-from example_utils import build_wrapper_from_scenarios
+from pyvallocation import PortfolioWrapper
 
 
 def load_data() -> tuple[pd.DataFrame, pd.Series]:
@@ -18,7 +18,7 @@ def load_data() -> tuple[pd.DataFrame, pd.Series]:
 def main() -> None:
     returns, latest_prices = load_data()
 
-    wrapper = build_wrapper_from_scenarios(returns)
+    wrapper = PortfolioWrapper.from_scenarios(returns)
 
     frontier = wrapper.variance_frontier(num_portfolios=8)
     # Select a middle point on the frontier for demonstration.

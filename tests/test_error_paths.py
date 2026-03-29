@@ -7,7 +7,6 @@ import pandas as pd
 import pytest
 
 from pyvallocation import (
-    AssetsDistribution,
     InfeasibleOptimizationError,
     PortfolioWrapper,
 )
@@ -30,9 +29,7 @@ T_SCENARIOS = 60
 
 def _make_mv_frontier(sample_mu, sample_cov, num_portfolios=10):
     """Helper to build a small mean-variance frontier."""
-    dist = AssetsDistribution(mu=sample_mu, cov=sample_cov)
-    wrapper = PortfolioWrapper(dist)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+    wrapper = PortfolioWrapper.from_moments(sample_mu, sample_cov)
     return wrapper.variance_frontier(num_portfolios=num_portfolios)
 
 
@@ -59,7 +56,7 @@ class TestInfeasibleOptimizationErrorMinVariance:
 
 
 class TestInfeasibleOnRiskTarget:
-    """frontier.portfolio_at_risk_target with impossibly small max_risk."""
+    """frontier.at_risk with impossibly small max_risk."""
 
     def test_infeasible_optimization_error_on_risk_target(
         self, sample_mu, sample_cov
@@ -67,11 +64,11 @@ class TestInfeasibleOnRiskTarget:
         frontier = _make_mv_frontier(sample_mu, sample_cov)
         impossible_max_risk = -999.0  # negative risk is impossible
         with pytest.raises(InfeasibleOptimizationError):
-            frontier.portfolio_at_risk_target(impossible_max_risk)
+            frontier.at_risk(impossible_max_risk)
 
 
 class TestInfeasibleOnReturnTarget:
-    """frontier.portfolio_at_return_target with impossibly high min_return."""
+    """frontier.at_return with impossibly high min_return."""
 
     def test_infeasible_optimization_error_on_return_target(
         self, sample_mu, sample_cov
@@ -79,7 +76,7 @@ class TestInfeasibleOnReturnTarget:
         frontier = _make_mv_frontier(sample_mu, sample_cov)
         impossible_min_return = float(np.max(frontier.returns)) + 100.0
         with pytest.raises(InfeasibleOptimizationError):
-            frontier.portfolio_at_return_target(impossible_min_return)
+            frontier.at_return(impossible_min_return)
 
 
 # ====================================================================

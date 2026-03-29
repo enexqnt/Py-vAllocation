@@ -636,7 +636,9 @@ class RobustOptimizer(_BaseOptimization):
 
     where  
       * :math:`\hat\mu` -- point estimate (MLE, posterior mean, ...)  
-      * :math:`S\succ0` -- scatter matrix (posterior covariance, shrinkage, ...)  
+      * :math:`S\succ0` -- mean-uncertainty scatter matrix :math:`S_\mu`.
+        For NIW posteriors this is :math:`S_\mu = \frac{1}{T_1}\frac{\nu_1}{\nu_1-2}\Sigma_1`
+        (Meucci Eq. 9.151), **not** the posterior covariance :math:`\Sigma_1`.  
       * :math:`q` -- radius, usually :math:`\sqrt{\chi^2_N(1-\alpha)}` for a
         :math:`100(1-\alpha)\%` credible set.
 
@@ -708,8 +710,10 @@ class RobustOptimizer(_BaseOptimization):
         """Create a robust mean optimizer instance.
 
         Args:
-            expected_return: Nominal mean vector.
-            uncertainty_cov: Mean-uncertainty covariance matrix.
+            expected_return: Nominal mean vector :math:`\\hat\\mu` (e.g. posterior mean :math:`\\mu_1`).
+            uncertainty_cov: Mean-uncertainty scatter matrix :math:`S_\\mu`.
+                For NIW posteriors use ``RobustBayesPosterior.s_mu``, **not** the
+                posterior covariance ``sigma`` or ``sigma1``.
             G, h: Inequality constraints ``G w <= h``.
             A, b: Equality constraints ``A w = b``.
             initial_weights: Optional initial portfolio for proportional costs.
@@ -899,6 +903,8 @@ class RelaxedRiskParity(_BaseOptimization):
         h: Optional[npt.ArrayLike] = None,
         A: Optional[npt.ArrayLike] = None,
         b: Optional[npt.ArrayLike] = None,
+        *,
+        risk_budgets: Optional[npt.ArrayLike] = None,
     ):
         """Create a relaxed risk parity optimizer instance.
 
@@ -907,6 +913,11 @@ class RelaxedRiskParity(_BaseOptimization):
             covariance: Covariance matrix.
             G, h: Inequality constraints ``G w <= h``.
             A, b: Equality constraints ``A w = b``.
+            risk_budgets: Optional target risk budgets :math:`b_i > 0` with
+                :math:`\\sum b_i = 1`.  When provided, the ARC floor becomes
+                :math:`x_i \\zeta_i \\ge b_i \\gamma^2` (risk budgeting).
+                When ``None`` (default), equal budgets :math:`b_i = 1/N` are
+                used, recovering the standard ERC portfolio.
         """
         cov = np.asarray(covariance, dtype=float)
         if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
@@ -922,6 +933,19 @@ class RelaxedRiskParity(_BaseOptimization):
         diag = np.clip(np.diag(cov), a_min=0.0, a_max=None)
         self._theta_sqrt = np.sqrt(diag, dtype=float)
         self._finalise_expected_row(self._I + 4)
+
+        n = self._I
+        if risk_budgets is not None:
+            rb = np.asarray(risk_budgets, dtype=float).ravel()
+            if rb.shape[0] != n:
+                raise ValueError(f"`risk_budgets` must have length {n}, got {rb.shape[0]}.")
+            if np.any(rb <= 0):
+                raise ValueError("`risk_budgets` must be strictly positive.")
+            if not np.isclose(rb.sum(), 1.0):
+                rb = rb / rb.sum()
+            self._risk_budgets = rb
+        else:
+            self._risk_budgets = np.full(n, 1.0 / n)
 
     # ------------------------------------------------------------------ #
     # core SOCP
@@ -1072,11 +1096,13 @@ class RelaxedRiskParity(_BaseOptimization):
             h_soc_all.append(np.zeros(n + 1, dtype=float))
             soc_dims.append(n + 1)
 
+        # ARC floor: x_i * zeta_i >= b_i * gamma^2
+        # Encoded via rotated SOC: sqrt(4*b_i*gamma^2 + (x_i - zeta_i)^2) <= x_i + zeta_i
         for i in range(n):
             block = np.zeros((3, n_vars), dtype=float)
             block[0, x_slice.start + i] = -1.0
             block[0, zeta_slice.start + i] = -1.0
-            block[1, gamma_idx] = -2.0
+            block[1, gamma_idx] = -2.0 * np.sqrt(self._risk_budgets[i])
             block[2, x_slice.start + i] = -1.0
             block[2, zeta_slice.start + i] = 1.0
             G_soc_all.append(block)

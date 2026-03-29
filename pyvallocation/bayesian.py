@@ -76,6 +76,12 @@ def _cholesky_pd(
     mat = np.asarray(mat, dtype=float)
     if mat.ndim != 2 or mat.shape[0] != mat.shape[1]:
         raise ValueError("Input to _cholesky_pd must be a square matrix.")
+    if not np.allclose(mat, mat.T, rtol=1e-8, atol=1e-10):
+        warnings.warn(
+            "Input matrix is not symmetric (max asymmetry: "
+            f"{float(np.max(np.abs(mat - mat.T))):.2e}). Symmetrising.",
+            UserWarning, stacklevel=3,
+        )
     mat = 0.5 * (mat + mat.T)
 
     identity = np.eye(mat.shape[0])
@@ -283,6 +289,23 @@ class NIWPosterior:
         self.nu0: int = int(nu0)
         self._posterior: Optional[NIWParams] = None
 
+    @property
+    def is_updated(self) -> bool:
+        """Whether the posterior has been computed via ``update()``."""
+        return self._posterior is not None
+
+    def _wrap_vector(self, arr: np.ndarray) -> Union[np.ndarray, pd.Series]:
+        """Wrap a 1D array as pandas Series if pandas mode is active."""
+        if self._pandas and self._asset_index is not None:
+            return pd.Series(arr, index=self._asset_index)
+        return arr
+
+    def _wrap_matrix(self, arr: np.ndarray) -> Union[np.ndarray, pd.DataFrame]:
+        """Wrap a 2D array as pandas DataFrame if pandas mode is active."""
+        if self._pandas and self._asset_index is not None:
+            return pd.DataFrame(arr, index=self._asset_index, columns=self._asset_index)
+        return arr
+
     def update(
         self,
         sample_mu: Union[npt.NDArray[np.floating], "pd.Series[np.floating]"],
@@ -369,29 +392,10 @@ class NIWPosterior:
         _ = _cholesky_pd(sigma1_array)  # Ensure \Sigma_1 is PD or near-PD
 
         # Wrap into pandas if appropriate
-        if self._pandas and self._asset_index is not None:
-            mu1: Union[npt.NDArray[np.floating], "pd.Series[np.floating]"] = pd.Series(
-                mu1_array, index=self._asset_index
-            )
-            sigma1: Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"] = pd.DataFrame(
-                sigma1_array, index=self._asset_index, columns=self._asset_index
-            )
-        else:
-            mu1 = mu1_array
-            sigma1 = sigma1_array
+        mu1 = self._wrap_vector(mu1_array)
+        sigma1 = self._wrap_matrix(sigma1_array)
 
         self._posterior = NIWParams(T1=T1, mu1=mu1, nu1=nu1, sigma1=sigma1)
-        return self._posterior
-
-    def get_posterior(self) -> Optional[NIWParams]:
-        r"""Retrieves the computed posterior parameters.
-
-        Returns:
-            A :class:`.NIWParams` instance containing the posterior parameters
-            (:math:`T_1`, :math:`\mu_1`, :math:`\nu_1`, :math:`\Sigma_1`), or ``None``
-            if :meth:`~.NIWPosterior.update` has not been called.
-
-        """
         return self._posterior
 
     def get_mu_ce(self) -> Union[npt.NDArray[np.floating], "pd.Series[np.floating]"]:
@@ -413,11 +417,7 @@ class NIWPosterior:
         """
         if self._posterior is None:
             raise RuntimeError("Posterior parameters not computed. Call `update()` first.")
-        mu1 = self._posterior.mu1
-        # If stored as numpy but we want to return pandas, wrap here:
-        if self._pandas and not isinstance(mu1, pd.Series) and self._asset_index is not None:
-            return pd.Series(mu1, index=self._asset_index)
-        return mu1
+        return self._wrap_vector(np.asarray(self._posterior.mu1, dtype=float).ravel())
 
     def get_S_mu(self) -> Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"]:
         r"""Computes the scatter matrix :math:`S_{\mu}` for the posterior of :math:`\mu`.
@@ -448,16 +448,9 @@ class NIWPosterior:
                 "Increase prior nu0 or provide more observations."
             )
         factor = self._posterior.nu1 / (self._posterior.T1 * (self._posterior.nu1 - 2.0))
-        # Ensure underlying data is array for multiplication
-        sigma1_array = self._posterior.sigma1
-        if isinstance(sigma1_array, pd.DataFrame):
-            sigma1_array = sigma1_array.values
-
+        sigma1_array = _to_numpy(self._posterior.sigma1)
         S_mu_array = factor * sigma1_array
-
-        if self._pandas and self._asset_index is not None:
-            return pd.DataFrame(S_mu_array, index=self._asset_index, columns=self._asset_index)
-        return S_mu_array
+        return self._wrap_matrix(S_mu_array)
 
 
     def get_sigma_ce(self) -> Union[npt.NDArray[np.floating], "pd.DataFrame[np.floating]"]:
@@ -485,15 +478,9 @@ class NIWPosterior:
         if denom == 0:
             raise ValueError(r"Denominator (\nu_1 + N + 1) for \Sigma_ce is zero.")
         factor = self._posterior.nu1 / denom
-
-        sigma1_array = self._posterior.sigma1
-        if isinstance(sigma1_array, pd.DataFrame):
-            sigma1_array = sigma1_array.values
-
+        sigma1_array = _to_numpy(self._posterior.sigma1)
         sigma_ce_array = factor * sigma1_array
-        if self._pandas and self._asset_index is not None:
-            return pd.DataFrame(sigma_ce_array, index=self._asset_index, columns=self._asset_index)
-        return sigma_ce_array
+        return self._wrap_matrix(sigma_ce_array)
 
     def cred_radius_mu(self, p_mu: float) -> float:
         r"""Computes the credibility factor :math:`\gamma_\mu` for the mean's uncertainty.
@@ -579,11 +566,11 @@ class NIWPosterior:
             raise ValueError(r"Denominator for sqrt term in C_\Sigma is zero.")
         term2_arg = numerator_term2 / denominator_term2
         if term2_arg < 0:
-            # This should not happen with valid inputs but good to check
             warnings.warn(
-                f"Argument for sqrt in C_\\Sigma calculation is negative ({term2_arg:f}); result may be NaN.",
-                RuntimeWarning
+                f"Numerical noise in C_Sigma: sqrt argument is {term2_arg:.2e}; clamping to zero.",
+                RuntimeWarning, stacklevel=2,
             )
+            term2_arg = 0.0
         term2 = np.sqrt(term2_arg)
         C_sigma = term1 + term2
         return C_sigma
@@ -615,6 +602,7 @@ class RobustBayesPosterior:
     s_mu: Union[npt.NDArray[np.floating], pd.DataFrame]
     _nu1: Optional[float] = field(default=None, repr=False)
     _n_assets: Optional[int] = field(default=None, repr=False)
+    _T1: Optional[float] = field(default=None, repr=False)
 
     @classmethod
     def from_niw(
@@ -655,6 +643,7 @@ class RobustBayesPosterior:
             s_mu=niw.get_S_mu(),
             _nu1=float(niw._posterior.nu1),
             _n_assets=int(niw.N),
+            _T1=float(niw._posterior.T1),
         )
 
     def mean_uncertainty_cov_log(
@@ -694,6 +683,50 @@ class RobustBayesPosterior:
         sigma_ce_np = _to_numpy(self.sigma)
         sigma1_np = factor * sigma_ce_np
         return _wrap_matrix_like(sigma1_np, self.sigma)
+
+    def cred_radius_mu(self, p_mu: float = 0.75) -> float:
+        """Credibility radius for the mean uncertainty ellipsoid (Meucci Eq. 9.156).
+
+        Args:
+            p_mu: Probability level for the chi-square quantile. Defaults to 0.75.
+
+        Returns:
+            float: Credibility factor gamma_mu.
+
+        Raises:
+            ValueError: If NIW parameters are not available.
+        """
+        if self._nu1 is None or self._n_assets is None or self._T1 is None:
+            raise ValueError("cred_radius_mu requires NIW params; use from_niw().")
+        q_mu_sq = chi2_quantile(p_mu, self._n_assets, sqrt=False)
+        return float(np.sqrt((q_mu_sq / self._T1) * (self._nu1 / (self._nu1 - 2.0))))
+
+    def cred_radius_sigma_factor(self, p_sigma: float = 0.75) -> float:
+        """Scaling factor for worst-case variance under Sigma uncertainty (Meucci Eq. 9.157).
+
+        Args:
+            p_sigma: Probability level for the chi-square quantile. Defaults to 0.75.
+
+        Returns:
+            float: Scaling factor C_sigma.
+
+        Raises:
+            ValueError: If NIW parameters are not available.
+        """
+        if self._nu1 is None or self._n_assets is None:
+            raise ValueError("cred_radius_sigma_factor requires NIW params; use from_niw().")
+        denom = self._nu1 + self._n_assets + 1.0
+        dof = self._n_assets * (self._n_assets + 1) // 2
+        q_sig_sq = chi2_quantile(p_sigma, dof, sqrt=False)
+        term1 = self._nu1 / denom
+        term2_arg = 2.0 * self._nu1**2 * q_sig_sq / denom**3
+        if term2_arg < 0:
+            warnings.warn(
+                f"Numerical noise in C_Sigma: clamping sqrt arg {term2_arg:.2e} to zero.",
+                RuntimeWarning, stacklevel=2,
+            )
+            term2_arg = 0.0
+        return float(term1 + np.sqrt(term2_arg))
 
     def mean_uncertainty_cov_simple(
         self,

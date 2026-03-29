@@ -32,10 +32,9 @@ Step 2 - Optimise for a return target under CVaR
 
 .. code-block:: python
 
-    wrapper = PortfolioWrapper(distribution)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+    wrapper = PortfolioWrapper.from_scenarios(scenarios)
 
-    weights, exp_return, cvar = wrapper.mean_cvar_portfolio_at_return(
+    weights, exp_return, cvar = wrapper.min_cvar_at_return(
         return_target=0.004,
         alpha=0.05,
     )
@@ -49,7 +48,7 @@ Step 3 - Map the entire frontier
 
 .. code-block:: python
 
-    frontier = wrapper.mean_cvar_frontier(num_portfolios=9, alpha=0.05)
+    frontier = wrapper.cvar_frontier(num_portfolios=9, alpha=0.05)
 
     import matplotlib.pyplot as plt
     from pyvallocation.plotting import plot_frontiers
@@ -66,7 +65,7 @@ Step 4 - Practical considerations
 - **Parametric fallback:** If you only have ``mu`` and ``cov``, the wrapper
   will simulate scenarios under a multivariate normal assumption. For heavy
   tails, bring your own scenarios.
-- **Stress testing:** Run ``wrapper.mean_cvar_portfolio_at_return`` across a grid
+- **Stress testing:** Run ``wrapper.min_cvar_at_return`` across a grid
   of ``alpha`` values (e.g., 1%, 5%, 10%) to understand tail sensitivity.
 - **Transaction costs:** Add ``initial_weights`` and ``proportional_costs`` to
   penalise turnover before calling the CVaR solver.

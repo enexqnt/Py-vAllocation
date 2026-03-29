@@ -24,9 +24,10 @@ Setup
         [0.010, 0.015, 0.018, 0.045],
     ])
 
-    dist = AssetsDistribution(mu=mu, cov=cov, asset_names=["Tech", "Health", "Value", "Bonds"])
-    wrapper = PortfolioWrapper(dist)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+    import pandas as pd
+    mu_s = pd.Series(mu, index=["Tech", "Health", "Value", "Bonds"])
+    cov_df = pd.DataFrame(cov, index=mu_s.index, columns=mu_s.index)
+    wrapper = PortfolioWrapper.from_moments(mu_s, cov_df)
 
 Step 2 - Frontier and diagnostics
 ----------------------------------

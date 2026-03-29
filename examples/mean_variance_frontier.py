@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from example_utils import build_wrapper_from_scenarios, print_portfolio
+from example_utils import print_portfolio
+from pyvallocation import PortfolioWrapper
 
 
 def main() -> None:
@@ -17,11 +18,11 @@ def main() -> None:
         }
     )
 
-    wrapper = build_wrapper_from_scenarios(data)
+    wrapper = PortfolioWrapper.from_scenarios(data)
 
     frontier = wrapper.variance_frontier(num_portfolios=6)
-    min_risk_w, min_risk_return, min_risk_vol = frontier.get_min_risk_portfolio()
-    max_return_w, max_return_return, max_return_vol = frontier.get_max_return_portfolio()
+    min_risk_w, min_risk_return, min_risk_vol = frontier.min_risk()
+    max_return_w, max_return_return, max_return_vol = frontier.max_return()
 
     print_portfolio(
         "Minimum-risk portfolio",

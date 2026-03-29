@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from example_utils import build_wrapper_from_moments
-
-
 def main() -> None:
     mu = np.array([0.08, 0.06, 0.05, 0.03])
     cov = np.array(
@@ -18,12 +15,13 @@ def main() -> None:
         ]
     )
 
-    from pyvallocation import AssetsDistribution, PortfolioWrapper
+    import pandas as pd
+    from pyvallocation import PortfolioWrapper
 
     asset_names = ["Tech", "Health", "Value", "Bonds"]
-    dist = AssetsDistribution(mu=mu, cov=cov, asset_names=asset_names)
-    wrapper = PortfolioWrapper(dist)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+    mu_s = pd.Series(mu, index=asset_names)
+    cov_df = pd.DataFrame(cov, index=asset_names, columns=asset_names)
+    wrapper = PortfolioWrapper.from_moments(mu_s, cov_df)
 
     frontier = wrapper.relaxed_risk_parity_frontier(
         num_portfolios=4,

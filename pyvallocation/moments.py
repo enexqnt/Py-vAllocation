@@ -54,11 +54,9 @@ Interfacing with portfolio wrappers
 
    from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
 
-   dist = AssetsDistribution(mu=mu_js, cov=sigma_oas)
-   wrapper = PortfolioWrapper(dist)
-   wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
-   frontier = wrapper.mean_variance_frontier(num_portfolios=25)
-   tangency_weights, exp_ret, exp_vol = frontier.get_tangency_portfolio(risk_free_rate=0.02)
+   wrapper = PortfolioWrapper.from_moments(mu_js, sigma_oas)
+   frontier = wrapper.variance_frontier(num_portfolios=25)
+   tangency_weights, exp_ret, exp_vol = frontier.tangency(risk_free_rate=0.02)
 
 Robust combinations
 ^^^^^^^^^^^^^^^^^^^
@@ -380,6 +378,9 @@ def shrink_covariance_ledoit_wolf(
 
     gamma_hat = np.linalg.norm(S_arr - F, "fro") ** 2
     kappa = (pi_hat - rho_hat) / gamma_hat
+    # For identity target: delta = kappa (Ledoit-Wolf 2004, Eq. 2).
+    # For constant_correlation target: delta = kappa / T (variant that accounts
+    # for the larger number of estimated parameters in the structured target).
     delta = float(np.clip(kappa if target == "identity" else kappa / T, 0.0, 1.0))
 
     Sigma = ensure_psd_matrix(delta * F + (1 - delta) * S_arr)

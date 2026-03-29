@@ -5,6 +5,11 @@ Release Notes
    :local:
    :depth: 1
 
+Version 0.4.1 (2026-03-29)
+--------------------------
+
+Bug fixes, theory corrections, and hardening.  See ``CHANGELOG.md`` for details.
+
 Version 0.4.0 (2026-02-01)
 --------------------------
 

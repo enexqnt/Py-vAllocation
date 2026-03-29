@@ -60,7 +60,10 @@ robust = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["default::DeprecationWarning:pyvallocation"]
+filterwarnings = [
+    "default::DeprecationWarning:pyvallocation",
+    "ignore::DeprecationWarning:tests",
+]
 
 [tool.ruff]
 line-length = 120

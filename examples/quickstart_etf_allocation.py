@@ -92,7 +92,7 @@ def entropy_pool_posterior(weekly_returns: pd.DataFrame) -> Tuple[pd.Series, pd.
         for asset, target in {"SPY": 0.23, "TLT": 0.18, "GLD": 0.22, "DBC": 0.28}.items()
     }
     processor = FlexibleViewsProcessor(
-        prior_returns=weekly_returns,
+        prior_risk_drivers=weekly_returns,
         mean_views=mean_views,
         vol_views=vol_caps,
         corr_views={("SPY", "TLT"): ("<=", -0.10)},
@@ -404,10 +404,11 @@ def main() -> None:
     # Overlay robust uncertainty path (diagnostic, dashed)
     # Mean-uncertainty covariance from NIW posterior (delta approximation in simple returns).
     uncertainty_cov = rb_posterior.mean_uncertainty_cov_simple(annualization_factor=52)
-    robust_uncertainty = PortfolioWrapper(
-        AssetsDistribution(mu=annual_mu["RobustBayes"], cov=uncertainty_cov)
+    robust_uncertainty = PortfolioWrapper.from_moments(
+        annual_mu["RobustBayes"],
+        uncertainty_cov,
+        bounds=(None, 0.6),
     )
-    robust_uncertainty.set_constraints({"long_only": True, "total_weight": 1.0, "bounds": (None, 0.6)})
     lambda_grid = np.geomspace(0.01, 10.0, 11)
     robust_frontier = robust_uncertainty.robust_lambda_frontier(
         lambdas=lambda_grid,
@@ -505,7 +506,7 @@ def main() -> None:
 
     step("Stress-testing with adverse flexible views...")
     stress_processor = FlexibleViewsProcessor(
-        prior_returns=in_sample_returns,
+        prior_risk_drivers=in_sample_returns,
         mean_views={"SPY": ("<=", -0.0002)},
         corr_views={("SPY", "TLT"): (">=", -0.02)},
         sequential=True,

@@ -47,12 +47,11 @@ Install & quickstart
 .. code-block:: python
 
    import numpy as np
-   from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+   from pyvallocation.portfolioapi import PortfolioWrapper
 
-   wrapper = PortfolioWrapper(AssetsDistribution(scenarios=np.random.normal(0, 0.01, size=(252, 4))))
-   wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+   wrapper = PortfolioWrapper.from_scenarios(np.random.normal(0, 0.01, size=(252, 4)))
    frontier = wrapper.variance_frontier(num_portfolios=11)
-   weights, ret, risk = frontier.get_tangency_portfolio(risk_free_rate=0.01)
+   weights, ret, risk = frontier.tangency(risk_free_rate=0.01)
    print(weights.round(3))
 
 .. toctree::

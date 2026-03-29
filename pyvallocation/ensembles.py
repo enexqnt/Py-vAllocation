@@ -688,7 +688,8 @@ def make_portfolio_spec(
             or a callable building a :class:`PortfolioFrontier` from a
             :class:`~pyvallocation.portfolioapi.PortfolioWrapper`.
         optimiser_kwargs: Keyword arguments for the optimiser. If it contains ``constraints``
-            they are passed to :meth:`PortfolioWrapper.set_constraints`.
+            (a dict or :class:`~pyvallocation.utils.constraints.Constraints` instance)
+            they are applied to the wrapper before building the frontier.
         selector: How to extract the representative portfolio. Accepts strings
             (``"tangency"``, ``"min_risk"``, ``"max_return"``, ``"risk_target"``,
             ``"risk_match"``, ``"risk_percentile"``, ``"column"``) or a callable.
@@ -735,7 +736,14 @@ def make_portfolio_spec(
         local_kwargs = dict(optimiser_kwargs)
         constraints = local_kwargs.pop("constraints", None)
         if constraints is not None:
-            wrapper.set_constraints(constraints)
+            from .utils.constraints import Constraints as _Constraints, build_G_h_A_b as _build
+            if isinstance(constraints, dict):
+                G, h, A, b = _Constraints.from_dict(constraints).to_matrices(dist.N)
+            elif isinstance(constraints, _Constraints):
+                G, h, A, b = constraints.to_matrices(dist.N)
+            else:
+                G, h, A, b = _build(dist.N, **constraints)
+            wrapper.G, wrapper.h, wrapper.A, wrapper.b = G, h, A, b
         optimiser_callable = _resolve_optimiser(optimiser)
         return optimiser_callable(wrapper, **local_kwargs)
 
@@ -967,7 +975,7 @@ def _build_selector(
             Returns:
                 pd.Series: Tangency portfolio weights.
             """
-            weights, *_ = frontier.get_tangency_portfolio(risk_free_rate=risk_free)
+            weights, *_ = frontier.tangency(risk_free_rate=risk_free)
             return weights.rename(label)
 
         return _tangency
@@ -984,7 +992,7 @@ def _build_selector(
                 pd.Series: Minimum-risk portfolio weights.
             """
             risk_label = selector_kwargs.pop("risk_label", None)
-            weights, *_ = frontier.get_min_risk_portfolio(risk_label=risk_label)
+            weights, *_ = frontier.min_risk(risk_label=risk_label)
             return weights.rename(label)
 
         return _min
@@ -1000,7 +1008,7 @@ def _build_selector(
             Returns:
                 pd.Series: Maximum-return portfolio weights.
             """
-            weights, *_ = frontier.get_max_return_portfolio()
+            weights, *_ = frontier.max_return()
             return weights.rename(label)
 
         return _max
@@ -1024,7 +1032,7 @@ def _build_selector(
             if resolved_label is None and "Volatility" in frontier.alternate_risks:
                 if "Estimation Risk" in (frontier.risk_measure or ""):
                     resolved_label = "Volatility"
-            weights, *_ = frontier.portfolio_at_risk_target(max_risk=max_risk, risk_label=resolved_label)
+            weights, *_ = frontier.at_risk(max_risk=max_risk, risk_label=resolved_label)
             return weights.rename(label)
 
         return _risk
@@ -1048,7 +1056,7 @@ def _build_selector(
             if resolved_label is None and "Volatility" in frontier.alternate_risks:
                 if "Estimation Risk" in (frontier.risk_measure or ""):
                     resolved_label = "Volatility"
-            weights, *_ = frontier.portfolio_closest_risk(target_risk, risk_label=resolved_label)
+            weights, *_ = frontier.closest_risk(target_risk, risk_label=resolved_label)
             return weights.rename(label)
 
         return _risk_match
@@ -1072,7 +1080,7 @@ def _build_selector(
             if resolved_label is None and "Volatility" in frontier.alternate_risks:
                 if "Estimation Risk" in (frontier.risk_measure or ""):
                     resolved_label = "Volatility"
-            weights, *_ = frontier.portfolio_at_risk_percentile(percentile, risk_label=resolved_label)
+            weights, *_ = frontier.at_percentile(percentile, risk_label=resolved_label)
             return weights.rename(label)
 
         return _risk_pct

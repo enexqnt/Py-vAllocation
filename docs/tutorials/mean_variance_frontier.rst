@@ -51,14 +51,12 @@ frontier construction. We supply the estimated moments via
 
 .. code-block:: python
 
-    from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+    from pyvallocation.portfolioapi import PortfolioWrapper
 
-    distribution = AssetsDistribution(mu=mu_js, cov=sigma_oas)
-    wrapper = PortfolioWrapper(distribution)
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+    wrapper = PortfolioWrapper.from_moments(mu_js, sigma_oas)
 
     mv_frontier = wrapper.variance_frontier(num_portfolios=21)
-    tangency_weights, tangency_return, tangency_risk = mv_frontier.get_tangency_portfolio(
+    tangency_weights, tangency_return, tangency_risk = mv_frontier.tangency(
         risk_free_rate=0.01
     )
 

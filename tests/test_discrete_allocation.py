@@ -6,10 +6,9 @@ import pandas as pd
 
 from pyvallocation import (
     DiscreteAllocationInput,
-    allocate_greedy,
-    allocate_mip,
     discretize_weights,
 )
+from pyvallocation.discrete_allocation import allocate_greedy, allocate_mip
 from pyvallocation.portfolioapi import PortfolioFrontier
 
 

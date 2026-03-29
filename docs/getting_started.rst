@@ -42,12 +42,10 @@ mean-variance frontier.
        }
    )
 
-   dist = AssetsDistribution(scenarios=scenarios)
-   wrapper = PortfolioWrapper(dist)
-   wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+   wrapper = PortfolioWrapper.from_scenarios(scenarios)
 
    frontier = wrapper.variance_frontier(num_portfolios=5)
-   weights, expected_return, risk = frontier.get_min_risk_portfolio()
+   weights, expected_return, risk = frontier.min_risk()
 
    print(weights.round(4))
    print(f"Expected return: {expected_return:.4%} | Volatility: {risk:.4%}")
@@ -91,9 +89,7 @@ targets sized by multiplier ``m``.
        ]
    )
 
-   dist = AssetsDistribution(mu=mu, cov=cov)
-   wrapper = PortfolioWrapper(dist)
-   wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+   wrapper = PortfolioWrapper.from_moments(mu, cov)
 
    frontier = wrapper.relaxed_risk_parity_frontier(
        num_portfolios=4,

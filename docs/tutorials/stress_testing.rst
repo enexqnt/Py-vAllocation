@@ -22,10 +22,9 @@ Set up data & tangency portfolio
    weekly = prices.resample("W-FRI").last().dropna(how="all")
    returns = weekly.pct_change().dropna().rename(columns=lambda c: c.replace(" ", "_"))
 
-   wrapper = PortfolioWrapper(AssetsDistribution(scenarios=np.log1p(returns)))
-   wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
+   wrapper = PortfolioWrapper.from_scenarios(np.log1p(returns))
    frontier = wrapper.variance_frontier(num_portfolios=21)
-   weights, *_ = frontier.get_tangency_portfolio(risk_free_rate=0.01)
+   weights, *_ = frontier.tangency(risk_free_rate=0.01)
 
    nominal_perf = performance_report(weights, returns.values, alpha=0.95)
    print(nominal_perf.round(4))
@@ -56,7 +55,7 @@ unchanged.
 
    from pyvallocation.stress import kernel_focus_stress
 
-   vol_feature = returns["SPY"].rolling(12).std(ddof=0).fillna(method="bfill")
+   vol_feature = returns["SPY"].rolling(12).std(ddof=0).bfill()
    kernel_df = kernel_focus_stress(
        weights,
        returns.values,

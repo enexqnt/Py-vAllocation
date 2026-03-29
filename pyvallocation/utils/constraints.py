@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 import numbers
 import warnings
+from dataclasses import dataclass
 from typing import (
+    Any,
     Dict,
     List,
     Optional,
@@ -24,6 +26,64 @@ BoundsLike = Union[
 ]
 RelBound = Tuple[int, int, Number]
 EqRow = Tuple[Sequence[Number], Number]
+
+
+@dataclass(frozen=True)
+class Constraints:
+    """Typed, immutable constraint specification for portfolio optimisers.
+
+    All fields have sensible defaults so that ``Constraints()`` produces
+    a long-only, fully-invested constraint set.
+
+    Examples:
+        >>> c = Constraints()                          # long-only, sum=1
+        >>> c = Constraints(bounds=(0.0, 0.3))         # per-asset cap at 30%
+        >>> c = Constraints(group_constraints={
+        ...     "Equity": ([0, 1, 2], 0.2, 0.6),      # 20-60% in equities
+        ... })
+        >>> c = Constraints.from_dict({"long_only": True, "total_weight": 1.0})
+    """
+    long_only: bool = True
+    total_weight: Optional[Number] = 1.0
+    bounds: Optional[BoundsLike] = None
+    relative_bounds: Optional[Sequence[RelBound]] = None
+    group_constraints: Optional[Dict[str, Tuple[Sequence[int], Number, Number]]] = None
+    additional_G_h: Optional[Sequence[Tuple[Sequence[Number], Number]]] = None
+    additional_A_b: Optional[Sequence[EqRow]] = None
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "Constraints":
+        """Create a Constraints instance from a dictionary.
+
+        Unrecognised keys are silently ignored for backward compatibility.
+        """
+        import dataclasses
+        valid_keys = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in d.items() if k in valid_keys}
+        return cls(**filtered)
+
+    def to_matrices(self, n_assets: int) -> Tuple[
+        Optional[np.ndarray], Optional[np.ndarray],
+        Optional[np.ndarray], Optional[np.ndarray],
+    ]:
+        """Build CVXOPT-compatible (G, h, A, b) constraint matrices.
+
+        Args:
+            n_assets: Number of portfolio assets.
+
+        Returns:
+            Tuple of (G, h, A, b) arrays or None.
+        """
+        return build_G_h_A_b(
+            n_assets,
+            total_weight=self.total_weight,
+            long_only=self.long_only,
+            bounds=self.bounds,
+            relative_bounds=self.relative_bounds,
+            group_constraints=self.group_constraints,
+            additional_G_h=self.additional_G_h,
+            additional_A_b=self.additional_A_b,
+        )
 
 
 def _check_number(x: Number, name: str) -> None:
@@ -52,6 +112,7 @@ def build_G_h_A_b(
     long_only: bool = True,
     bounds: Optional[BoundsLike] = None,
     relative_bounds: Optional[Sequence[RelBound]] = None,
+    group_constraints: Optional[Dict[str, Tuple[Sequence[int], Number, Number]]] = None,
     additional_G_h: Optional[Sequence[Tuple[Sequence[Number], Number]]] = None,
     additional_A_b: Optional[Sequence[EqRow]] = None,
     return_none_if_empty: bool = True,
@@ -76,6 +137,9 @@ def build_G_h_A_b(
             a sequence of per-asset tuples, or a mapping ``asset -> (lower, upper)``.
         relative_bounds: Sequence of triples ``(i, j, bound)`` implementing
             ``w_i - w_j <= bound`` style constraints.
+        group_constraints: Mapping of group name to ``(indices, lower, upper)``
+            tuples.  Each entry constrains the sum of weights in the group to
+            lie between ``lower`` and ``upper``.
         additional_G_h: Extra inequality rows supplied as ``(row, rhs)`` pairs.
         additional_A_b: Extra equality rows supplied as ``(row, rhs)`` pairs.
         return_none_if_empty: When ``True`` return ``None`` instead of empty arrays.
@@ -212,6 +276,26 @@ def build_G_h_A_b(
             row[j] = -1
             G_rows.append(row)
             h_vals.append(float(k))
+
+    if group_constraints is not None:
+        for name, (indices, lo, hi) in group_constraints.items():
+            idx = list(indices)
+            if not all(0 <= i < n_assets for i in idx):
+                raise IndexError(f"group '{name}' contains out-of-range asset indices.")
+            _check_number(lo, f"lower bound for group '{name}'")
+            _check_number(hi, f"upper bound for group '{name}'")
+            if lo > hi:
+                raise ValueError(f"group '{name}': lower bound {lo} > upper bound {hi}.")
+            # sum(w_i for i in group) <= hi
+            row_upper = np.zeros(n_assets)
+            row_upper[idx] = 1.0
+            G_rows.append(row_upper)
+            h_vals.append(float(hi))
+            # sum(w_i for i in group) >= lo  →  -sum(w_i) <= -lo
+            row_lower = np.zeros(n_assets)
+            row_lower[idx] = -1.0
+            G_rows.append(row_lower)
+            h_vals.append(float(-lo))
 
     if additional_G_h is not None:
         for row, rhs in additional_G_h:

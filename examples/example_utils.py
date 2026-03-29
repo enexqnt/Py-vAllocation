@@ -6,7 +6,7 @@ from typing import Optional, Sequence, Union
 import numpy as np
 import pandas as pd
 
-from pyvallocation.portfolioapi import AssetsDistribution, PortfolioWrapper
+from pyvallocation.portfolioapi import PortfolioWrapper
 
 
 ArrayLike = Union[np.ndarray, pd.DataFrame, pd.Series]
@@ -53,13 +53,14 @@ def build_wrapper_from_scenarios(
     Returns:
         PortfolioWrapper: Configured wrapper instance.
     """
-    dist = AssetsDistribution(scenarios=scenarios, probabilities=probabilities)
-    wrapper = PortfolioWrapper(dist)
-    constraints = {"long_only": True, "total_weight": total_weight}
-    if bounds is not None:
-        constraints["bounds"] = bounds
-    wrapper.set_constraints(constraints)
-    return wrapper
+    probs_arr = np.asarray(probabilities, dtype=float) if probabilities is not None else None
+    return PortfolioWrapper.from_scenarios(
+        scenarios,
+        probabilities=probs_arr,
+        long_only=True,
+        total_weight=total_weight,
+        bounds=bounds,
+    )
 
 
 def build_wrapper_from_moments(
@@ -81,13 +82,13 @@ def build_wrapper_from_moments(
         PortfolioWrapper: Configured wrapper instance.
     """
     cov_psd = ensure_psd(cov)
-    dist = AssetsDistribution(mu=mu, cov=cov_psd)
-    wrapper = PortfolioWrapper(dist)
-    constraints = {"long_only": True, "total_weight": total_weight}
-    if bounds is not None:
-        constraints["bounds"] = bounds
-    wrapper.set_constraints(constraints)
-    return wrapper
+    return PortfolioWrapper.from_moments(
+        mu,
+        cov_psd,
+        long_only=True,
+        total_weight=total_weight,
+        bounds=bounds,
+    )
 
 
 def print_portfolio(

@@ -215,11 +215,7 @@ class TestSmoke(unittest.TestCase):
 
         cov = pd.DataFrame(cov_matrix, index=self.returns_df.columns, columns=self.returns_df.columns)
         
-        asset_dist = portfolioapi.AssetsDistribution(mu=mu, cov=cov)
-        wrapper = portfolioapi.PortfolioWrapper(asset_dist)
-
-        constraints_to_set = {'long_only': True, 'total_weight': 1.0}
-        wrapper.set_constraints(constraints_to_set)
+        wrapper = portfolioapi.PortfolioWrapper.from_moments(mu, cov)
 
         num_portfolios = 10
         frontier = wrapper.variance_frontier(num_portfolios=num_portfolios)
@@ -227,7 +223,7 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(len(frontier.returns), num_portfolios)
         self.assertEqual(len(frontier.risks), num_portfolios)
 
-        w_min_risk, r_min_risk, risk_val_min_risk = frontier.get_min_risk_portfolio()
+        w_min_risk, r_min_risk, risk_val_min_risk = frontier.min_risk()
         self.assertEqual(w_min_risk.shape, (self.N,))
         self.assertIsInstance(r_min_risk, float)
         self.assertIsInstance(risk_val_min_risk, float)
@@ -237,13 +233,13 @@ class TestSmoke(unittest.TestCase):
         target_return = (min_frontier_return + max_frontier_return) / 2.0
         
         if max_frontier_return > min_frontier_return:
-            w_target, r_target, risk_target = frontier.portfolio_at_return_target(target_return)
+            w_target, r_target, risk_target = frontier.at_return(target_return)
             self.assertEqual(w_target.shape, (self.N,))
             self.assertIsInstance(r_target, float)
             self.assertIsInstance(risk_target, float)
             self.assertAlmostEqual(r_target, target_return, places=3)
         else:
-            print("Skipping portfolio_at_return_target sub-test as frontier returns are too close.")
+            print("Skipping at_return sub-test as frontier returns are too close.")
 
     def test_bayesian_niw_posterior(self):
         prior_mean_bl = pd.Series(np.random.rand(self.N) / 100, index=self.returns_df.columns)
@@ -286,9 +282,7 @@ class TestSmoke(unittest.TestCase):
             est_uncertainty_cov_matrix += np.eye(self.N) * (abs(min_eig_robust) + 1e-7)
         est_uncertainty_cov = pd.DataFrame(est_uncertainty_cov_matrix, index=self.returns_df.columns, columns=self.returns_df.columns)
 
-        robust_dist = portfolioapi.AssetsDistribution(mu=est_expected_return, cov=est_uncertainty_cov)
-        robust_wrapper = portfolioapi.PortfolioWrapper(robust_dist)
-        robust_wrapper.set_constraints({'long_only': True, 'total_weight': 1.0})
+        robust_wrapper = portfolioapi.PortfolioWrapper.from_moments(est_expected_return, est_uncertainty_cov)
 
         num_portfolios_robust = 10
         lambda_frontier = robust_wrapper.robust_lambda_frontier(num_portfolios=num_portfolios_robust, max_lambda=1.0)
@@ -297,7 +291,7 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(len(lambda_frontier.returns), num_portfolios_robust)
         self.assertEqual(len(lambda_frontier.risks), num_portfolios_robust)
 
-        w_min_est_risk, r_min_est_risk, est_risk_min = lambda_frontier.get_min_risk_portfolio()
+        w_min_est_risk, r_min_est_risk, est_risk_min = lambda_frontier.min_risk()
         self.assertEqual(w_min_est_risk.shape, (self.N,))
         self.assertIsInstance(r_min_est_risk, float)
         self.assertIsInstance(est_risk_min, float)
@@ -311,9 +305,7 @@ class TestSmoke(unittest.TestCase):
             est_uncertainty_cov_matrix += np.eye(self.N) * (abs(min_eig_gamma) + 1e-7)
         est_uncertainty_cov = pd.DataFrame(est_uncertainty_cov_matrix, index=self.returns_df.columns, columns=self.returns_df.columns)
 
-        robust_dist = portfolioapi.AssetsDistribution(mu=est_expected_return, cov=est_uncertainty_cov)
-        robust_wrapper = portfolioapi.PortfolioWrapper(robust_dist)
-        robust_wrapper.set_constraints({'long_only': True, 'total_weight': 1.0})
+        robust_wrapper = portfolioapi.PortfolioWrapper.from_moments(est_expected_return, est_uncertainty_cov)
 
         gamma_mu_val = 0.05
         gamma_sigma_sq_val = (0.4)**2
@@ -372,7 +364,7 @@ class TestSmoke(unittest.TestCase):
         mean_views = {self.returns_df.columns[0]: ('>', 0.0005), self.returns_df.columns[1]: 0.0001}
         
         fvp = views.FlexibleViewsProcessor(
-            prior_returns=self.returns_df,
+            prior_risk_drivers=self.returns_df,
             prior_probabilities=p_prior,
             mean_views=mean_views
         )
@@ -392,7 +384,7 @@ class TestSmoke(unittest.TestCase):
         vol_views = {self.returns_df.columns[0]: ('>', 0.01)}
 
         fvp = views.FlexibleViewsProcessor(
-            prior_returns=self.returns_df,
+            prior_risk_drivers=self.returns_df,
             prior_probabilities=p_prior,
             corr_views=corr_views,
             vol_views=vol_views
@@ -432,9 +424,7 @@ class TestSmoke(unittest.TestCase):
         scenarios = np.random.randn(self.T, self.N) * 0.02
         scenarios_df = pd.DataFrame(scenarios, columns=self.returns_df.columns)
 
-        cvar_dist = portfolioapi.AssetsDistribution(scenarios=scenarios_df)
-        cvar_wrapper = portfolioapi.PortfolioWrapper(cvar_dist)
-        cvar_wrapper.set_constraints({'long_only': True, 'total_weight': 1.0})
+        cvar_wrapper = portfolioapi.PortfolioWrapper.from_scenarios(scenarios_df)
 
         num_portfolios_cvar = 10
         alpha_cvar = 0.05
@@ -445,7 +435,7 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(len(cvar_frontier.risks), num_portfolios_cvar)
         self.assertEqual(cvar_frontier.risk_measure, f"CVaR (alpha={alpha_cvar:.2f})")
 
-        w_min_cvar, r_min_cvar, cvar_val_min = cvar_frontier.get_min_risk_portfolio()
+        w_min_cvar, r_min_cvar, cvar_val_min = cvar_frontier.min_risk()
         self.assertEqual(w_min_cvar.shape, (self.N,))
         self.assertIsInstance(r_min_cvar, float)
         self.assertIsInstance(cvar_val_min, float)
@@ -454,7 +444,7 @@ class TestSmoke(unittest.TestCase):
         max_cvar_on_frontier = np.max(cvar_frontier.risks)
         target_cvar = (min_cvar_on_frontier + max_cvar_on_frontier) / 2.0
         if max_cvar_on_frontier > min_cvar_on_frontier + 1e-6:
-            w_target_cvar, r_target_cvar, cvar_at_target = cvar_frontier.portfolio_at_risk_target(max_risk=target_cvar)
+            w_target_cvar, r_target_cvar, cvar_at_target = cvar_frontier.at_risk(max_risk=target_cvar)
             self.assertEqual(w_target_cvar.shape, (self.N,))
             self.assertIsInstance(r_target_cvar, float)
             self.assertIsInstance(cvar_at_target, float)
@@ -464,7 +454,7 @@ class TestSmoke(unittest.TestCase):
         max_ret_on_frontier = np.max(cvar_frontier.returns)
         target_return_cvar = (min_ret_on_frontier + max_ret_on_frontier) / 2.0
         if max_ret_on_frontier > min_ret_on_frontier + 1e-6:
-            w_target_ret, r_at_target_ret, cvar_at_target_ret = cvar_frontier.portfolio_at_return_target(min_return=target_return_cvar)
+            w_target_ret, r_at_target_ret, cvar_at_target_ret = cvar_frontier.at_return(min_return=target_return_cvar)
             self.assertEqual(w_target_ret.shape, (self.N,))
             self.assertIsInstance(r_at_target_ret, float)
             self.assertIsInstance(cvar_at_target_ret, float)

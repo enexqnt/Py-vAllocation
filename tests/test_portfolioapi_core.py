@@ -50,9 +50,7 @@ def _build_long_only_wrapper() -> PortfolioWrapper:
         index=mu.index,
         columns=mu.index,
     )
-    wrapper = PortfolioWrapper(AssetsDistribution(mu=mu, cov=cov))
-    wrapper.set_constraints({"long_only": True, "total_weight": 1.0})
-    return wrapper
+    return PortfolioWrapper.from_moments(mu, cov)
 
 
 def test_robust_lambda_frontier_custom_grid_preserves_names():
@@ -63,7 +61,7 @@ def test_robust_lambda_frontier_custom_grid_preserves_names():
     assert frontier.weights.shape == (2, len(lambdas))
     assert frontier.asset_names == ["AAA", "BBB"]
 
-    weights, _, _ = frontier.get_min_risk_portfolio()
+    weights, _, _ = frontier.min_risk()
     pd.testing.assert_index_equal(weights.index, pd.Index(["AAA", "BBB"]))
 
 

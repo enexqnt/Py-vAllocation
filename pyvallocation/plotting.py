@@ -942,32 +942,32 @@ def plot_frontier_report(
 
     if selected_weights is None:
         if selection_key in {"min_risk", "minimum_risk"}:
-            selected_weights, selected_return, selected_risk = frontier.get_min_risk_portfolio(
+            selected_weights, selected_return, selected_risk = frontier.min_risk(
                 risk_label=risk_label
             )
         elif selection_key in {"max_return", "maximum_return"}:
-            selected_weights, selected_return, selected_risk = frontier.get_max_return_portfolio()
+            selected_weights, selected_return, selected_risk = frontier.max_return()
         elif selection_key in {"tangency", "max_sharpe", "sharpe"}:
             rf = float(selection_kwargs.pop("risk_free_rate", 0.0))
-            selected_weights, selected_return, selected_risk = frontier.get_tangency_portfolio(rf)
+            selected_weights, selected_return, selected_risk = frontier.tangency(rf)
         elif selection_key in {"risk_target", "max_return_subject_to_risk"}:
             max_risk = float(selection_kwargs.pop("max_risk"))
-            selected_weights, selected_return, selected_risk = frontier.portfolio_at_risk_target(
+            selected_weights, selected_return, selected_risk = frontier.at_risk(
                 max_risk=max_risk, risk_label=risk_label
             )
         elif selection_key in {"return_target", "min_risk_subject_to_return"}:
             min_return = float(selection_kwargs.pop("min_return"))
-            selected_weights, selected_return, selected_risk = frontier.portfolio_at_return_target(
+            selected_weights, selected_return, selected_risk = frontier.at_return(
                 min_return=min_return, risk_label=risk_label
             )
         elif selection_key in {"risk_percentile", "risk_pct", "percentile"}:
             pct = float(selection_kwargs.pop("percentile"))
-            selected_weights, selected_return, selected_risk = frontier.portfolio_at_risk_percentile(
+            selected_weights, selected_return, selected_risk = frontier.at_percentile(
                 pct, risk_label=risk_label
             )
         elif selection_key in {"risk_match", "risk_nearest"}:
             target_risk = float(selection_kwargs.pop("target_risk"))
-            selected_weights, selected_return, selected_risk = frontier.portfolio_closest_risk(
+            selected_weights, selected_return, selected_risk = frontier.closest_risk(
                 target_risk, risk_label=risk_label
             )
         elif selection_key in {"index", "column"}:

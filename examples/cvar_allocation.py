@@ -5,13 +5,14 @@ from __future__ import annotations
 import numpy as np
 
 from data_utils import load_returns
-from example_utils import build_wrapper_from_scenarios, print_portfolio
+from example_utils import print_portfolio
+from pyvallocation import PortfolioWrapper
 
 
 def main() -> None:
     returns = load_returns().iloc[-750:]  # recent history only
     probabilities = np.full(len(returns), 1.0 / len(returns))
-    wrapper = build_wrapper_from_scenarios(returns, probabilities=probabilities)
+    wrapper = PortfolioWrapper.from_scenarios(returns, probabilities=probabilities)
 
     # Target a modest return in line with the median scenario outcome.
     target_return = float(np.median(returns.mean()))
@@ -21,7 +22,7 @@ def main() -> None:
     )
 
     frontier = wrapper.cvar_frontier(num_portfolios=7, alpha=0.05)
-    tangency_weights, tangency_return, tangency_risk = frontier.get_tangency_portfolio(0.001)
+    tangency_weights, tangency_return, tangency_risk = frontier.tangency(0.001)
 
     print_portfolio(
         "=== Mean-CVaR target portfolio ===",

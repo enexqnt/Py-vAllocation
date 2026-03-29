@@ -11,8 +11,8 @@ used across the tutorials and examples:
   a uniform interface for constraints, turnover costs, and selectors.
 - :class:`pyvallocation.portfolioapi.PortfolioFrontier` encapsulates solved
   frontiers and offers convenience selectors such as
-  :meth:`~pyvallocation.portfolioapi.PortfolioFrontier.get_tangency_portfolio`
-  and :meth:`~pyvallocation.portfolioapi.PortfolioFrontier.portfolio_at_risk_target`.
+  :meth:`~pyvallocation.portfolioapi.PortfolioFrontier.tangency`
+  and :meth:`~pyvallocation.portfolioapi.PortfolioFrontier.at_risk`.
 
 All helpers preserve pandas alignment and cooperate with the ensembling and
 discrete allocation utilities.
