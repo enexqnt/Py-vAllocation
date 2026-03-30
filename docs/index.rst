@@ -26,10 +26,10 @@ Where to start
 
 - :doc:`getting_started` for installation and a minimal efficient frontier
   example.
-- :doc:`tutorials/quickstart_etf_allocation` for the ETF allocation walk-through
-  that mirrors the runnable quickstart script.
-- :doc:`tutorials/index` for guided walkthroughs of the main workflows
-  (mean-variance, CVaR, stress testing, and portfolio ensembling).
+- :doc:`tutorials/notebooks/ETF_Multi_Asset_Walkthrough` for the end-to-end
+  multi-asset ETF walkthrough with stress tests and horizon projections.
+- :doc:`tutorials/index` for all interactive notebooks covering mean-variance,
+  CVaR, risk parity, stress testing, views, repricing, and ensembles.
 - :doc:`tutorials/examples_overview` for a catalog of runnable scripts and notebooks.
 - The `examples/` directory offers runnable scripts that mirror the tutorials -
   try ``python examples/stress_and_pnl.py`` for probability tilts and performance summaries.

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pyvallocation.utils.constraints import build_G_h_A_b
+from pyvallocation.utils.constraints import Constraints, build_G_h_A_b
 from pyvallocation.utils.data_helpers import (
     numpy_weights_to_pandas_series,
     pandas_to_numpy_returns,
@@ -377,3 +377,93 @@ class TestNormalizeWeights:
         assert result.shape == (5,)
         assert result.sum() == pytest.approx(1.0)
         np.testing.assert_array_almost_equal(result, np.full(5, 0.2))
+
+
+# ====================================================================
+# Group constraints (v0.5.0)
+# ====================================================================
+
+
+class TestGroupConstraints:
+    """Group constraints in build_G_h_A_b."""
+
+    def test_single_group(self):
+        G, h, A, b = build_G_h_A_b(
+            N_ASSETS, group_constraints={"equity": ([0, 1], 0.3, 0.6)}
+        )
+        assert G is not None and h is not None
+        # long_only (4 rows) + group upper (1 row) + group lower (1 row) = 6 rows
+        # Find the group rows: the last two rows added by group_constraints
+        # Upper: [1, 1, 0, 0] <= 0.6
+        # Lower: [-1, -1, 0, 0] <= -0.3
+        row_upper = G[-2]
+        row_lower = G[-1]
+        np.testing.assert_array_equal(row_upper, [1.0, 1.0, 0.0, 0.0])
+        assert float(h[-2]) == pytest.approx(0.6)
+        np.testing.assert_array_equal(row_lower, [-1.0, -1.0, 0.0, 0.0])
+        assert float(h[-1]) == pytest.approx(-0.3)
+
+    def test_multiple_groups(self):
+        G, h, A, b = build_G_h_A_b(
+            N_ASSETS,
+            group_constraints={
+                "equity": ([0, 1], 0.2, 0.6),
+                "fixed_income": ([2, 3], 0.3, 0.7),
+            },
+        )
+        assert G is not None and h is not None
+        # long_only (4) + equity upper+lower (2) + fi upper+lower (2) = 8 rows
+        assert G.shape[0] == N_ASSETS + 4
+
+    def test_group_lower_exceeds_upper_raises(self):
+        with pytest.raises(ValueError, match="lower bound.*upper bound"):
+            build_G_h_A_b(
+                N_ASSETS, group_constraints={"g": ([0], 0.8, 0.3)}
+            )
+
+    def test_group_index_out_of_range_raises(self):
+        with pytest.raises(IndexError, match="out-of-range"):
+            build_G_h_A_b(
+                N_ASSETS, group_constraints={"g": ([5], 0.1, 0.5)}
+            )
+
+    def test_constraints_dataclass_with_groups(self):
+        c = Constraints(group_constraints={"equity": ([0, 1], 0.2, 0.6)})
+        G, h, A, b = c.to_matrices(N_ASSETS)
+        assert G is not None and h is not None
+        # Should contain the group rows among the inequality constraints
+        # long_only (4) + group upper + group lower = 6
+        assert G.shape[0] == N_ASSETS + 2
+
+    def test_constraints_from_dict_with_groups(self):
+        c = Constraints.from_dict(
+            {"group_constraints": {"equity": ([0, 1], 0.2, 0.6)}}
+        )
+        assert c.group_constraints is not None
+        assert "equity" in c.group_constraints
+
+    def test_constraints_from_dict_ignores_unknown_keys(self):
+        c = Constraints.from_dict(
+            {"group_constraints": {"eq": ([0], 0.1, 0.5)}, "unknown_key": 42}
+        )
+        assert c.group_constraints is not None
+
+    def test_group_constraints_feasible_with_optimizer(self):
+        """Actually solve a mean-variance optimisation with group constraints."""
+        from pyvallocation import PortfolioWrapper
+
+        mu = np.array([0.08, 0.06, 0.04, 0.03])
+        cov = np.eye(N_ASSETS) * 0.04
+        c = Constraints(group_constraints={"equity": ([0, 1], 0.3, 0.6)})
+        wrapper = PortfolioWrapper.from_moments(mu, cov, constraints=c)
+        frontier = wrapper.variance_frontier(num_portfolios=5)
+        # Check group constraint is satisfied for every portfolio
+        for col in range(frontier.weights.shape[1]):
+            w = frontier.weights[:, col]
+            equity_weight = w[0] + w[1]
+            assert equity_weight >= 0.3 - 1e-6, (
+                f"Portfolio {col}: equity weight {equity_weight:.6f} < 0.3"
+            )
+            assert equity_weight <= 0.6 + 1e-6, (
+                f"Portfolio {col}: equity weight {equity_weight:.6f} > 0.6"
+            )

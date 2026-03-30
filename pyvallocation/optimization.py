@@ -440,6 +440,67 @@ class MeanVariance(_FrontierMixin, _BaseOptimization):
         max_ret = self._max_expected_return()
         return self._frontier(first, self._solve_target, num_portfolios, self._mean, max_ret)
 
+    def max_sharpe(self, risk_free_rate: float = 0.0) -> OptimizationResult:
+        r"""Solve directly for the maximum Sharpe ratio portfolio.
+
+        Uses the Cornuejols-Tütüncü (2007) reformulation:
+
+        .. math::
+
+           \min_{y}\; y^\top \Sigma\, y
+           \quad\text{s.t.}\quad
+           (\mu - r_f)^\top y = 1,\; G\,y \le 0,\; A\,y = 0
+
+        The optimal weights are ``w = y / \mathbf{1}^\top y``.
+
+        Args:
+            risk_free_rate: Risk-free rate for Sharpe computation.
+
+        Returns:
+            OptimizationResult: Optimal weights, return, and volatility.
+        """
+        mu_excess = np.asarray(self._mean).ravel() - risk_free_rate
+        N = self._I
+
+        # Build the auxiliary problem: min y'Σy s.t. (μ-rf)'y = 1
+        P = matrix(2.0 * np.asarray(self._cov, dtype=float))
+        q = matrix(np.zeros(N))
+
+        # Equality: (μ-rf)'y = 1  +  any user equalities scaled to 0
+        A_rows = [mu_excess.reshape(1, -1)]
+        b_vals = [1.0]
+        if self._A is not None:
+            # User equalities become homogeneous: A y = 0 (since we normalize later)
+            A_np = np.asarray(self._A)
+            for row_idx in range(A_np.shape[0]):
+                A_rows.append(A_np[row_idx:row_idx+1])
+                b_vals.append(0.0)
+
+        A_mat = matrix(np.vstack(A_rows))
+        b_vec = matrix(np.array(b_vals, dtype=float))
+
+        # Inequalities: G y <= 0 (homogeneous version of G w <= h)
+        if self._G is not None:
+            G_mat = matrix(np.asarray(self._G, dtype=float))
+            h_vec = matrix(np.zeros(np.asarray(self._G).shape[0]))
+        else:
+            G_mat = None
+            h_vec = None
+
+        sol = solvers.qp(P, q, G_mat, h_vec, A_mat, b_vec)
+        if sol["status"] != "optimal":
+            raise InfeasibleOptimizationError("Max Sharpe portfolio is infeasible.")
+
+        y = np.asarray(sol["x"]).ravel()
+        y_sum = y.sum()
+        if abs(y_sum) < 1e-12:
+            raise InfeasibleOptimizationError("Max Sharpe portfolio has zero weight sum (degenerate).")
+
+        w = y / y_sum
+        ret = float(np.dot(np.asarray(self._mean).ravel(), w))
+        risk = float(np.sqrt(w @ np.asarray(self._cov, dtype=float) @ w))
+        return OptimizationResult(weights=w, nominal_return=ret, risk=risk)
+
 # =================================================================== #
 # 2.  MEAN-CVaR
 # =================================================================== #

@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-03-29
+### Added
+- `Constraints` frozen dataclass with `group_constraints`, `from_dict()`, IDE autocomplete.
+- `TransactionCosts` frozen dataclass for immutable cost specification.
+- `PortfolioWrapper.from_moments()`, `.from_scenarios()`, `.from_robust_posterior()` factory classmethods.
+- All frontier methods accept `constraints=` and `costs=` keyword overrides (immutable per-call).
+- Budget risk parity via `risk_budgets` parameter on `RelaxedRiskParity` (Richard-Roncalli 2019).
+- CVaR/VaR views in `FlexibleViewsProcessor` via recursive EP (Meucci 2011, ssrn-1542083).
+- `covariance_ewma()` EWMA covariance estimator (RiskMetrics).
+- `MeanVariance.max_sharpe()` direct solver (Cornuejols-Tutuncu reformulation).
+- Short position support in discrete allocation (auto-delegates to MILP).
+- Prayer-aligned repricing: `reprice_exp`, `reprice_taylor`, `make_repricing_fn` for stocks, bonds, and derivatives.
+- `project_scenarios` accepts `reprice=` callable for P3+P4 in one step.
+- `log2simple`, `simple2log`, `project_mean_covariance`, `project_scenarios` now exported from top-level.
+- `PortfolioFrontier.__post_init__` validates shape consistency.
+- `__repr__` on `PortfolioFrontier` and `PortfolioWrapper`.
+- `THEORY.md` mapping papers to implementations with Prayer framework guide.
+- 48 new tests (total: 189). New test files: `test_views.py`, `test_api_v2.py`.
+- New examples: `budget_risk_parity.py`, `group_constraints.py`, `repricing_derivatives.py`.
+
+### Changed
+- **BREAKING**: Removed `set_constraints()`, `set_transaction_costs()`, `_ensure_default_constraints()`. Use factory classmethods or per-method `constraints=`/`costs=` kwargs.
+- **BREAKING**: Removed 7 deprecated `PortfolioFrontier` method aliases (`get_min_risk_portfolio`, etc.). Use `min_risk()`, `max_return()`, `tangency()`, `at_risk()`, `at_return()`, `at_percentile()`, `closest_risk()`.
+- **BREAKING**: Removed 5 deprecated `PortfolioWrapper` methods (`mean_variance_frontier`, etc.). Use `variance_frontier()`, `cvar_frontier()`, `robust_lambda_frontier()`, `min_variance_at_return()`, `min_cvar_at_return()`.
+- **BREAKING**: Removed `prior_returns` deprecated parameter from `FlexibleViewsProcessor`. Use `prior_risk_drivers`.
+- **BREAKING**: Removed `ensemble_average` / `blend_columns` (misleading per Vorobets). Use `average_frontiers` with `risk_percentile_selections` for cross-frontier ensembles.
+- Cleaned `__init__.py`: removed internal symbols (`build_G_h_A_b`, `allocate_greedy`, `allocate_mip`, `average_exposures`, `exposure_stacking`). Still importable via submodule paths.
+- Added `portfolio_variance`, `portfolio_volatility`, `Constraints`, `TransactionCosts` to top-level exports.
+
+### Fixed
+- Variance bias inconsistency in sequential EP (`np.cov(bias=True)` for consistency).
+- BLP asset index: fixed silent wrong-asset selection for numeric string labels.
+- View target validation: vol must be positive, correlation in [-1,1], skew rejects near-zero variance.
+- BLP confidence key mismatch now warns when dict keys don't match view keys.
+- Asymmetric matrix input now warns before silent symmetrisation in Cholesky.
+- Robust optimizer: docstrings now state `dist.cov` must be S_mu (mean-uncertainty scatter), not Sigma_1.
+- Documented Ledoit-Wolf `kappa/T` constant-correlation variant.
+- Added `cred_radius_mu` and `cred_radius_sigma_factor` to `RobustBayesPosterior`.
+- NaN clamping in `cred_radius_sigma_factor` instead of returning NaN.
+- Extracted `_wrap_vector`/`_wrap_matrix` helpers in NIWPosterior; removed dead `get_posterior()`.
+
 ## [0.4.1] - 2026-03-29
 ### Fixed
 - ENS formula: changed from Herfindahl `1/sum(p^2)` to entropy `exp(-sum(p*ln(p)))` per Meucci (2012) and Vorobets (2025, Eq. 5.1.3).

@@ -5,6 +5,24 @@ Release Notes
    :local:
    :depth: 1
 
+Version 0.5.0 (2026-03-29)
+--------------------------
+
+**Breaking changes** -- see ``CHANGELOG.md`` for migration details.
+
+* Replaced ``set_constraints()`` / ``set_transaction_costs()`` with typed
+  ``Constraints`` / ``TransactionCosts`` dataclasses and factory classmethods
+  (``from_moments``, ``from_scenarios``, ``from_robust_posterior``).
+* Removed 7 deprecated ``PortfolioFrontier`` aliases and 5 deprecated
+  ``PortfolioWrapper`` methods.  New canonical names: ``min_risk()``,
+  ``max_return()``, ``tangency()``, ``at_risk()``, ``at_return()``, etc.
+
+**New features**: budget risk parity, CVaR views, EWMA covariance,
+max-Sharpe direct solver, Prayer repricing framework, group constraints,
+short-position discrete allocation, ``PortfolioFrontier`` shape validation.
+
+See the full ``CHANGELOG.md`` in the repository root for details.
+
 Version 0.4.1 (2026-03-29)
 --------------------------
 

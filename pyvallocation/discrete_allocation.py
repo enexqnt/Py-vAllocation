@@ -106,8 +106,7 @@ class DiscreteAllocationInput:
         if weights.empty:
             raise ValueError("`weights` must contain at least one non-zero entry.")
 
-        if (weights < 0).any():
-            raise ValueError("Negative weights are not supported by the discrete allocation helpers.")
+        self._has_shorts = bool((weights < 0).any())
 
         latest_prices = latest_prices.reindex(weights.index)
         if (latest_prices <= 0).any():
@@ -217,6 +216,11 @@ def allocate_greedy(
     mode = (fallback_mode or "none").lower()
     if mode not in {"auto", "milp", "none"}:
         raise ValueError("`fallback_mode` must be one of {'auto', 'milp', 'none'}.")
+
+    if inputs._has_shorts:
+        logger.info("Short positions detected; delegating to MILP allocator.")
+        fkw = fallback_kwargs or {}
+        return allocate_mip(inputs, **fkw)
 
     weights = inputs.weights.sort_values(ascending=False)
     prices = inputs.latest_prices.loc[weights.index]
@@ -371,9 +375,20 @@ def allocate_mip(
     max_shares_per_lot = np.where(price_per_lot > 0, np.floor(inputs.total_value / price_per_lot).astype(int), 0)
     max_shares_per_lot = np.clip(max_shares_per_lot + 1, 0, None)
 
-    upper_cash = inputs.total_value if max_cash is None else min(max_cash, inputs.total_value)
+    # With short positions, short-sale proceeds can push leftover cash
+    # above total_value, so the upper bound must account for the maximum
+    # possible proceeds from negative lots.
+    short_proceeds_max = float(
+        np.sum(np.where(weights.values < 0, max_shares_per_lot * price_per_lot, 0.0))
+    )
+    effective_cash_ub = inputs.total_value + short_proceeds_max
+    upper_cash = effective_cash_ub if max_cash is None else min(max_cash, effective_cash_ub)
 
-    lb = np.zeros(num_vars)
+    # Allow negative lots for short positions
+    lot_lb = np.where(
+        weights.values >= 0, 0.0, -max_shares_per_lot.astype(float)
+    )
+    lb = np.concatenate([lot_lb, np.zeros(n + 1)])  # u and r stay >= 0
     ub = np.concatenate([
         max_shares_per_lot.astype(float),
         np.full(n, inputs.total_value, dtype=float),

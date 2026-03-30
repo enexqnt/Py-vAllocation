@@ -20,7 +20,7 @@ ArrayLike = Union[np.ndarray, pd.DataFrame, pd.Series]
 ProbabilityLike = Union[np.ndarray, pd.Series, Sequence[float]]
 WeightsLike = Union[np.ndarray, pd.Series, pd.DataFrame]
 
-__all__ = ["scenario_pnl", "performance_report"]
+__all__ = ["scenario_pnl", "performance_report", "horizon_report", "drawdown_quantile"]
 
 
 def scenario_pnl(weights: WeightsLike, scenarios: ArrayLike) -> ArrayLike:
@@ -204,3 +204,114 @@ def performance_report(
             "ENS": ens,
         }
     )
+
+
+def horizon_report(
+    weights: WeightsLike,
+    invariants: ArrayLike,
+    *,
+    horizons: Sequence[int] = (4, 13, 26, 52),
+    n_simulations: int = 5000,
+    p: Optional[ProbabilityLike] = None,
+    reprice=None,
+    confidence: float = 0.95,
+    seed: Optional[int] = None,
+) -> pd.DataFrame:
+    """Compare risk metrics across multiple projection horizons.
+
+    For each horizon, bootstraps invariants via
+    :func:`~pyvallocation.utils.projection.project_scenarios`, reprices,
+    and computes :func:`performance_report`.
+
+    Args:
+        weights: Portfolio weights.
+        invariants: Invariant scenarios ``(T, N)``.
+        horizons: Sequence of horizon lengths (in invariant time steps).
+        n_simulations: Scenarios per horizon.
+        p: Optional scenario probabilities.
+        reprice: Repricing callable (default ``reprice_exp``).
+        confidence: Confidence level for VaR/CVaR.
+        seed: Base random seed (incremented per horizon for independence).
+
+    Returns:
+        pd.DataFrame: Rows = horizons, columns = mean, stdev, VaR, CVaR, ENS.
+    """
+    from .projection import project_scenarios, reprice_exp as _reprice_exp
+
+    if reprice is None:
+        reprice = _reprice_exp
+
+    default_labels = {4: "1m", 13: "3m", 26: "6m", 52: "1y"}
+    rows = {}
+    for i, h in enumerate(horizons):
+        h_seed = (seed + i) if seed is not None else None
+        scen = project_scenarios(
+            invariants, investment_horizon=h, p=p,
+            n_simulations=n_simulations, reprice=reprice,
+        )
+        report = performance_report(
+            weights, scen, confidence=confidence,
+        )
+        label = default_labels.get(h, f"{h}w")
+        rows[label] = report
+
+    return pd.DataFrame(rows).T
+
+
+def drawdown_quantile(
+    weights: WeightsLike,
+    invariants: ArrayLike,
+    horizon: int,
+    *,
+    confidence: float = 0.95,
+    n_paths: int = 1000,
+    p: Optional[ProbabilityLike] = None,
+    reprice=None,
+    seed: Optional[int] = None,
+) -> pd.Series:
+    """Compute the maximum drawdown distribution via path simulation.
+
+    Simulates full wealth paths, computes the maximum peak-to-trough
+    drawdown of each path, and returns summary statistics.
+
+    Args:
+        weights: Portfolio weights.
+        invariants: Invariant scenarios ``(T, N)``.
+        horizon: Path length in invariant time steps.
+        confidence: Quantile level for the drawdown statistic.
+        n_paths: Number of simulated paths.
+        p: Optional scenario probabilities.
+        reprice: Repricing callable (default ``reprice_exp``).
+        seed: Random seed.
+
+    Returns:
+        pd.Series: Keys ``max_dd_mean``, ``max_dd_median``,
+        ``max_dd_{confidence}``, ``max_dd_worst``.
+    """
+    from .projection import simulate_paths, reprice_exp as _reprice_exp
+
+    if reprice is None:
+        reprice = _reprice_exp
+
+    w = np.asarray(weights, dtype=float).ravel()
+    paths = simulate_paths(
+        invariants, horizon=horizon, n_paths=n_paths,
+        p=p, reprice=reprice, seed=seed,
+    )  # (n_paths, horizon, N)
+
+    # Portfolio cumulative returns at each step
+    port_cum = paths @ w  # (n_paths, horizon)
+    wealth = 1.0 + port_cum  # wealth relative to $1
+
+    # Running maximum and drawdown
+    running_max = np.maximum.accumulate(wealth, axis=1)
+    drawdowns = (running_max - wealth) / np.where(running_max > 0, running_max, 1.0)
+    max_dd = drawdowns.max(axis=1)  # (n_paths,)
+
+    pct = int(round(confidence * 100))
+    return pd.Series({
+        "max_dd_mean": float(max_dd.mean()),
+        "max_dd_median": float(np.median(max_dd)),
+        f"max_dd_{pct}": float(np.quantile(max_dd, confidence)),
+        "max_dd_worst": float(max_dd.max()),
+    })

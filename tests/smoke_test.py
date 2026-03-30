@@ -9,10 +9,12 @@ class TestSmoke(unittest.TestCase):
     def setUp(self):
         self.T = 100
         self.N = 5
-        self.returns_array = np.random.rand(self.T, self.N) - 0.5
+        rng = np.random.default_rng(42)
+        self.returns_array = rng.random((self.T, self.N)) - 0.5
         self.returns_df = pd.DataFrame(self.returns_array, columns=[f'Asset_{i}' for i in range(self.N)])
-        self.spy_vol_series = pd.Series(np.random.rand(self.T), name='SPY_VOL')
+        self.spy_vol_series = pd.Series(rng.random(self.T), name='SPY_VOL')
         self.half_life = 50
+        self._rng = rng
 
     def test_generate_uniform_probabilities(self):
         p_uniform = probabilities.generate_uniform_probabilities(self.T)
@@ -98,7 +100,7 @@ class TestSmoke(unittest.TestCase):
         if self.T <= self.N + 2:
             original_T = self.T
             self.T = self.N + 3
-            temp_returns_df = pd.DataFrame(np.random.rand(self.T, self.N) - 0.5)
+            temp_returns_df = pd.DataFrame(self._rng.random(self.T, self.N) - 0.5)
             p_uniform_temp = probabilities.generate_uniform_probabilities(self.T)
             mu_temp, cov_temp = moments.estimate_sample_moments(temp_returns_df, p_uniform_temp)
             mu_shrunk = moments.shrink_mean_jorion(mu_temp, cov_temp, self.T)
@@ -117,7 +119,7 @@ class TestSmoke(unittest.TestCase):
         if self.T < self.N:
             original_T = self.T
             self.T = self.N + 1
-            temp_returns_df = pd.DataFrame(np.random.rand(self.T, self.N) - 0.5, columns=self.returns_df.columns)
+            temp_returns_df = pd.DataFrame(self._rng.random(self.T, self.N) - 0.5, columns=self.returns_df.columns)
             p_uniform_temp = probabilities.generate_uniform_probabilities(self.T)
             _ , cov_temp = moments.estimate_sample_moments(temp_returns_df, p_uniform_temp)
             cov_shrunk = moments.shrink_covariance_ledoit_wolf(temp_returns_df, cov_temp, target='constant_correlation')
@@ -135,7 +137,7 @@ class TestSmoke(unittest.TestCase):
         if self.T < self.N:
             original_T = self.T
             self.T = self.N + 1
-            temp_returns_df = pd.DataFrame(np.random.rand(self.T, self.N) - 0.5, columns=self.returns_df.columns)
+            temp_returns_df = pd.DataFrame(self._rng.random(self.T, self.N) - 0.5, columns=self.returns_df.columns)
             p_uniform_temp = probabilities.generate_uniform_probabilities(self.T)
             _ , cov_temp = moments.estimate_sample_moments(temp_returns_df, p_uniform_temp)
             cov_shrunk = moments.shrink_covariance_ledoit_wolf(temp_returns_df, cov_temp, target='identity')
@@ -147,7 +149,7 @@ class TestSmoke(unittest.TestCase):
         self.assertIsInstance(cov_shrunk, pd.DataFrame)
 
     def test_black_litterman_processor(self):
-        prior_mean = pd.Series(np.random.rand(self.N) / 100, index=self.returns_df.columns)
+        prior_mean = pd.Series(self._rng.random(self.N) / 100, index=self.returns_df.columns)
         prior_cov = pd.DataFrame(np.cov(self.returns_array.T) + np.eye(self.N)*0.0001, index=self.returns_df.columns, columns=self.returns_df.columns)
         
         eigenvalues = np.linalg.eigvalsh(prior_cov)
@@ -174,7 +176,7 @@ class TestSmoke(unittest.TestCase):
         self.assertIsInstance(posterior_cov, pd.DataFrame)
 
     def test_project_mean_covariance(self):
-        mu = pd.Series(np.random.rand(self.N) / 252, index=self.returns_df.columns)
+        mu = pd.Series(self._rng.random(self.N) / 252, index=self.returns_df.columns)
         cov = pd.DataFrame(np.cov(self.returns_array.T)/252 + np.eye(self.N)*0.00001, index=self.returns_df.columns, columns=self.returns_df.columns)
         investment_horizon = 20
 
@@ -184,8 +186,8 @@ class TestSmoke(unittest.TestCase):
         self.assertTrue(np.all(mu_hor >= mu * investment_horizon * 0.9) and np.all(mu_hor <= mu * investment_horizon * 1.1) if not mu.empty else True)
 
     def test_log2simple(self):
-        log_mu = pd.Series(np.random.rand(self.N) * 0.01, index=self.returns_df.columns)
-        log_cov = pd.DataFrame(np.random.rand(self.N, self.N) * 0.001, index=self.returns_df.columns, columns=self.returns_df.columns)
+        log_mu = pd.Series(self._rng.random(self.N) * 0.01, index=self.returns_df.columns)
+        log_cov = pd.DataFrame(self._rng.random((self.N, self.N)) * 0.001, index=self.returns_df.columns, columns=self.returns_df.columns)
         log_cov = (log_cov + log_cov.T)/2 + np.eye(self.N)*1e-5
 
         simple_mu, simple_cov = projection.log2simple(log_mu, log_cov)
@@ -196,7 +198,7 @@ class TestSmoke(unittest.TestCase):
 
 
     def test_assets_distribution(self):
-        mu = pd.Series(np.random.rand(self.N) / 100, index=self.returns_df.columns)
+        mu = pd.Series(self._rng.random(self.N) / 100, index=self.returns_df.columns)
         cov = pd.DataFrame(np.cov(self.returns_array.T) + np.eye(self.N)*0.0001, index=self.returns_df.columns, columns=self.returns_df.columns)
         dist = portfolioapi.AssetsDistribution(mu=mu, cov=cov)
         self.assertTrue(np.array_equal(dist.mu, mu))
@@ -207,7 +209,7 @@ class TestSmoke(unittest.TestCase):
 
 
     def test_portfolio_wrapper_mvo(self):
-        mu = pd.Series(np.random.rand(self.N) / 100, index=self.returns_df.columns)
+        mu = pd.Series(self._rng.random(self.N) / 100, index=self.returns_df.columns)
         cov_matrix = np.cov(self.returns_array.T)
         min_eig = np.min(np.linalg.eigvalsh(cov_matrix))
         if min_eig <= 1e-8:
@@ -242,7 +244,7 @@ class TestSmoke(unittest.TestCase):
             print("Skipping at_return sub-test as frontier returns are too close.")
 
     def test_bayesian_niw_posterior(self):
-        prior_mean_bl = pd.Series(np.random.rand(self.N) / 100, index=self.returns_df.columns)
+        prior_mean_bl = pd.Series(self._rng.random(self.N) / 100, index=self.returns_df.columns)
         prior_cov_bl_matrix = np.cov(self.returns_array.T) + np.eye(self.N)*0.001
         min_eig_bl = np.min(np.linalg.eigvalsh(prior_cov_bl_matrix))
         if min_eig_bl <= 1e-8:
@@ -254,7 +256,7 @@ class TestSmoke(unittest.TestCase):
 
         niw_updater = bayesian.NIWPosterior(prior_mean_bl, prior_cov_bl, kappa_prior, nu_prior)
 
-        sample_mean = pd.Series(np.random.rand(self.N) / 100, index=self.returns_df.columns)
+        sample_mean = pd.Series(self._rng.random(self.N) / 100, index=self.returns_df.columns)
         sample_cov_matrix = np.cov(self.returns_array.T * 1.1) + np.eye(self.N)*0.001
         min_eig_sample = np.min(np.linalg.eigvalsh(sample_cov_matrix))
         if min_eig_sample <= 1e-8:
@@ -275,7 +277,7 @@ class TestSmoke(unittest.TestCase):
 
 
     def test_portfolio_wrapper_robust_lambda_frontier(self):
-        est_expected_return = pd.Series(np.random.rand(self.N) / 90, index=self.returns_df.columns)
+        est_expected_return = pd.Series(self._rng.random(self.N) / 90, index=self.returns_df.columns)
         est_uncertainty_cov_matrix = np.cov(self.returns_array.T * 0.9) + np.eye(self.N)*0.0015
         min_eig_robust = np.min(np.linalg.eigvalsh(est_uncertainty_cov_matrix))
         if min_eig_robust <= 1e-8:
@@ -298,7 +300,7 @@ class TestSmoke(unittest.TestCase):
 
 
     def test_portfolio_wrapper_solve_robust_gamma_portfolio(self):
-        est_expected_return = pd.Series(np.random.rand(self.N) / 95, index=self.returns_df.columns)
+        est_expected_return = pd.Series(self._rng.random(self.N) / 95, index=self.returns_df.columns)
         est_uncertainty_cov_matrix = np.cov(self.returns_array.T * 0.95) + np.eye(self.N)*0.0012
         min_eig_gamma = np.min(np.linalg.eigvalsh(est_uncertainty_cov_matrix))
         if min_eig_gamma <= 1e-8:
@@ -396,7 +398,7 @@ class TestSmoke(unittest.TestCase):
         self.assertTrue(np.all(q_posterior >= 0))
 
     def test_flexible_views_processor_mean_cov_prior(self):
-        prior_mean = pd.Series(np.random.rand(self.N) / 100, index=self.returns_df.columns)
+        prior_mean = pd.Series(self._rng.random(self.N) / 100, index=self.returns_df.columns)
         prior_cov_matrix = np.cov(self.returns_array.T) + np.eye(self.N)*0.0001
         min_eig = np.min(np.linalg.eigvalsh(prior_cov_matrix))
         if min_eig <= 1e-8:

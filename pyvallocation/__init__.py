@@ -20,6 +20,7 @@ __all__ = [
     "shrink_covariance_nls",
     "factor_covariance_poet",
     "robust_covariance_tyler",
+    "covariance_ewma",
     "sparse_precision_glasso",
     # --- Bayesian ---
     "RobustBayesPosterior",
@@ -56,6 +57,15 @@ __all__ = [
     # --- Risk utilities ---
     "portfolio_variance",
     "portfolio_volatility",
+    # --- Projection & repricing (Prayer P3-P4) ---
+    "project_scenarios",
+    "simulate_paths",
+    "reprice_exp",
+    "reprice_taylor",
+    "make_repricing_fn",
+    "log2simple",
+    "simple2log",
+    "project_mean_covariance",
     # --- Plotting ---
     "plot_frontiers",
     "plot_frontiers_grid",
@@ -74,6 +84,8 @@ __all__ = [
     # --- Performance ---
     "scenario_pnl",
     "performance_report",
+    "horizon_report",
+    "drawdown_quantile",
 ]
 
 from .portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper, TransactionCosts
@@ -86,6 +98,7 @@ from .moments import (
     posterior_moments_black_litterman,
     posterior_moments_niw,
     posterior_moments_niw_with_uncertainty,
+    covariance_ewma,
     robust_covariance_tyler,
     robust_mean_huber,
     robust_mean_median_of_means,
@@ -112,6 +125,16 @@ from .discrete_allocation import (
     DiscreteAllocationResult,
     discretize_weights,
 )
+from .utils.projection import (
+    log2simple,
+    make_repricing_fn,
+    project_mean_covariance,
+    project_scenarios,
+    reprice_exp,
+    reprice_taylor,
+    simulate_paths,
+    simple2log,
+)
 from .ensembles import (
     average_frontiers,
     assemble_portfolio_ensemble,
@@ -137,4 +160,4 @@ from .stress import (
     linear_map,
     stress_test,
 )
-from .utils.performance import performance_report, scenario_pnl
+from .utils.performance import drawdown_quantile, horizon_report, performance_report, scenario_pnl

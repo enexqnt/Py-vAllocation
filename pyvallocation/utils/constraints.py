@@ -337,16 +337,13 @@ def build_G_h_A_b(
         and bounds is not None
         and isinstance(bounds, tuple)
         and bounds[0] is not None
-        and bounds[0] >= 0
+        and bounds[0] == 0
     ):
         warnings.warn(
-            "long_only=True already enforces w >= 0; supplying a non-negative lower "
-            "bound duplicates that constraint.",
+            "long_only=True already enforces w >= 0; supplying lower bound = 0 "
+            "duplicates that constraint.",
             UserWarning,
             stacklevel=2,
-        )
-        logger.warning(
-            "long_only=True already enforces w >= 0; supplying a non-negative lower bound duplicates that constraint."
         )
 
     def _stack(rows: List[np.ndarray]) -> Optional[np.ndarray]:

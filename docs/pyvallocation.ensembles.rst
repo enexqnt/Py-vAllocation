@@ -27,7 +27,7 @@ At a glance
   project and is credited accordingly.
 - :func:`pyvallocation.ensembles.assemble_portfolio_ensemble` orchestrates
   frontier sampling, averaging, stacking, and optional selectors. The function
-  underpins the :doc:`tutorials/portfolio_ensembles` walkthrough.
+  underpins the :doc:`tutorials/notebooks/Portfolio_Ensembles` notebook.
 
 Quick start
 -----------
@@ -83,9 +83,12 @@ handy shortcuts:
 
    avg_portfolio.plot.bar(title="Average ensemble weights")
 
-You can also stay on the `PortfolioFrontier` itself::
+You can also align frontiers by risk percentile before averaging::
 
-   frontier.ensemble_average(columns=[0, -1])
+   from pyvallocation.ensembles import average_frontiers, risk_percentile_selections
+
+   selections = risk_percentile_selections([frontier, another], percentile=0.5)
+   blended = average_frontiers([frontier, another], selections=selections)
 
 Or blend several frontiers/single portfolios directly::
 
@@ -110,7 +113,7 @@ Tips
 - Exposure stacking assumes portfolios are long-only and sum to one. If your
   research stack permits leverage, normalise samples first.
 - :func:`assemble_portfolio_ensemble` can mix averaging and stacking in a single
-  call. See :doc:`tutorials/portfolio_ensembles` for an end-to-end example.
+  call. See :doc:`tutorials/notebooks/Portfolio_Ensembles` for an end-to-end example.
 - Every helper preserves pandas indices when they are present so the output can
   flow straight into downstream reporting.
 - Solver options can be forwarded via ``solver_options`` when you need to tweak

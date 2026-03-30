@@ -18,7 +18,7 @@ Quickstarts
 
 - :file:`examples/quickstart_etf_allocation.py` - end-to-end ETF allocation
   (moments -> frontiers -> ensemble -> discrete trades). Outputs plots and CSVs
-  under :file:`output/` and is documented in :doc:`quickstart_etf_allocation`.
+  under :file:`output/`.
 
 Frontiers & risk models
 -----------------------
@@ -27,6 +27,9 @@ Frontiers & risk models
 - :file:`examples/cvar_allocation.py` - CVaR frontier (:math:`\alpha = 5\%`).
 - :file:`examples/robust_frontier.py` - robust (Meucci) :math:`\lambda`-frontier.
 - :file:`examples/relaxed_risk_parity_frontier.py` - relaxed risk parity diagnostic sweep.
+- :file:`examples/budget_risk_parity.py` - custom risk budgets (50/20/20/10) vs. ERC.
+- :file:`examples/group_constraints.py` - sector allocation limits with typed ``Constraints``.
+- :file:`examples/repricing_derivatives.py` - stocks + bonds + options via the Prayer repricing chain.
 
 Utilities
 ---------
@@ -37,12 +40,21 @@ Utilities
   stacking/averaging to a single allocation.
 - :file:`examples/stress_and_pnl.py` - probability tilts, linear shocks, and performance summaries.
 
-Notebooks
----------
+Notebooks (with output and plots)
+----------------------------------
 
-Rendered notebooks live under :file:`docs/tutorials/notebooks/`:
+.. toctree::
+   :maxdepth: 1
 
-- :file:`tutorials/notebooks/Example_01.ipynb`
-- :file:`tutorials/notebooks/Simple_views_on_mean.ipynb`
-- :file:`tutorials/notebooks/Bayesian.ipynb`
-- :file:`tutorials/notebooks/Flexible_Views.ipynb`
+   notebooks/Example_01
+   notebooks/Simple_views_on_mean
+   notebooks/Bayesian
+   notebooks/Flexible_Views
+   notebooks/Mean_Variance
+   notebooks/CVaR_Frontier
+   notebooks/Group_Constraints
+   notebooks/Budget_Risk_Parity
+   notebooks/Repricing_Derivatives
+   notebooks/Stress_Testing
+   notebooks/Portfolio_Ensembles
+   notebooks/ETF_Multi_Asset_Walkthrough

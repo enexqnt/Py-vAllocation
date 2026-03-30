@@ -160,19 +160,30 @@ def simple2log(mu_r, cov_r):
     return (_wrap_vector(mu_g_np, mu_r), _wrap_matrix(cov_g_np, cov_r))
 
 
-def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
+def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000,
+                      reprice=None):
     """
-    Simulate horizon sums by sampling scenarios with replacement.
+    Simulate horizon sums by sampling invariants with replacement.
+
+    Implements **P3 (Projection)** of Meucci's Prayer framework: invariants
+    are bootstrapped over ``investment_horizon`` steps and summed (random walk).
+    If a ``reprice`` callable is supplied, it is applied to the projected risk
+    drivers to obtain P&L scenarios (**P4 Pricing**).
 
     Args:
-        R: Historical or simulated scenarios. One-dimensional inputs represent
-            single-asset returns (length ``T``). Two-dimensional inputs represent
-            ``T`` scenarios across ``N`` assets.
+        R: Historical or simulated invariants (e.g. log-returns, yield changes).
+            One-dimensional inputs represent single-instrument (length ``T``).
+            Two-dimensional inputs represent ``T`` scenarios across ``N`` risk drivers.
         investment_horizon: Number of draws (with replacement) per simulated path.
             Defaults to ``2``.
         p: Scenario probabilities. When omitted, draws are uniform. Length must
             match the number of rows in ``R``.
         n_simulations: Number of simulated paths to generate. Defaults to ``1000``.
+        reprice: Optional callable ``f(projected_risk_drivers) -> pnl_scenarios``
+            that converts projected risk-driver changes into P&L or simple-return
+            scenarios.  Built-in options:
+            :func:`reprice_exp` (stocks: ``exp(Δy) - 1``),
+            :func:`reprice_taylor` (greeks/duration: ``θτ + δΔy + ½γΔy²``).
 
     Returns:
         numpy.ndarray or pandas.Series or pandas.DataFrame: Simulated sums whose
@@ -230,6 +241,9 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
     idx = rng.choice(num_rows, size=(n_simulations, investment_horizon), p=weights)
     scenario_sums = R_np[idx].sum(axis=1)
 
+    if reprice is not None:
+        scenario_sums = reprice(scenario_sums)
+
     if is_series:
         template_ser = pd.Series(dtype=float, index=range(n_simulations), name=R.name)
         return _wrap_vector(scenario_sums, template_ser)
@@ -241,3 +255,162 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000):
 
 # Alias emphasising that inputs can be generic risk drivers, not only returns.
 project_risk_drivers = project_scenarios
+
+
+def simulate_paths(
+    R,
+    horizon: int = 2,
+    n_paths: int = 1000,
+    p=None,
+    reprice=None,
+    seed=None,
+):
+    """Simulate full trajectory paths by bootstrapping invariants.
+
+    Unlike :func:`project_scenarios` which returns only the terminal sum,
+    this function returns the cumulative risk-driver change at **every**
+    intermediate step, enabling drawdown analysis and fan charts.
+
+    Args:
+        R: Invariant scenarios ``(T, N)`` or ``(T,)`` (e.g. log-returns).
+        horizon: Number of bootstrap steps per path.
+        n_paths: Number of simulated paths.
+        p: Optional scenario probabilities.
+        reprice: Optional callable applied to cumulative risk-driver changes
+            at each step (e.g. ``reprice_exp`` for cumulative simple returns).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        np.ndarray: Shape ``(n_paths, horizon, N)`` — cumulative
+        risk-driver changes (or repriced values) at each time step.
+    """
+    R_np = _to_numpy(R)
+    if R_np.ndim == 1:
+        R_np = R_np.reshape(-1, 1)
+    if R_np.ndim != 2:
+        raise ValueError("`R` must be 1D or 2D.")
+
+    T, N = R_np.shape
+    weights = np.asarray(p, dtype=float).ravel() if p is not None else np.full(T, 1.0 / T)
+    weights = weights / weights.sum()
+
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(T, size=(n_paths, horizon), p=weights)
+    sampled = R_np[idx]  # (n_paths, horizon, N)
+    cumulative = np.cumsum(sampled, axis=1)  # cumulative sum along time
+
+    if reprice is not None:
+        # Apply repricing at each time step
+        out = np.empty_like(cumulative)
+        for t in range(horizon):
+            out[:, t, :] = reprice(cumulative[:, t, :])
+        return out
+
+    return cumulative
+
+
+# ------------------------------------------------------------------ #
+# Built-in repricing functions  (Prayer Step P4)
+# ------------------------------------------------------------------ #
+
+def reprice_exp(delta_y: np.ndarray) -> np.ndarray:
+    """Reprice via exponentiation (stocks, equity indices).
+
+    Maps projected log-return invariants to simple returns:
+    ``P&L / V_0 = exp(Δy) - 1``.
+
+    This is the **exact** repricing for instruments whose risk driver
+    is the log-price (Meucci Prayer P4, Eq. 17 for stocks).
+
+    Args:
+        delta_y: Projected risk-driver changes ``Y_{T+τ} - Y_T`` (log-returns).
+
+    Returns:
+        np.ndarray: Simple-return scenarios.
+    """
+    return np.exp(delta_y) - 1.0
+
+
+def reprice_taylor(
+    delta_y: np.ndarray,
+    *,
+    theta: Union[np.ndarray, float, None] = None,
+    delta: Union[np.ndarray, float, None] = None,
+    gamma: Union[np.ndarray, float, None] = None,
+    tau: float = 0.0,
+) -> np.ndarray:
+    r"""Reprice via Taylor / Greek approximation (options, bonds).
+
+    Approximates the P&L using a second-order expansion around the
+    current risk-driver values (Meucci Prayer P4, Eq. 18):
+
+    .. math::
+
+       \text{P\&L} \approx \theta\,\tau + \delta\,\Delta y
+                    + \tfrac12\,\gamma\,(\Delta y)^2.
+
+    The coefficients are instrument-specific sensitivities:
+
+    * **Equities**: ``delta=1``, others zero (reduces to linear return).
+    * **Options**: ``theta`` (time decay), ``delta`` (option delta),
+      ``gamma`` (option gamma).  For multi-factor options, ``delta``
+      and ``gamma`` can be vectors/matrices matching risk-driver columns.
+    * **Bonds**: ``delta = -duration * price``, ``gamma = convexity * price``.
+
+    Args:
+        delta_y: Projected risk-driver changes (``n_sim × n_drivers``).
+        theta: Time-decay coefficient(s).  Scalar or per-instrument array.
+        delta: First-order sensitivity (delta, -duration, etc.).
+        gamma: Second-order sensitivity (gamma, convexity, etc.).
+        tau: Time step (e.g. ``1/252`` for daily, ``1/12`` for monthly).
+
+    Returns:
+        np.ndarray: Approximate P&L scenarios, same shape as ``delta_y``.
+    """
+    pnl = np.zeros_like(delta_y, dtype=float)
+    if theta is not None:
+        pnl = pnl + np.asarray(theta, dtype=float) * tau
+    if delta is not None:
+        pnl = pnl + np.asarray(delta, dtype=float) * delta_y
+    if gamma is not None:
+        pnl = pnl + 0.5 * np.asarray(gamma, dtype=float) * delta_y ** 2
+    return pnl
+
+
+def make_repricing_fn(pricing_fn, current_drivers: np.ndarray):
+    """Build a repricing callable from an arbitrary pricing function.
+
+    For **full repricing** (Prayer P4), the user supplies a function
+    ``pricing_fn(Y)`` that maps risk-driver levels to instrument prices.
+    The returned callable computes:
+
+    ``P&L = pricing_fn(Y_T + Δy) - pricing_fn(Y_T)``
+
+    Args:
+        pricing_fn: Callable ``f(Y) -> prices``, where ``Y`` has the same
+            columns as the risk-driver scenarios.  Must be vectorised over
+            the first (scenario) axis.
+        current_drivers: Current risk-driver levels ``Y_T`` (1-D array of
+            length ``n_drivers``).
+
+    Returns:
+        Callable: Repricing function suitable for the ``reprice`` parameter
+        of :func:`project_scenarios`.
+
+    Examples:
+        >>> # Bond: price = face * exp(-yield * maturity)
+        >>> import numpy as np
+        >>> face, maturity = 100, 5
+        >>> pricing_fn = lambda Y: face * np.exp(-Y * maturity)
+        >>> current_yield = np.array([0.03])
+        >>> repricer = make_repricing_fn(pricing_fn, current_yield)
+        >>> # repricer(delta_y) returns bond P&L scenarios
+    """
+    y0 = np.asarray(current_drivers, dtype=float)
+    p0 = pricing_fn(y0)
+
+    def _reprice(delta_y: np.ndarray) -> np.ndarray:
+        y_horizon = y0 + delta_y
+        return pricing_fn(y_horizon) - p0
+
+    return _reprice

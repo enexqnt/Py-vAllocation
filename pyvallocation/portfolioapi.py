@@ -269,6 +269,24 @@ class PortfolioFrontier:
     metadata: Optional[List[Dict[str, Any]]] = None
     alternate_risks: Dict[str, np.ndarray] = field(default_factory=dict)
 
+    def __post_init__(self):
+        M = self.returns.shape[0]
+        if self.weights.shape[1] != M:
+            raise ValueError(f"weights has {self.weights.shape[1]} columns but returns has {M} entries.")
+        if self.risks.shape[0] != M:
+            raise ValueError(f"risks has {self.risks.shape[0]} entries but returns has {M}.")
+        if self.asset_names is not None and len(self.asset_names) != self.weights.shape[0]:
+            raise ValueError(f"asset_names length {len(self.asset_names)} != N assets {self.weights.shape[0]}.")
+        for label, arr in (self.alternate_risks or {}).items():
+            if arr.shape[0] != M:
+                raise ValueError(f"alternate_risks['{label}'] has {arr.shape[0]} entries but frontier has {M}.")
+
+    def __repr__(self):
+        N, M = self.weights.shape
+        names = self.asset_names[:3] if self.asset_names else None
+        suffix = f", assets={names}..." if names else ""
+        return f"PortfolioFrontier(N={N}, M={M}, risk_measure='{self.risk_measure}'{suffix})"
+
     def available_risk_measures(self) -> List[str]:
         """Return list of risk measure labels carried by this frontier.
 
@@ -718,6 +736,11 @@ class PortfolioWrapper:
         self.market_impact_costs: Optional[np.ndarray] = None
         self.proportional_costs: Optional[np.ndarray] = None
         logger.info(f"PortfolioWrapper initialized for {self.dist.N} assets.")
+
+    def __repr__(self):
+        names = self.dist.asset_names[:3] if self.dist.asset_names else None
+        suffix = f", assets={names}..." if names else ""
+        return f"PortfolioWrapper(N={self.dist.N}{suffix})"
 
     @classmethod
     def from_moments(

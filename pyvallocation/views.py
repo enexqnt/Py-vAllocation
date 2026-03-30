@@ -1,5 +1,6 @@
 # entropy_pooling and _dual_objective functions are adapted from fortitudo-tech https://github.com/fortitudo-tech/fortitudo.tech
 
+import logging
 import warnings
 from collections.abc import Sequence
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -390,6 +391,10 @@ class FlexibleViewsProcessor:
             vol_views: Views on marginal volatilities.
             corr_views: Views on correlations.
             skew_views: Views on skewness.
+            cvar_views: Views on conditional value-at-risk. Specify as
+                ``{asset: (target_cvar, gamma)}`` where ``gamma`` is the tail
+                probability (e.g. 0.05 for 95% CVaR). Uses recursive entropy
+                pooling per Meucci (2011, ssrn-1542083).
             sequential: Whether to apply views sequentially (default ``False``).
         """
         risk_drivers = prior_risk_drivers
@@ -786,6 +791,10 @@ class FlexibleViewsProcessor:
             A_cvar.append(row_mean[np.argsort(order)])  # unsort
             b_cvar.append(gamma * cvar_target)
 
+            # Normalization: sum(q) = 1
+            A_cvar.append(np.ones(S))
+            b_cvar.append(1.0)
+
             # Combine with other constraints
             all_A = list(other_A or []) + A_cvar
             all_b = list(other_b or []) + b_cvar
@@ -801,8 +810,9 @@ class FlexibleViewsProcessor:
                     h=np.array(all_h) if all_h else None,
                 )
                 # Compute relative entropy
-                mask = q > 0
-                kl = float(np.sum(q[mask] * np.log(q[mask] / p[mask])))
+                q_flat = q.flatten()
+                mask = q_flat > 0
+                kl = float(np.sum(q_flat[mask] * np.log(q_flat[mask] / p[mask])))
                 return q, kl
             except Exception:
                 return None, np.inf
@@ -826,7 +836,11 @@ class FlexibleViewsProcessor:
             if abs(d2) < 1e-14:
                 break
 
-            s_new = int(round(s - d1 / d2))
+            ratio = d1 / d2
+            if not np.isfinite(ratio):
+                break
+
+            s_new = int(round(s - ratio))
             s_new = max(1, min(s_new, S - 2))
 
             if s_new == s:
@@ -1302,7 +1316,6 @@ class BlackLittermanProcessor:
             result = []
             for k in keys:
                 if k not in conf:
-                    import logging
                     logging.getLogger(__name__).warning(
                         "No confidence found for view key %r; defaulting to 1.0. "
                         "Ensure confidence keys match view keys exactly (e.g. tuple for relative views).",

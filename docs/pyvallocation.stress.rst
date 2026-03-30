@@ -15,7 +15,7 @@ Highlights
 - :func:`pyvallocation.stress.entropy_pooling_stress` - plug posterior probabilities from entropy pooling.
 - :func:`pyvallocation.stress.linear_map` - helper to build mean/scale/factor shocks.
 
-The :ref:`stress testing tutorial <stress_testing_tutorial>` demonstrates these
+The :doc:`tutorials/notebooks/Stress_Testing` notebook demonstrates these
 functions alongside the :mod:`pyvallocation.utils.performance` helpers.
 
 Reference

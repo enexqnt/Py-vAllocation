@@ -709,6 +709,53 @@ def robust_covariance_tyler(
     return _wrap(covariance, _labels(R), False)
 
 
+def covariance_ewma(
+    R: ArrayLike,
+    *,
+    span: int = 252,
+    min_periods: int = 1,
+) -> ArrayLike:
+    """Exponentially Weighted Moving Average (EWMA) covariance estimator.
+
+    Implements the RiskMetrics (1996) exponential smoother. The decay
+    factor is ``lambda = 1 - 2 / (span + 1)``.
+
+    The recursion is:
+
+    .. math::
+
+       \\Sigma_t = \\lambda\\,\\Sigma_{t-1} + (1-\\lambda)\\,r_t r_t^\\top.
+
+    Args:
+        R: Scenario matrix ``(T, N)`` of returns (most recent row last).
+        span: Decay span in observations. Defaults to 252 (≈ 1 year of daily data).
+        min_periods: Minimum number of observations before producing a result.
+
+    Returns:
+        ArrayLike: EWMA covariance matrix (pandas DataFrame when labels available).
+
+    References:
+        J.P. Morgan / Reuters (1996), *RiskMetrics Technical Document*.
+    """
+    labels = _labels(R)
+    X = np.asarray(R, dtype=float)
+    if X.ndim != 2:
+        raise ValueError("Input `R` must be two-dimensional with shape (T, N).")
+    T, N = X.shape
+    if T < min_periods:
+        raise ValueError(f"Need at least {min_periods} observations, got {T}.")
+
+    lam = 1.0 - 2.0 / (span + 1)
+
+    # Initialize with first observation outer product
+    cov = np.outer(X[0], X[0])
+    for t in range(1, T):
+        cov = lam * cov + (1.0 - lam) * np.outer(X[t], X[t])
+
+    cov = 0.5 * (cov + cov.T)  # enforce symmetry
+    return _wrap(cov, labels, False)
+
+
 def _soft_threshold(matrix: np.ndarray, threshold: float) -> np.ndarray:
     """Apply soft-thresholding to off-diagonal elements.
 
@@ -1228,10 +1275,12 @@ def estimate_moments(
     elif cov_choice in {"glasso", "graphical_lasso"}:
         cov_kwargs["return_precision"] = False
         Sigma = sparse_precision_glasso(R, **cov_kwargs)
+    elif cov_choice == "ewma":
+        Sigma = covariance_ewma(R, **cov_kwargs)
     else:
         raise ValueError(
             f"Unsupported covariance estimator '{cov_estimator}'. "
-            f"Valid options: {sorted({'sample', 'ledoit_wolf', 'oas', 'nls', 'poet', 'tyler', 'glasso'})}."
+            f"Valid options: {sorted({'sample', 'ledoit_wolf', 'oas', 'nls', 'poet', 'tyler', 'glasso', 'ewma'})}."
         )
 
     return mu, Sigma

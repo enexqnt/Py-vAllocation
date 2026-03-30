@@ -54,8 +54,8 @@ Run the ETF quickstart
 ----------------------
 
 For a full workflow--from data ingestion to trade lots--run the ETF quickstart
-script. It mirrors :doc:`tutorials/quickstart_etf_allocation` and writes CSVs
-and plots to ``output/``.
+script. See the :doc:`tutorials/notebooks/ETF_Multi_Asset_Walkthrough` notebook
+for the full walkthrough with output and plots.
 
 .. code-block:: bash
 

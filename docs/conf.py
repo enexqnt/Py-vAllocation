@@ -6,8 +6,8 @@ project = 'Py-vAllocation'
 copyright = '2025, enexqnt'
 author = 'enexqnt'
 
-version = '0.4.1'
-release = '0.4.1'
+version = '0.5.1'
+release = '0.5.1'
 
 extensions = [
     'sphinx.ext.autodoc',
@@ -18,6 +18,8 @@ extensions = [
     'sphinxcontrib.bibtex',
     'nbsphinx',
 ]
+
+nbsphinx_execute = 'never'  # render pre-executed notebook output as-is
 
 bibtex_bibfiles = ['references.bib']
 bibtex_reference_style = 'author_year' # or 'label' or 'numeric'
@@ -52,7 +54,6 @@ templates_path = ['_templates']
 
 exclude_patterns = [
     '_build', 'Thumbs.db', '.DS_Store',
-    'tutorials/notebooks/*.ipynb',
 ]
 source_suffix = ['.rst', '.ipynb']
 
