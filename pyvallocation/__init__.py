@@ -38,6 +38,11 @@ __all__ = [
     "entropy_pooling",
     "FlexibleViewsProcessor",
     "BlackLittermanProcessor",
+    "at_least",
+    "at_most",
+    "between",
+    "above",
+    "below",
     # --- Optimisers (advanced) ---
     "MeanVariance",
     "MeanCVaR",
@@ -65,6 +70,7 @@ __all__ = [
     "make_repricing_fn",
     "log2simple",
     "simple2log",
+    "compose_repricers",
     "project_mean_covariance",
     # --- Plotting ---
     "plot_frontiers",
@@ -77,6 +83,7 @@ __all__ = [
     "plot_assumptions_3d",
     # --- Stress testing ---
     "stress_test",
+    "stress_invariants",
     "exp_decay_stress",
     "kernel_focus_stress",
     "entropy_pooling_stress",
@@ -88,29 +95,50 @@ __all__ = [
     "drawdown_quantile",
 ]
 
-from .portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper, TransactionCosts
-from .utils.constraints import Constraints
-from .utils.functions import portfolio_variance, portfolio_volatility
+from .bayesian import RobustBayesPosterior
+from .discrete_allocation import (
+    DiscreteAllocationInput,
+    DiscreteAllocationResult,
+    discretize_weights,
+)
+from .ensembles import (
+    assemble_portfolio_ensemble,
+    average_frontiers,
+    exposure_stack_frontiers,
+    make_portfolio_spec,
+    risk_percentile_selections,
+    stack_portfolios,
+)
 from .moments import (
-    estimate_sample_moments,
+    covariance_ewma,
     estimate_moments,
+    estimate_sample_moments,
     factor_covariance_poet,
     posterior_moments_black_litterman,
     posterior_moments_niw,
     posterior_moments_niw_with_uncertainty,
-    covariance_ewma,
     robust_covariance_tyler,
     robust_mean_huber,
     robust_mean_median_of_means,
-    shrink_covariance_nls,
     shrink_covariance_ledoit_wolf,
+    shrink_covariance_nls,
     shrink_covariance_oas,
     shrink_mean_james_stein,
     shrink_mean_jorion,
     sparse_precision_glasso,
 )
-from .bayesian import RobustBayesPosterior
 from .optimization import InfeasibleOptimizationError, MeanCVaR, MeanVariance, RelaxedRiskParity, RobustOptimizer
+from .plotting import (
+    plot_assumptions_3d,
+    plot_frontier_report,
+    plot_frontiers,
+    plot_frontiers_grid,
+    plot_param_impact,
+    plot_robust_path,
+    plot_robust_surface,
+    plot_weights,
+)
+from .portfolioapi import AssetsDistribution, PortfolioFrontier, PortfolioWrapper, TransactionCosts
 from .probabilities import (
     compute_effective_number_scenarios,
     compute_effective_number_scenarios_hhi,
@@ -119,45 +147,35 @@ from .probabilities import (
     generate_uniform_probabilities,
     silverman_bandwidth,
 )
-from .views import BlackLittermanProcessor, FlexibleViewsProcessor, entropy_pooling
-from .discrete_allocation import (
-    DiscreteAllocationInput,
-    DiscreteAllocationResult,
-    discretize_weights,
+from .stress import (
+    entropy_pooling_stress,
+    exp_decay_stress,
+    kernel_focus_stress,
+    linear_map,
+    stress_invariants,
+    stress_test,
 )
+from .utils.constraints import Constraints
+from .utils.functions import portfolio_variance, portfolio_volatility
+from .utils.performance import drawdown_quantile, horizon_report, performance_report, scenario_pnl
 from .utils.projection import (
+    compose_repricers,
     log2simple,
     make_repricing_fn,
     project_mean_covariance,
     project_scenarios,
     reprice_exp,
     reprice_taylor,
-    simulate_paths,
     simple2log,
+    simulate_paths,
 )
-from .ensembles import (
-    average_frontiers,
-    assemble_portfolio_ensemble,
-    exposure_stack_frontiers,
-    risk_percentile_selections,
-    stack_portfolios,
-    make_portfolio_spec,
+from .views import (
+    BlackLittermanProcessor,
+    FlexibleViewsProcessor,
+    above,
+    at_least,
+    at_most,
+    below,
+    between,
+    entropy_pooling,
 )
-from .plotting import (
-    plot_frontiers,
-    plot_frontiers_grid,
-    plot_weights,
-    plot_frontier_report,
-    plot_robust_path,
-    plot_param_impact,
-    plot_robust_surface,
-    plot_assumptions_3d,
-)
-from .stress import (
-    entropy_pooling_stress,
-    exp_decay_stress,
-    kernel_focus_stress,
-    linear_map,
-    stress_test,
-)
-from .utils.performance import drawdown_quantile, horizon_report, performance_report, scenario_pnl

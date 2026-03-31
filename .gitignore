@@ -50,3 +50,7 @@ docs/_templates/
 # Output directories
 output/
 *.log
+
+# Claude Code session data and theory reference docs
+.claude/
+.Theory/

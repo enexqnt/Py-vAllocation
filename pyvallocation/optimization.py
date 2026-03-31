@@ -470,9 +470,20 @@ class MeanVariance(_FrontierMixin, _BaseOptimization):
         A_rows = [mu_excess.reshape(1, -1)]
         b_vals = [1.0]
         if self._A is not None:
-            # User equalities become homogeneous: A y = 0 (since we normalize later)
+            # User equalities become homogeneous: A y = 0 (since we normalize later).
+            # Non-homogeneous constraints (b != 0) cannot be enforced in this
+            # reformulation (Cornuejols-Tutuncu) and are skipped with a warning.
             A_np = np.asarray(self._A)
+            b_np = np.asarray(self._b).ravel()
             for row_idx in range(A_np.shape[0]):
+                if not np.isclose(b_np[row_idx], 0.0, atol=1e-12):
+                    _LOGGER.warning(
+                        "max_sharpe: equality b[%d]=%.4g is non-homogeneous; "
+                        "skipping (cannot be enforced in Cornuejols-Tutuncu "
+                        "reformulation).",
+                        row_idx, b_np[row_idx],
+                    )
+                    continue
                 A_rows.append(A_np[row_idx:row_idx+1])
                 b_vals.append(0.0)
 

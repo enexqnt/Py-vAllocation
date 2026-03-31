@@ -248,6 +248,7 @@ def horizon_report(
         scen = project_scenarios(
             invariants, investment_horizon=h, p=p,
             n_simulations=n_simulations, reprice=reprice,
+            seed=h_seed,
         )
         report = performance_report(
             weights, scen, confidence=confidence,

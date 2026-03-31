@@ -161,7 +161,7 @@ def simple2log(mu_r, cov_r):
 
 
 def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000,
-                      reprice=None):
+                      reprice=None, seed=None):
     """
     Simulate horizon sums by sampling invariants with replacement.
 
@@ -184,6 +184,7 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000,
             scenarios.  Built-in options:
             :func:`reprice_exp` (stocks: ``exp(Δy) - 1``),
             :func:`reprice_taylor` (greeks/duration: ``θτ + δΔy + ½γΔy²``).
+        seed: Random seed for reproducibility.  Defaults to ``None``.
 
     Returns:
         numpy.ndarray or pandas.Series or pandas.DataFrame: Simulated sums whose
@@ -237,7 +238,7 @@ def project_scenarios(R, investment_horizon=2, p=None, n_simulations=1000,
         if not np.isclose(weight_sum, 1.0):
             weights = weights / weight_sum
 
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed)
     idx = rng.choice(num_rows, size=(n_simulations, investment_horizon), p=weights)
     scenario_sums = R_np[idx].sum(axis=1)
 
@@ -414,3 +415,86 @@ def make_repricing_fn(pricing_fn, current_drivers: np.ndarray):
         return pricing_fn(y_horizon) - p0
 
     return _reprice
+
+
+def compose_repricers(instruments, invariant_columns):
+    """Build a repricing function mapping K invariant columns to N instrument P&Ls.
+
+    For mixed portfolios where each instrument may depend on one or more
+    risk drivers (Prayer P4).  Three specification formats are supported:
+
+    * **callable** -- 1-to-1: uses the invariant column with the same name
+      as the instrument.
+    * **("driver", callable)** or **(["driver"], callable)** -- single named
+      driver whose name differs from the instrument.
+    * **(["d1", "d2"], callable)** -- multi-driver: the callable receives
+      an ``(n_sim, n_drivers)`` array.
+
+    Args:
+        instruments: Dict mapping **instrument name** to repricing spec.
+        invariant_columns: Ordered column names of the invariant scenario
+            matrix (length K).
+
+    Returns:
+        Tuple[Callable, List[str]]: ``(repricing_fn, instrument_names)``
+        where *repricing_fn* maps ``(n_sim, K) -> (n_sim, N)`` and
+        *instrument_names* is the ordered list of output column labels.
+
+    Raises:
+        KeyError: If a required driver column is not in *invariant_columns*.
+        TypeError: If a spec is neither a callable nor a ``(drivers, callable)`` tuple.
+
+    Examples:
+        >>> fn, names = compose_repricers(
+        ...     {"Stock": reprice_exp,
+        ...      "Bond": (["yield_10y"], lambda dy: reprice_taylor(dy, delta=-7, gamma=50)),
+        ...      "Call": (["stock_logret", "iv_chg"], my_option_fn)},
+        ...     invariant_columns=["stock_logret", "yield_10y", "iv_chg"],
+        ... )
+        >>> names
+        ['Stock', 'Bond', 'Call']
+    """
+    inv_list = list(invariant_columns)
+    inv_idx = {name: i for i, name in enumerate(inv_list)}
+    instrument_names = list(instruments.keys())
+    parsed = []  # list of (col_indices, fn)
+
+    for inst, spec in instruments.items():
+        if callable(spec) and not isinstance(spec, tuple):
+            # Plain callable: 1-to-1, instrument name must match an invariant column
+            if inst not in inv_idx:
+                raise KeyError(
+                    f"Instrument '{inst}' has no matching invariant column. "
+                    f"Use (drivers, callable) syntax to specify which column(s) to use."
+                )
+            parsed.append(([inv_idx[inst]], spec))
+        elif isinstance(spec, tuple) and len(spec) == 2:
+            drivers, fn = spec
+            if not callable(fn):
+                raise TypeError(f"Second element of spec for '{inst}' must be callable.")
+            if isinstance(drivers, str):
+                drivers = [drivers]
+            col_indices = []
+            for d in drivers:
+                if d not in inv_idx:
+                    raise KeyError(f"Driver '{d}' for instrument '{inst}' not in invariant_columns {inv_list}.")
+                col_indices.append(inv_idx[d])
+            parsed.append((col_indices, fn))
+        else:
+            raise TypeError(
+                f"Repricing spec for '{inst}' must be a callable or (drivers, callable) tuple, "
+                f"got {type(spec).__name__}."
+            )
+
+    def _combined(delta_y):
+        n_sim = delta_y.shape[0] if delta_y.ndim == 2 else len(delta_y)
+        pnl = np.empty((n_sim, len(parsed)), dtype=float)
+        for j, (col_idx, fn) in enumerate(parsed):
+            if len(col_idx) == 1:
+                chunk = delta_y[:, col_idx[0]] if delta_y.ndim == 2 else delta_y
+            else:
+                chunk = delta_y[:, col_idx]
+            pnl[:, j] = np.asarray(fn(chunk), dtype=float).ravel()
+        return pnl
+
+    return _combined, instrument_names

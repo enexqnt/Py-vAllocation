@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-03-31
+### Added
+- **Meucci Prayer pipeline**: `PortfolioWrapper.from_prices()` for newbies,
+  `.from_invariants()` for the full P3-P4 pipeline with any instrument mix.
+- **K→N repricing**: `compose_repricers()` maps K risk drivers to N instruments.
+  Multi-driver specs: `"Call": (["underlying", "vol"], greeks_fn)`.
+- **Invariant-level stress**: `stress_invariants()` applies views to risk drivers,
+  projects, reprices, and compares nominal vs stressed metrics.
+- **View helpers**: `at_least()`, `at_most()`, `between()`, `above()`, `below()`.
+- **Range views**: `vol_views={"SPY": between(0.12, 0.20)}`.
+- **Rank views**: `rank_mean=["SPY", "TLT", "GLD"]` (E[SPY] >= E[TLT] >= E[GLD]).
+- **Variance views**: `var_views={"SPY": at_most(0.04)}`.
+- **Quantile (VaR) views**: `quantile_views={"SPY": (-0.10, at_most(0.05))}`.
+- `FlexibleViewsProcessor.get_scenarios()` exposes the EP scenario matrix.
+- `return_type="log"` on `from_moments()` / `from_scenarios()` auto-converts.
+- `seed` parameter on `project_scenarios()`.
+- `enforce_convexity` parameter on `cvar_frontier()`.
+### Changed
+- **`from_robust_posterior()`** now stores Sigma_ce in `dist.cov` (return covariance)
+  and S_mu in `_uncertainty_cov`. Both `variance_frontier()` and
+  `robust_lambda_frontier()` work from the same wrapper.
+- Robust frontier auto-computes volatility overlay from Sigma_ce.
+- Frontier returns/risks always reported in simple-return space via `_report_mu_cov()`.
+- CVaR scenario generation upgraded from INFO to WARNING log level.
+- Non-sequential EP two-pass linearization for mixed mean + higher-order views.
+- `max_sharpe()` warns and skips non-homogeneous equality constraints.
+### Fixed
+- `from_prices()` validates for NaN, Inf, and non-positive prices early.
+- View helpers validate finite targets at creation time.
+
+## [0.5.1] - 2026-03-29
+### Added
+- Helper functions, additional tests, tutorial notebooks, code polish.
+
 ## [0.5.0] - 2026-03-29
 ### Added
 - `Constraints` frozen dataclass with `group_constraints`, `from_dict()`, IDE autocomplete.

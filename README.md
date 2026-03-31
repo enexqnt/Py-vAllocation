@@ -4,27 +4,28 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/py-vallocation.svg)](https://pypi.org/project/py-vallocation/)
 
 Py-vAllocation is a research-to-production toolkit for scenario-based portfolio
-optimisation. Build mean-variance, CVaR, and relaxed risk parity frontiers;
-incorporate Black–Litterman and entropy pooling views; apply shrinkage-heavy
-statistics (NIW, Ledoit–Wolf, nonlinear shrinkage, Tyler, Huber, POET); ensemble
-strategies; and convert weights to discrete trades. Pandas labels are preserved
-throughout the workflow.
+optimisation following Meucci's Prayer framework (invariants, projection,
+repricing, optimisation). Build mean-variance, CVaR, and relaxed risk parity
+frontiers; incorporate Black-Litterman and entropy pooling views; apply
+shrinkage-heavy statistics; ensemble strategies; stress-test at the
+risk-driver level; and convert weights to discrete trades.
 
 ## Highlights
 
+- **Meucci Prayer pipeline** - `from_prices()` for newbies, `from_invariants()` for the full P3-P4 pipeline with any instrument (equities, bonds, options, futures, ETFs).
+- **K-to-N repricing** - `compose_repricers()` maps K risk drivers to N instruments. Multi-driver specs for options: `("underlying", "vol"): greeks_fn`.
+- **Flexible views** - mean, volatility, variance, correlation, skewness, CVaR, quantile (VaR), and rank views via entropy pooling. Helpers: `at_least()`, `at_most()`, `between()`.
 - **Consistent optimisation surface** - switch between mean-variance, CVaR, relaxed risk parity, and robust formulations without rewriting constraints.
-- **View integration** - Black–Litterman mean views plus entropy pooling constraints keep discretionary inputs consistent with posterior moments.
-- **Robust models** - relaxed risk parity, Bayesian NIW updates, and Meucci-style probability tilts.
-- **Moment estimation** - Ledoit–Wolf, James–Stein, nonlinear shrinkage, Tyler, Huber, POET, graphical lasso, and more via `estimate_moments`.
-- **Production plumbing** - ensemble builders, discrete allocation, plotting, and reporting helpers reduce friction between research and delivery.
-- **Stress testing & PnL** - one-line helpers for probability tilts, linear shocks, and compact risk reports.
-- **Optional extras** - install the `robust` extra only when heavy dependencies are needed.
+- **Robust models** - Bayesian NIW posteriors, relaxed risk parity, Meucci-style probability tilts. `from_robust_posterior()` supports both MV and robust frontiers from the same wrapper.
+- **Moment estimation** - Ledoit-Wolf, James-Stein, nonlinear shrinkage, Tyler, Huber, POET, graphical lasso, EWMA via `estimate_moments`.
+- **Invariant-level stress testing** - `stress_invariants()` applies views to risk drivers, flows through repricing, and reports nominal vs stressed metrics.
+- **Production plumbing** - ensemble builders, discrete allocation, plotting, reporting. Pandas labels preserved throughout.
 
 ## Design principles
 
-- **Pandas-first inputs/outputs** with consistent labels when they are supplied.
+- **No magic, no hidden assumptions** - every step of the Prayer is explicit and user-controlled.
+- **Pandas-first inputs/outputs** with consistent labels.
 - **Scenario-based risk** by default, with clear risk labels across frontiers.
-- **Minimal reformatting**: utility helpers standardise shapes, weights, and probabilities.
 
 ## Installation
 
@@ -55,28 +56,43 @@ Key artefacts:
 - `output/stacked_weights.csv`, `selected_weights.csv`, `average_weights.csv` - ensemble summaries.
 - Terminal output covering discrete trade sizing and stress results.
 
-Or use the API directly:
+Or use the API directly -- five factory methods for every user level:
 
 ```python
-import pandas as pd
-from pyvallocation.portfolioapi import PortfolioWrapper
+from pyvallocation import PortfolioWrapper
 
-scenarios = pd.DataFrame({
-    "Stock_A": [0.01, -0.02, 0.015],
-    "Stock_B": [0.007, 0.003, 0.004]
-})
+# --- Newbie: from prices ---
+port = PortfolioWrapper.from_prices(price_df)
+frontier = port.variance_frontier()
+w, ret, risk = frontier.tangency(risk_free_rate=0.04)
 
-port = PortfolioWrapper.from_scenarios(scenarios)
+# --- Intermediate: log-return invariants, project 1Y, reprice to simple ---
+import numpy as np
+log_rets = np.log(price_df / price_df.shift(1)).dropna()
+port = PortfolioWrapper.from_invariants(log_rets, horizon=52, seed=42)
+frontier = port.cvar_frontier(alpha=0.05)
 
-frontier = port.variance_frontier(num_portfolios=20)
-weights, ret, risk = frontier.tangency(risk_free_rate=0.01)
-print(weights)
-
-# Pick a portfolio by CVaR even on a variance frontier (scenarios required)
-weights_cvar, ret_cvar, cvar_val = frontier.at_risk(
-    max_risk=0.02, risk_label="CVaR (95%)"
+# --- Institutional: mixed instruments (stocks + bonds + options) ---
+from pyvallocation import compose_repricers, reprice_exp, reprice_taylor
+port = PortfolioWrapper.from_invariants(
+    invariants_df,  # columns: equity log-return, yield change, vol change
+    reprice={
+        "SPY":  reprice_exp,
+        "TLT":  (["yield_10y"], lambda dy: reprice_taylor(dy, delta=-17, gamma=200)),
+        "Call": (["equity_lr", "iv_chg"], my_greeks_fn),
+    },
+    horizon=52, seed=42,
 )
-print(weights_cvar)
+frontier = port.cvar_frontier(alpha=0.05)
+
+# --- Views with helpers ---
+from pyvallocation import FlexibleViewsProcessor, at_least, at_most, between
+ep = FlexibleViewsProcessor(
+    prior_risk_drivers=invariants_df,
+    mean_views={"SPY": at_least(0.05)},
+    vol_views={"TLT": between(0.08, 0.15)},
+    rank_mean=["SPY", "TLT", "GLD"],  # E[SPY] >= E[TLT] >= E[GLD]
+)
 ```
 
 ## Examples
@@ -87,8 +103,10 @@ The `examples/` directory contains runnable scripts (see `examples/README.md`):
 - `mean_variance_frontier.py`, `cvar_allocation.py`, `robust_frontier.py` (use `variance_frontier` / `cvar_frontier`)
 - `relaxed_risk_parity_frontier.py`, `portfolio_ensembles.py`, `discrete_allocation.py`
 - `stress_and_pnl.py` - probability tilts + linear shocks + performance reports
+- `group_constraints.py` - sector/group weight constraints
 
-Notebooks (`examples/*.ipynb`) mirror the tutorials.
+Notebooks under `docs/tutorials/notebooks/` cover Bayesian views, CVaR frontiers,
+derivatives repricing, stress testing, and more.
 
 ## Documentation
 
@@ -112,16 +130,19 @@ sphinx-build -b html docs docs/_build/html
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.9+
 - numpy, pandas, scipy, cvxopt
 
 ## References
 
+- Meucci (2005) - Risk and Asset Allocation (Prayer framework)
+- Meucci (2008) - Fully Flexible Views (entropy pooling)
+- Vorobets (2024) - Derivatives Portfolio Optimization & Exposure Stacking
 - Markowitz (1952) - Portfolio Selection
 - Black & Litterman (1992) - Global Portfolio Optimization
-- Ledoit & Wolf (2004, 2020) - Covariance shrinkage
-- Meucci (2008) - Fully Flexible Views (entropy pooling)
 - Rockafellar & Uryasev (2000) - CVaR optimization
+- Gambeta & Kwon (2020) - Relaxed Risk Parity
+- Ledoit & Wolf (2004, 2020) - Covariance shrinkage
 
 See the [bibliography](https://py-vallocation.readthedocs.io/en/latest/bibliography.html) for the complete list.
 

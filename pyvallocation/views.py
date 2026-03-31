@@ -6,12 +6,75 @@ from collections.abc import Sequence
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from scipy.optimize import Bounds, minimize
-
 import pandas as pd
+from scipy.optimize import Bounds, minimize
 
 from .bayesian import _cholesky_pd
 from .probabilities import normalize_probability_vector
+
+# ---------------------------------------------------------------------------
+# View helper functions — readable shortcuts for constraint operators
+# ---------------------------------------------------------------------------
+
+def _validate_finite(value, name="value"):
+    v = float(value)
+    if not np.isfinite(v):
+        raise ValueError(f"View target {name} must be finite, got {v}.")
+    return v
+
+
+def at_least(value):
+    """View target: greater than or equal to *value*.
+
+    Examples:
+        >>> mean_views = {"SPY": at_least(0.05)}   # E[SPY] >= 5%
+        >>> vol_views  = {"TLT": at_least(0.08)}   # sigma_TLT >= 8%
+    """
+    return (">=", _validate_finite(value))
+
+
+def at_most(value):
+    """View target: less than or equal to *value*.
+
+    Examples:
+        >>> vol_views  = {"SPY": at_most(0.20)}   # sigma_SPY <= 20%
+        >>> corr_views = {("SPY", "TLT"): at_most(0.0)}  # non-positive correlation
+    """
+    return ("<=", _validate_finite(value))
+
+
+def between(lo, hi):
+    """View target: *lo* <= target <= *hi* (range view).
+
+    Expands to two constraints internally (a ``>=`` and a ``<=``).
+
+    Examples:
+        >>> vol_views = {"SPY": between(0.12, 0.20)}  # 12% <= sigma_SPY <= 20%
+        >>> mean_views = {"GLD": between(0.01, 0.06)}  # 1% <= E[GLD] <= 6%
+    """
+    lo_f = _validate_finite(lo, "lo")
+    hi_f = _validate_finite(hi, "hi")
+    if lo_f > hi_f:
+        raise ValueError(f"between({lo_f}, {hi_f}): lower bound exceeds upper bound.")
+    return ("between", lo_f, hi_f)
+
+
+def above(value):
+    """View target: strictly greater than *value*.
+
+    Examples:
+        >>> mean_views = {"SPY": above(0.0)}  # E[SPY] > 0 (positive return)
+    """
+    return (">", _validate_finite(value))
+
+
+def below(value):
+    """View target: strictly less than *value*.
+
+    Examples:
+        >>> mean_views = {"SPY": below(0.0)}  # E[SPY] < 0 (negative return)
+    """
+    return ("<", _validate_finite(value))
 
 def _entropy_pooling_dual_objective(
     lagrange_multipliers: np.ndarray,
@@ -372,12 +435,20 @@ class FlexibleViewsProcessor:
         random_state: Any = None,
         mean_views: Any = None,
         vol_views: Any = None,
+        var_views: Any = None,
         corr_views: Any = None,
         skew_views: Any = None,
         cvar_views: Any = None,
+        quantile_views: Any = None,
+        rank_mean: Optional[List] = None,
         sequential: bool = False,
     ):
-        """Initialise the flexible-views processor.
+        r"""Initialise the flexible-views processor.
+
+        All view parameters accept dictionaries keyed by asset label.  Values
+        can be plain scalars (equality), ``(operator, target)`` tuples, or the
+        helper shortcuts :func:`at_least`, :func:`at_most`, :func:`between`,
+        :func:`above`, :func:`below`.
 
         Args:
             prior_risk_drivers: Scenario matrix of risk drivers (returns, factors, etc.).
@@ -387,14 +458,27 @@ class FlexibleViewsProcessor:
             distribution_fn: Optional callable to draw scenarios from moments.
             num_scenarios: Number of scenarios to simulate when needed (default ``10000``).
             random_state: Optional random seed or Generator.
-            mean_views: Views on means (absolute or relative).
-            vol_views: Views on marginal volatilities.
-            corr_views: Views on correlations.
-            skew_views: Views on skewness.
-            cvar_views: Views on conditional value-at-risk. Specify as
-                ``{asset: (target_cvar, gamma)}`` where ``gamma`` is the tail
-                probability (e.g. 0.05 for 95% CVaR). Uses recursive entropy
-                pooling per Meucci (2011, ssrn-1542083).
+            mean_views: Views on expected returns (absolute or relative).
+                Relative views use tuple keys: ``{("A", "B"): at_least(0.02)}``
+                means :math:`E[A] - E[B] \ge 2\%`.
+            vol_views: Views on marginal volatilities (standard deviations).
+            var_views: Views on marginal variances.  ``{"A": at_most(0.04)}``
+                means :math:`\text{Var}[A] \le 0.04`.
+            corr_views: Views on pairwise correlations.
+                ``{("A", "B"): between(-0.2, 0.2)}`` constrains the correlation
+                of A and B to the range [-0.2, 0.2].
+            skew_views: Views on marginal skewness.
+            cvar_views: Views on conditional value-at-risk.  ``{asset: (cvar_target, gamma)}``
+                where ``gamma`` is the tail probability (e.g. 0.05 for 95% CVaR).
+                Uses recursive entropy pooling per Meucci (2011, ssrn-1542083).
+            quantile_views: Views on marginal quantiles (VaR).
+                ``{asset: (quantile_level, probability)}`` constrains
+                :math:`P(R_{asset} \le level) = prob`.  Use ``at_most`` /
+                ``at_least`` on the probability for inequalities.
+            rank_mean: Ordered list of asset labels expressing a ranking view
+                on expected returns.  ``["A", "B", "C"]`` means
+                :math:`E[A] \ge E[B] \ge E[C]`.  Generates pairwise
+                inequality constraints on mean differences.
             sequential: Whether to apply views sequentially (default ``False``).
         """
         risk_drivers = prior_risk_drivers
@@ -509,12 +593,24 @@ class FlexibleViewsProcessor:
 
         self.mean_views = _vec_to_dict(mean_views, "mean_views")
         self.vol_views = _vec_to_dict(vol_views, "vol_views")
+        self.var_views = _vec_to_dict(var_views, "var_views")
         self.skew_views = _vec_to_dict(skew_views, "skew_views")
         self.corr_views = corr_views or {}
         if cvar_views is not None:
             self.cvar_views = _vec_to_dict(cvar_views, "cvar_views") if not isinstance(cvar_views, dict) else cvar_views
         else:
             self.cvar_views = None
+        self.quantile_views = _vec_to_dict(quantile_views, "quantile_views") if quantile_views else {}
+
+        # rank_mean: expand ["A", "B", "C"] into pairwise E[A] >= E[B], E[B] >= E[C]
+        if rank_mean is not None:
+            if len(rank_mean) < 2:
+                raise ValueError("`rank_mean` requires at least 2 assets.")
+            for i in range(len(rank_mean) - 1):
+                pair = (rank_mean[i], rank_mean[i + 1])
+                if pair not in self.mean_views:
+                    self.mean_views[pair] = (">=", 0.0)
+
         self.sequential = bool(sequential)
 
         self.posterior_probabilities = self._compute_posterior_probabilities()
@@ -534,37 +630,53 @@ class FlexibleViewsProcessor:
 
     @staticmethod
     def _parse_view(v: Any) -> Tuple[str, float]:
-        r"""
-        Converts a raw view value into a standardized (operator, target) tuple.
-
-        This static method provides flexibility in how views are specified. A view
-        can be a simple scalar (implying an equality constraint) or a tuple
-        containing an operator string and a scalar target.
+        r"""Convert a raw view value into a standardised ``(operator, target)`` tuple.
 
         Accepted syntaxes:
-        -----------------
-        * ``x`` (e.g., `0.03`)   -> `('==', x)`: Implies an equality view.
-        * ``('>=', x)`` (e.g., `('>=', 0.05)`) -> `('>=', x)`: Implies a greater-than-or-equal-to inequality view.
-        * Similar for `'<=', '>', '<'`.
 
-        For **relative mean views** (e.g., `mean_views={('Asset A', 'Asset B'): ('>=', 0.0)}`),
-        the target `x` is interpreted as the desired difference between the means
-        (e.g., :math:`\mu_1 - \mu_2 \ge x`).
+        * ``0.03``                  → ``('==', 0.03)``  (equality)
+        * ``('>=', 0.05)``          → ``('>=', 0.05)``  (inequality)
+        * ``at_least(0.05)``        → ``('>=', 0.05)``  (same, via helper)
+        * ``between(0.03, 0.08)``   → ``('between', 0.03, 0.08)``  (range — see note)
 
-        Args:
-            v (Any): Raw view value (scalar or tuple).
+        .. note::
 
-        Returns:
-            Tuple[str, float]: Operator string (``'=='``, ``'>='``, ``'<='``, ``'>'``, ``'<'``)
-            and the numerical target value.
+           ``between`` is handled by :meth:`_parse_view_specs`, which splits it
+           into two constraints.  Calling ``_parse_view`` directly on a range
+           tuple will raise ``TypeError``.
         """
         if (
             isinstance(v, (list, tuple))
             and len(v) == 2
             and v[0] in ("==", ">=", "<=", ">", "<")
         ):
-            return v[0], float(v[1])
-        return "==", float(v)
+            tgt = float(v[1])
+            if not np.isfinite(tgt):
+                raise ValueError(f"View target must be finite, got {v}.")
+            return v[0], tgt
+        tgt = float(v)
+        if not np.isfinite(tgt):
+            raise ValueError(f"View target must be finite, got {v}.")
+        return "==", tgt
+
+    @staticmethod
+    def _parse_view_specs(v: Any) -> List[Tuple[str, float]]:
+        """Convert a view value into a list of ``(operator, target)`` pairs.
+
+        Handles all formats accepted by :meth:`_parse_view` plus the
+        ``between(lo, hi)`` range syntax, which expands to two constraints.
+        """
+        if (
+            isinstance(v, (list, tuple))
+            and len(v) == 3
+            and v[0] == "between"
+        ):
+            lo, hi = float(v[1]), float(v[2])
+            if lo > hi:
+                raise ValueError(f"between({lo}, {hi}): lower bound exceeds upper bound.")
+            return [(">=", lo), ("<=", hi)]
+        op, tgt = FlexibleViewsProcessor._parse_view(v)
+        return [(op, tgt)]
 
     def _asset_idx(self, key) -> int:
         """
@@ -681,46 +793,54 @@ class FlexibleViewsProcessor:
 
         if moment_type == "mean":
             for key, vw in view_dict.items():
-                op, tgt = self._parse_view(vw)
-
                 if isinstance(key, tuple) and len(key) == 2:
                     a1, a2 = key
                     i, j = self._asset_idx(a1), self._asset_idx(a2)
                     row = R[:, i] - R[:, j]
-                    add(op, row, tgt)
                 else:
                     idx = self._asset_idx(key)
-                    add(op, R[:, idx], tgt)
+                    row = R[:, idx]
+                for op, tgt in self._parse_view_specs(vw):
+                    add(op, row, tgt)
 
         elif moment_type == "vol":
             for asset, vw in view_dict.items():
-                op, tgt = self._parse_view(vw)
-                if tgt <= 0:
-                    raise ValueError(f"Volatility target for '{asset}' must be positive (got {tgt}).")
                 idx = self._asset_idx(asset)
-                raw = tgt**2 + mu[idx] ** 2
-                add(op, R[:, idx] ** 2, raw)
+                for op, tgt in self._parse_view_specs(vw):
+                    if tgt <= 0:
+                        raise ValueError(f"Volatility target for '{asset}' must be positive (got {tgt}).")
+                    raw = tgt**2 + mu[idx] ** 2
+                    add(op, R[:, idx] ** 2, raw)
+
+        elif moment_type == "var":
+            for asset, vw in view_dict.items():
+                idx = self._asset_idx(asset)
+                for op, tgt in self._parse_view_specs(vw):
+                    if tgt < 0:
+                        raise ValueError(f"Variance target for '{asset}' must be non-negative (got {tgt}).")
+                    raw = tgt + mu[idx] ** 2  # E[X^2] = Var + mu^2
+                    add(op, R[:, idx] ** 2, raw)
 
         elif moment_type == "skew":
             for asset, vw in view_dict.items():
-                op, tgt = self._parse_view(vw)
                 idx = self._asset_idx(asset)
                 if var[idx] < 1e-12:
                     raise ValueError(f"Variance of '{asset}' is near-zero ({var[idx]:.2e}); skewness view is numerically unstable.")
                 s = np.sqrt(var[idx])
-                raw = tgt * s**3 + 3 * mu[idx] * var[idx] + mu[idx] ** 3
-                add(op, R[:, idx] ** 3, raw)
+                for op, tgt in self._parse_view_specs(vw):
+                    raw = tgt * s**3 + 3 * mu[idx] * var[idx] + mu[idx] ** 3
+                    add(op, R[:, idx] ** 3, raw)
 
         elif moment_type == "corr":
             for (a1, a2), vw in view_dict.items():
-                op, tgt = self._parse_view(vw)
-                if not -1.0 <= tgt <= 1.0:
-                    raise ValueError(f"Correlation target for ('{a1}', '{a2}') must be in [-1, 1] (got {tgt}).")
                 i = self._asset_idx(a1)
                 j = self._asset_idx(a2)
                 s_i, s_j = np.sqrt(var[i]), np.sqrt(var[j])
-                raw = tgt * s_i * s_j + mu[i] * mu[j]
-                add(op, R[:, i] * R[:, j], raw)
+                for op, tgt in self._parse_view_specs(vw):
+                    if not -1.0 <= tgt <= 1.0:
+                        raise ValueError(f"Correlation target for ('{a1}', '{a2}') must be in [-1, 1] (got {tgt}).")
+                    raw = tgt * s_i * s_j + mu[i] * mu[j]
+                    add(op, R[:, i] * R[:, j], raw)
 
         else:
             raise ValueError(f"Unknown moment type '{moment_type}'.")
@@ -903,7 +1023,10 @@ class FlexibleViewsProcessor:
 
             return entropy_pooling(prior_probs, A, b, G, h)
 
-        if not any((self.mean_views, self.vol_views, self.skew_views, self.corr_views, self.cvar_views)):
+        has_any = any((self.mean_views, self.vol_views, self.var_views,
+                       self.skew_views, self.corr_views, self.cvar_views,
+                       self.quantile_views))
+        if not has_any:
             return p0
 
         if self.sequential:
@@ -911,6 +1034,7 @@ class FlexibleViewsProcessor:
             view_blocks = [
                 ("mean", self.mean_views),
                 ("vol", self.vol_views),
+                ("var", self.var_views),
                 ("skew", self.skew_views),
                 ("corr", self.corr_views),
             ]
@@ -925,14 +1049,21 @@ class FlexibleViewsProcessor:
                     var_cur = var_cur.flatten()
 
         else:
+            # Two-pass when mean views coexist with higher-order views:
+            # solve EP for means first to update the linearization point,
+            # then build ALL constraints at the updated operating point.
+            has_higher = bool(self.vol_views or self.var_views or self.skew_views or self.corr_views)
+            if self.mean_views and has_higher:
+                Aeq_m, beq_m, Gm, hm = self._build_constraints(
+                    self.mean_views, "mean", mu_cur, var_cur)
+                q_mid = do_ep(p0, Aeq_m, beq_m, Gm, hm)
+                mu_cur = (R.T @ q_mid).flatten()
+                var_cur = (((R - mu_cur) ** 2).T @ q_mid).flatten()
+
             A_all, b_all, G_all, h_all = [], [], [], []
-            view_blocks = [
-                ("mean", self.mean_views),
-                ("vol", self.vol_views),
-                ("skew", self.skew_views),
-                ("corr", self.corr_views),
-            ]
-            for mtype, vd in view_blocks:
+            for mtype, vd in [("mean", self.mean_views), ("vol", self.vol_views),
+                               ("var", self.var_views), ("skew", self.skew_views),
+                               ("corr", self.corr_views)]:
                 if vd:
                     Aeq, beq, G, h = self._build_constraints(vd, mtype, mu_cur, var_cur)
                     A_all.extend(Aeq)
@@ -944,6 +1075,34 @@ class FlexibleViewsProcessor:
                 q_result = do_ep(p0, A_all, b_all, G_all, h_all)
             else:
                 q_result = p0
+
+        # --- Quantile (VaR) views: P(R_i <= level) {op} probability ---
+        if self.quantile_views:
+            A_q, b_q, G_q, h_q = [], [], [], []
+            for asset, spec in self.quantile_views.items():
+                idx = self._asset_idx(asset)
+                if isinstance(spec, (list, tuple)) and len(spec) == 2:
+                    level, prob_spec = float(spec[0]), spec[1]
+                else:
+                    raise ValueError(
+                        f"quantile_views['{asset}'] must be (level, probability) "
+                        f"or (level, at_most(p)) / (level, at_least(p))."
+                    )
+                indicator = (R[:, idx] <= level).astype(float)
+                for op, prob in self._parse_view_specs(prob_spec):
+                    if not 0.0 < prob < 1.0:
+                        raise ValueError(f"Quantile probability for '{asset}' must be in (0, 1), got {prob}.")
+                    if op == "==":
+                        A_q.append(indicator)
+                        b_q.append(prob)
+                    elif op in ("<=", "<"):
+                        G_q.append(indicator)
+                        h_q.append(prob)
+                    else:  # >= or >
+                        G_q.append(-indicator)
+                        h_q.append(-prob)
+            if A_q or G_q:
+                q_result = do_ep(q_result, A_q, b_q, G_q, h_q)
 
         # --- CVaR views (recursive EP, Meucci 2011 ssrn-1542083) ---
         if self.cvar_views:
@@ -961,6 +1120,21 @@ class FlexibleViewsProcessor:
                 )
 
         return q_result
+
+    def get_scenarios(self) -> Union[np.ndarray, "pd.DataFrame"]:
+        """Return the scenario matrix used for entropy pooling.
+
+        If ``prior_risk_drivers`` was provided, returns a DataFrame (or array)
+        with the same structure.  If scenarios were synthesised from
+        ``prior_mean`` and ``prior_cov``, returns the synthetic matrix.
+
+        Use this to pass the exact scenarios to
+        :meth:`~pyvallocation.portfolioapi.PortfolioWrapper.from_invariants`
+        together with :meth:`get_posterior_probabilities`.
+        """
+        if self._use_pandas:
+            return pd.DataFrame(self.R, columns=self.assets)
+        return self.R.copy()
 
     def get_posterior_probabilities(self) -> np.ndarray:
         """Return the (S x 1) posterior probability vector.
@@ -997,7 +1171,7 @@ class FlexibleViewsProcessor:
             type provided during the initialization of the `FlexibleViewsProcessor`.
         """
         return self.posterior_returns, self.posterior_cov
-    
+
 class BlackLittermanProcessor:
     r"""
     Bayesian Black-Litterman (BL) updater for *equality* **mean views**.

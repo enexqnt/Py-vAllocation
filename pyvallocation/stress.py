@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Callable, Mapping, Optional, Sequence, Tuple, Union
+from collections.abc import Mapping, Sequence
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -22,6 +23,7 @@ WeightsLike = Union[np.ndarray, pd.Series, pd.DataFrame, Mapping[str, float]]
 
 __all__ = [
     "stress_test",
+    "stress_invariants",
     "exp_decay_stress",
     "kernel_focus_stress",
     "entropy_pooling_stress",
@@ -424,3 +426,117 @@ def linear_map(
         return X
 
     return _transform
+
+
+def stress_invariants(
+    invariants: ArrayLike,
+    weights: WeightsLike,
+    reprice: Union[Callable, dict],
+    *,
+    stress_views: Optional[dict] = None,
+    horizon: int = 1,
+    n_simulations: int = 5000,
+    seed: Optional[int] = None,
+    confidence: float = 0.95,
+    demean: bool = False,
+) -> pd.DataFrame:
+    """Stress test at the **invariant** level through the full Prayer pipeline.
+
+    Applies stress views to the risk-driver distribution via entropy pooling,
+    projects to horizon, reprices to P&L, and compares nominal vs stressed
+    risk metrics.  This is the correct way to answer questions like
+    *"what happens to my portfolio if HY spreads widen by 200 bp?"* — the
+    stress is applied to invariants, not directly to P&L.
+
+    Args:
+        invariants: Historical risk-driver scenarios ``(T, K)``.
+        weights: Portfolio weights ``(N,)`` or Series.
+        reprice: Repricing specification — a callable or dict, same format as
+            :meth:`~pyvallocation.portfolioapi.PortfolioWrapper.from_invariants`.
+        stress_views: Dict of views on the invariants, passed as
+            ``mean_views`` to :class:`~pyvallocation.views.FlexibleViewsProcessor`.
+            Example: ``{"credit_spread": at_least(0.02)}``.
+        horizon: Investment horizon in invariant time steps.
+        n_simulations: Number of projected scenarios.
+        seed: Random seed for reproducibility.
+        confidence: VaR/CVaR confidence level (default 0.95).
+        demean: Demean P&L for VaR/CVaR computation.
+
+    Returns:
+        pd.DataFrame: Nominal and stressed metrics (return, stdev, VaR, CVaR, ENS).
+    """
+    from .utils.projection import compose_repricers, project_scenarios, reprice_exp
+    from .views import FlexibleViewsProcessor
+
+    is_df = isinstance(invariants, pd.DataFrame)
+
+    # Build repricing function
+    if isinstance(reprice, dict):
+        if not is_df:
+            raise TypeError("Dict reprice requires DataFrame invariants.")
+        combined, inst_names = compose_repricers(reprice, invariants.columns.tolist())
+    else:
+        combined = reprice if reprice is not None else reprice_exp
+        inst_names = None
+
+    # Convert to numpy for consistent project_scenarios calls
+    inv_np = invariants.to_numpy(dtype=float) if is_df else np.asarray(invariants, dtype=float)
+    p_nom = None  # uniform
+
+    # Nominal P&L
+    pnl_nom = project_scenarios(inv_np, investment_horizon=horizon, p=p_nom,
+                                n_simulations=n_simulations, reprice=combined, seed=seed)
+    pnl_nom = np.asarray(pnl_nom, dtype=float)
+
+    # Stressed P&L
+    if stress_views:
+        processor = FlexibleViewsProcessor(prior_risk_drivers=invariants, mean_views=stress_views)
+        p_stressed = processor.get_posterior_probabilities().flatten()
+        seed_s = seed + 1 if seed is not None else None
+        pnl_stressed = project_scenarios(inv_np, investment_horizon=horizon, p=p_stressed,
+                                         n_simulations=n_simulations, reprice=combined, seed=seed_s)
+        pnl_stressed = np.asarray(pnl_stressed, dtype=float)
+    else:
+        pnl_stressed = None
+
+    # Wrap with instrument names and delegate to stress_test
+    if inst_names is not None:
+        pnl_df = pd.DataFrame(pnl_nom, columns=inst_names)
+    elif is_df:
+        pnl_df = pd.DataFrame(pnl_nom, columns=invariants.columns)
+    else:
+        pnl_df = pnl_nom
+
+    if pnl_stressed is not None:
+        # Compute stressed probabilities on the P&L grid — since we bootstrapped
+        # with stressed probs the P&L scenarios already embed the stress. We
+        # compare the two scenario sets via stress_test with a transform.
+        nom_probs = resolve_probabilities(None, pnl_nom.shape[0])
+        stressed_probs = resolve_probabilities(None, pnl_stressed.shape[0])
+
+        # Compute metrics for both distributions directly
+        def _metrics(R, p, w):
+            from .moments import estimate_sample_moments
+            mu, sigma = estimate_sample_moments(R, p)
+            mu_v = np.asarray(mu, float).ravel()
+            sigma_m = np.asarray(sigma, float)
+            w_v = np.asarray(w, float).ravel()
+            mean_r = float(w_v @ mu_v)
+            stdev_r = float(np.sqrt(w_v @ sigma_m @ w_v))
+            var_r = float(np.asarray(portfolio_var(w_v, R, p, confidence=confidence, demean=demean)).ravel()[0])
+            cvar_r = float(np.asarray(portfolio_cvar(w_v, R, p, confidence=confidence, demean=demean)).ravel()[0])
+            ens = compute_effective_number_scenarios(p)
+            return mean_r, stdev_r, var_r, cvar_r, ens
+
+        w_arr = np.asarray(weights, float).ravel() if not isinstance(weights, pd.Series) else weights.values
+        m_n = _metrics(pnl_nom, nom_probs, w_arr)
+        m_s = _metrics(pnl_stressed, stressed_probs, w_arr)
+        ci = int(round(confidence * 100))
+        return pd.DataFrame({
+            "return_nom": [m_n[0]], "stdev_nom": [m_n[1]],
+            f"VaR{ci}_nom": [m_n[2]], f"CVaR{ci}_nom": [m_n[3]], "ENS_nom": [m_n[4]],
+            "return_stressed": [m_s[0]], "stdev_stressed": [m_s[1]],
+            f"VaR{ci}_stressed": [m_s[2]], f"CVaR{ci}_stressed": [m_s[3]], "ENS_stressed": [m_s[4]],
+        })
+
+    return stress_test(weights, pnl_df, confidence=confidence, demean=demean)

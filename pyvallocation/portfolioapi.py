@@ -3,8 +3,9 @@ from __future__ import annotations
 import copy
 import logging
 import warnings
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -691,41 +692,48 @@ class PortfolioFrontier:
         )
 
 class PortfolioWrapper:
+    """High-level interface for portfolio construction and optimization.
+
+    Factory classmethods cover every user level:
+
+    * **Newbie**: ``PortfolioWrapper.from_prices(price_df)``
+    * **Parametric**: ``PortfolioWrapper.from_moments(mu, cov)``
+    * **Scenario-based**: ``PortfolioWrapper.from_scenarios(scenarios)``
+    * **Meucci Prayer (P3→P4)**: ``PortfolioWrapper.from_invariants(invariants, reprice=..., horizon=52)``
+    * **Bayesian robust**: ``PortfolioWrapper.from_robust_posterior(posterior)``
+
+    Then compute frontiers, select portfolios, and analyze::
+
+        frontier = port.variance_frontier()
+        w, ret, risk = frontier.tangency(risk_free_rate=0.04)
+
+    Constraints and costs can be passed to factories or per-method.
     """
-    A high-level interface for portfolio construction and optimization.
+    def __init__(
+        self,
+        distribution: AssetsDistribution,
+        *,
+        constraints: Union["Constraints", Dict[str, Any], None] = None,
+        costs: Optional["TransactionCosts"] = None,
+        long_only: bool = True,
+        total_weight: float = 1.0,
+        bounds: Optional[Any] = None,
+    ):
+        """Create a wrapper from a pre-built distribution.
 
-    This class serves as the main entry point for performing portfolio
-    optimization. It simplifies the process by managing asset data, constraints,
-    transaction costs, and the underlying optimization models.
-
-    Typical Workflow:
-
-    1.  Initialize via factory: ``port = PortfolioWrapper.from_moments(mu, cov)``
-        or ``port = PortfolioWrapper.from_scenarios(scenarios)``
-    2.  Compute: ``frontier = port.variance_frontier()`` or ``portfolio = port.min_variance_at_return(0.10)``
-    3.  Analyze: Use the returned :class:`PortfolioFrontier` or portfolio objects.
-
-    Constraints and costs can be passed to the factory classmethods or
-    directly to individual frontier / portfolio methods.
-    """
-    def __init__(self, distribution: AssetsDistribution):
-        """
-        Initializes the PortfolioWrapper with asset distribution data.
+        Most users should prefer the factory classmethods (``from_prices``,
+        ``from_moments``, ``from_scenarios``, ``from_invariants``,
+        ``from_robust_posterior``), which also validate and transform inputs.
+        Use this constructor directly when you already have an
+        :class:`AssetsDistribution` and want full control.
 
         Args:
-            distribution (AssetsDistribution): An :class:`AssetsDistribution` object
-                containing the statistical properties of the assets.
-
-        Attributes:
-            dist (AssetsDistribution): The stored asset distribution.
-            G (Optional[np.ndarray]): Matrix for linear inequality constraints (G * w <= h).
-            h (Optional[np.ndarray]): Vector for linear inequality constraints (G * w <= h).
-            A (Optional[np.ndarray]): Matrix for linear equality constraints (A * w = b).
-            b (Optional[np.ndarray]): Vector for linear equality constraints (A * w = b).
-            initial_weights (Optional[np.ndarray]): Current portfolio weights, used for
-                transaction cost calculations.
-            market_impact_costs (Optional[np.ndarray]): Quadratic market impact cost coefficients.
-            proportional_costs (Optional[np.ndarray]): Linear proportional transaction cost coefficients.
+            distribution: Pre-built distribution.
+            constraints: Optional :class:`Constraints` object or dict.
+            costs: Optional :class:`TransactionCosts`.
+            long_only: Long-only constraint shortcut. Defaults to ``True``.
+            total_weight: Weight-sum constraint. Defaults to ``1.0``.
+            bounds: Per-asset bounds shortcut.
         """
         self.dist = distribution
         self.G: Optional[np.ndarray] = None
@@ -735,6 +743,9 @@ class PortfolioWrapper:
         self.initial_weights: Optional[np.ndarray] = None
         self.market_impact_costs: Optional[np.ndarray] = None
         self.proportional_costs: Optional[np.ndarray] = None
+        self._return_type: str = "simple"
+        self._uncertainty_cov: Optional[np.ndarray] = None
+        self._setup_constraints(self, distribution, constraints, costs, long_only, total_weight, bounds)
         logger.info(f"PortfolioWrapper initialized for {self.dist.N} assets.")
 
     def __repr__(self):
@@ -742,18 +753,69 @@ class PortfolioWrapper:
         suffix = f", assets={names}..." if names else ""
         return f"PortfolioWrapper(N={self.dist.N}{suffix})"
 
+    def _report_mu_cov(self):
+        """Return (mu, cov) in simple-return space for frontier reporting.
+
+        For ``_return_type == "simple"`` this is an identity.  For ``"log"``
+        (robust posterior path) the moments are converted via :func:`log2simple`.
+        """
+        if self._return_type == "simple":
+            return self.dist.mu, self.dist.cov
+        from .utils.projection import log2simple
+        return log2simple(self.dist.mu, self.dist.cov)
+
+    def _require_mu_cov(self, method: str) -> None:
+        """Raise if parametric moments are missing."""
+        if self.dist.mu is None or self.dist.cov is None:
+            raise ValueError(f"{method} requires `mu` and `cov`.")
+
+    def _cvar_overlay(self, weights: np.ndarray, confidence: float = 0.95) -> Dict[str, np.ndarray]:
+        """Compute optional CVaR overlay from stored scenarios."""
+        alt: Dict[str, np.ndarray] = {}
+        if self.dist.scenarios is not None:
+            try:
+                scen = np.asarray(self.dist.scenarios, dtype=float)
+                probs = (
+                    np.asarray(self.dist.probabilities, dtype=float).reshape(-1)
+                    if self.dist.probabilities is not None
+                    else generate_uniform_probabilities(scen.shape[0])
+                )
+                alt[f"CVaR ({int(confidence*100)}%)"] = np.abs(
+                    np.asarray(portfolio_cvar(weights, scen, probs, confidence=confidence))
+                ).reshape(-1)
+            except Exception as exc:  # pragma: no cover
+                logger.debug("CVaR overlay skipped: %s", exc)
+        return alt
+
+    @staticmethod
+    def _setup_constraints(wrapper, dist, constraints, costs, long_only, total_weight, bounds):
+        """Apply constraints and costs to a wrapper (used by factory methods)."""
+        from .utils.constraints import Constraints
+        if constraints is not None:
+            if isinstance(constraints, dict):
+                constraints = Constraints.from_dict(constraints)
+            G, h, A, b = constraints.to_matrices(dist.N)
+            wrapper.G, wrapper.h, wrapper.A, wrapper.b = G, h, A, b
+        else:
+            c = Constraints(long_only=long_only, total_weight=total_weight, bounds=bounds)
+            G, h, A, b = c.to_matrices(dist.N)
+            wrapper.G, wrapper.h, wrapper.A, wrapper.b = G, h, A, b
+        if costs is not None:
+            wrapper._apply_transaction_costs(costs)
+
     @classmethod
     def from_moments(
         cls,
         mu: Union[npt.NDArray[np.floating], pd.Series],
         cov: Union[npt.NDArray[np.floating], pd.DataFrame],
         *,
-        constraints: Union["Constraints", Dict[str, Any], None] = None,
-        costs: Optional["TransactionCosts"] = None,
+        constraints: Union[Constraints, Dict[str, Any], None] = None,
+        costs: Optional[TransactionCosts] = None,
         long_only: bool = True,
         total_weight: float = 1.0,
         bounds: Optional[Any] = None,
-    ) -> "PortfolioWrapper":
+        return_type: str = "simple",
+    ) -> PortfolioWrapper:
         """Create a ready-to-use wrapper from mean and covariance.
 
         Applies ``ensure_psd_matrix`` to the covariance and sets constraints
@@ -761,35 +823,31 @@ class PortfolioWrapper:
         :class:`~pyvallocation.utils.constraints.Constraints` object or dict),
         it overrides the ``long_only``/``total_weight``/``bounds`` shortcuts.
 
+        Args:
+            return_type: ``"simple"`` (default) or ``"log"``. When ``"log"``,
+                moments are converted to simple-return space via
+                :func:`~pyvallocation.utils.projection.log2simple` so the
+                optimizer works in P&L space per Meucci's Prayer.
+
         Examples:
             >>> wrapper = PortfolioWrapper.from_moments(mu, cov)
             >>> frontier = wrapper.variance_frontier()
         """
         from .utils.validation import ensure_psd_matrix
-        from .utils.constraints import Constraints
 
         cov_arr = np.asarray(cov, dtype=float) if not isinstance(cov, pd.DataFrame) else cov.to_numpy(dtype=float)
         cov_psd = ensure_psd_matrix(cov_arr)
         if isinstance(cov, pd.DataFrame):
             cov_psd = pd.DataFrame(cov_psd, index=cov.index, columns=cov.columns)
 
-        dist = AssetsDistribution(mu=mu, cov=cov_psd)
-        wrapper = cls(dist)
-
-        if constraints is not None:
-            if isinstance(constraints, dict):
-                constraints = Constraints.from_dict(constraints)
-            G, h, A, b = constraints.to_matrices(dist.N)
-            wrapper.G, wrapper.h, wrapper.A, wrapper.b = G, h, A, b
+        if return_type == "log":
+            from .utils.projection import log2simple
+            mu_s, cov_s = log2simple(mu, cov_psd)
+            dist = AssetsDistribution(mu=mu_s, cov=cov_s)
         else:
-            c = Constraints(long_only=long_only, total_weight=total_weight, bounds=bounds)
-            G, h, A, b = c.to_matrices(dist.N)
-            wrapper.G, wrapper.h, wrapper.A, wrapper.b = G, h, A, b
-
-        if costs is not None:
-            wrapper._apply_transaction_costs(costs)
-
-        return wrapper
+            dist = AssetsDistribution(mu=mu, cov=cov_psd)
+        return cls(dist, constraints=constraints, costs=costs,
+                   long_only=long_only, total_weight=total_weight, bounds=bounds)
 
     @classmethod
     def from_scenarios(
@@ -797,58 +855,59 @@ class PortfolioWrapper:
         scenarios: Union[npt.NDArray[np.floating], pd.DataFrame],
         *,
         probabilities: Optional[Union[npt.NDArray[np.floating], pd.Series]] = None,
-        constraints: Union["Constraints", Dict[str, Any], None] = None,
-        costs: Optional["TransactionCosts"] = None,
+        constraints: Union[Constraints, Dict[str, Any], None] = None,
+        costs: Optional[TransactionCosts] = None,
         long_only: bool = True,
         total_weight: float = 1.0,
         bounds: Optional[Any] = None,
-    ) -> "PortfolioWrapper":
+        return_type: str = "simple",
+    ) -> PortfolioWrapper:
         """Create a ready-to-use wrapper from scenario data.
+
+        Args:
+            return_type: ``"simple"`` (default) or ``"log"``. When ``"log"``,
+                scenarios are converted to simple returns via ``exp(x) - 1``
+                so the optimizer works in P&L space per Meucci's Prayer.
 
         Examples:
             >>> wrapper = PortfolioWrapper.from_scenarios(returns_df)
             >>> frontier = wrapper.variance_frontier()
         """
-        from .utils.constraints import Constraints
+
+        if return_type == "log":
+            from .utils.projection import convert_scenarios_compound_to_simple
+            is_df = isinstance(scenarios, pd.DataFrame)
+            scen_np = scenarios.to_numpy(dtype=float) if is_df else np.asarray(scenarios, dtype=float)
+            scen_simple = convert_scenarios_compound_to_simple(scen_np)
+            if is_df:
+                scenarios = pd.DataFrame(scen_simple, index=scenarios.index, columns=scenarios.columns)
+            else:
+                scenarios = scen_simple
 
         dist = AssetsDistribution(scenarios=scenarios, probabilities=probabilities)
-        wrapper = cls(dist)
-
-        if constraints is not None:
-            if isinstance(constraints, dict):
-                constraints = Constraints.from_dict(constraints)
-            G, h, A, b = constraints.to_matrices(dist.N)
-            wrapper.G, wrapper.h, wrapper.A, wrapper.b = G, h, A, b
-        else:
-            c = Constraints(long_only=long_only, total_weight=total_weight, bounds=bounds)
-            G, h, A, b = c.to_matrices(dist.N)
-            wrapper.G, wrapper.h, wrapper.A, wrapper.b = G, h, A, b
-
-        if costs is not None:
-            wrapper._apply_transaction_costs(costs)
-
-        return wrapper
+        return cls(dist, constraints=constraints, costs=costs,
+                   long_only=long_only, total_weight=total_weight, bounds=bounds)
 
     @classmethod
     def from_robust_posterior(
         cls,
-        posterior: "RobustBayesPosterior",
+        posterior: RobustBayesPosterior,
         *,
-        constraints: Union["Constraints", Dict[str, Any], None] = None,
-        costs: Optional["TransactionCosts"] = None,
+        constraints: Union[Constraints, Dict[str, Any], None] = None,
+        costs: Optional[TransactionCosts] = None,
         long_only: bool = True,
         total_weight: float = 1.0,
         bounds: Optional[Any] = None,
         annualization_factor: float = 1.0,
-    ) -> "PortfolioWrapper":
+    ) -> PortfolioWrapper:
         """Create a wrapper configured for robust optimisation from a Bayesian posterior.
 
         Maps the :class:`~pyvallocation.bayesian.RobustBayesPosterior` fields
         to the robust optimiser inputs per Meucci (2005, Eq. 9.155):
 
         * ``dist.mu``  ← ``posterior.mu`` (posterior mean :math:`\\mu_1`)
-        * ``dist.cov``  ← ``posterior.s_mu`` scaled by ``annualization_factor``
-          (mean-uncertainty scatter :math:`S_\\mu`)
+        * ``dist.cov``  ← ``posterior.sigma`` (return covariance :math:`\\Sigma_{ce}`)
+        * ``_uncertainty_cov``  ← ``posterior.s_mu`` (mean-uncertainty scatter :math:`S_\\mu`)
 
         The resulting wrapper is ready for :meth:`robust_lambda_frontier` or
         :meth:`solve_robust_gamma_portfolio`.
@@ -873,14 +932,85 @@ class PortfolioWrapper:
         """
         mu = posterior.mu
         s_mu = posterior.mean_uncertainty_cov_log(annualization_factor=annualization_factor)
+        sigma_ce = posterior.sigma  # posterior return covariance Sigma_ce
+
         if annualization_factor != 1.0:
             mu_scaled = np.asarray(mu, dtype=float) * annualization_factor
             if isinstance(mu, pd.Series):
                 mu_scaled = pd.Series(mu_scaled, index=mu.index, name=mu.name)
             mu = mu_scaled
-        return cls.from_moments(
+            # Sigma_ce scales linearly with horizon (random walk)
+            sigma_ce_arr = np.asarray(sigma_ce, dtype=float) * annualization_factor
+            if isinstance(sigma_ce, pd.DataFrame):
+                sigma_ce_arr = pd.DataFrame(sigma_ce_arr, index=sigma_ce.index, columns=sigma_ce.columns)
+            sigma_ce = sigma_ce_arr
+
+        wrapper = cls.from_moments(
             mu=mu,
-            cov=s_mu,
+            cov=sigma_ce,  # Sigma_ce (return covariance), NOT S_mu
+            constraints=constraints,
+            costs=costs,
+            long_only=long_only,
+            total_weight=total_weight,
+            bounds=bounds,
+        )
+        wrapper._return_type = "log"
+        wrapper._uncertainty_cov = np.asarray(s_mu, dtype=float)
+        return wrapper
+
+    @classmethod
+    def from_prices(
+        cls,
+        prices: Union[npt.NDArray[np.floating], pd.DataFrame],
+        *,
+        constraints: Union[Constraints, Dict[str, Any], None] = None,
+        costs: Optional[TransactionCosts] = None,
+        long_only: bool = True,
+        total_weight: float = 1.0,
+        bounds: Optional[Any] = None,
+    ) -> PortfolioWrapper:
+        """Create a wrapper from a price history.
+
+        Computes simple returns ``(P_t / P_{t-1}) - 1`` and builds the
+        distribution from the resulting scenario matrix.  This is the
+        easiest entry point for users who have raw price data.
+
+        Args:
+            prices: Price matrix ``(T+1, N)`` as a 2-D array or DataFrame.
+                Rows are chronological observations, columns are assets.
+            constraints: Constraint specification.
+            costs: Transaction cost specification.
+            long_only: Shortcut for long-only constraint. Defaults to ``True``.
+            total_weight: Shortcut for weight-sum constraint. Defaults to ``1.0``.
+            bounds: Shortcut for per-asset bounds.
+
+        Raises:
+            ValueError: If *prices* contains fewer than 2 rows, NaN, or
+                non-positive values.
+
+        Examples:
+            >>> wrapper = PortfolioWrapper.from_prices(price_df)
+            >>> frontier = wrapper.variance_frontier()
+        """
+        if isinstance(prices, pd.DataFrame):
+            if prices.shape[0] < 2:
+                raise ValueError("`prices` must have at least 2 rows to compute returns.")
+            if prices.isnull().any().any():
+                raise ValueError("`prices` contains NaN values. Fill or drop missing data before calling from_prices.")
+            if (prices <= 0).any().any():
+                raise ValueError("`prices` contains non-positive values. Prices must be strictly positive.")
+            returns = prices.pct_change().iloc[1:]
+        else:
+            arr = np.asarray(prices, dtype=float)
+            if arr.ndim < 2 or arr.shape[0] < 2:
+                raise ValueError("`prices` must be a 2-D array with at least 2 rows.")
+            if not np.all(np.isfinite(arr)):
+                raise ValueError("`prices` contains NaN or Inf values.")
+            if np.any(arr <= 0):
+                raise ValueError("`prices` contains non-positive values. Prices must be strictly positive.")
+            returns = arr[1:] / arr[:-1] - 1.0
+        return cls.from_scenarios(
+            scenarios=returns,
             constraints=constraints,
             costs=costs,
             long_only=long_only,
@@ -888,7 +1018,100 @@ class PortfolioWrapper:
             bounds=bounds,
         )
 
-    def _apply_transaction_costs(self, costs: "TransactionCosts") -> None:
+    @classmethod
+    def from_invariants(
+        cls,
+        invariants: Union[npt.NDArray[np.floating], pd.DataFrame],
+        *,
+        horizon: int = 1,
+        n_simulations: int = 5000,
+        p: Optional[Union[npt.NDArray[np.floating], pd.Series]] = None,
+        reprice: Optional[Any] = None,
+        seed: Optional[int] = None,
+        constraints: Union[Constraints, Dict[str, Any], None] = None,
+        costs: Optional[TransactionCosts] = None,
+        long_only: bool = True,
+        total_weight: float = 1.0,
+        bounds: Optional[Any] = None,
+    ) -> PortfolioWrapper:
+        """Create a wrapper via Meucci's Prayer: project invariants, reprice to P&L.
+
+        Chains **P3 Projection** (bootstrap invariants over ``horizon`` steps)
+        and **P4 Pricing** (reprice to P&L) to produce simple-return scenarios
+        ready for optimisation (**P6**).
+
+        Args:
+            invariants: Historical invariant scenarios ``(T, K)``.
+                DataFrame or array of risk-driver observations (log-returns,
+                yield changes, implied-vol changes, ...).
+            horizon: Investment horizon in invariant time steps.
+            n_simulations: Number of projected P&L scenarios.
+            p: Flexible probabilities for the invariants (e.g. posterior
+                from :class:`~pyvallocation.views.FlexibleViewsProcessor`).
+            reprice: **P4** repricing callable.  Default :func:`reprice_exp`
+                (``exp(x)-1``, suitable for log-return invariants).
+
+                - *callable*: applied to the full ``(n_sim, K)`` projected
+                  matrix.
+                - *dict* ``{col_name: callable}``: per-column repricing
+                  (requires DataFrame invariants).
+            seed: Random seed for reproducibility.
+            constraints: Constraint specification.
+            costs: Transaction cost specification.
+            long_only: Shortcut for long-only constraint. Defaults to ``True``.
+            total_weight: Shortcut for weight-sum constraint. Defaults to ``1.0``.
+            bounds: Shortcut for per-asset bounds.
+
+        Examples:
+            >>> # Equities (log-return invariants, default reprice_exp)
+            >>> log_rets = np.log(prices / prices.shift(1)).dropna()
+            >>> wrapper = PortfolioWrapper.from_invariants(log_rets, horizon=52, seed=42)
+            >>> frontier = wrapper.cvar_frontier()
+
+            >>> # Mixed portfolio (per-instrument repricing)
+            >>> wrapper = PortfolioWrapper.from_invariants(
+            ...     invariants_df,
+            ...     reprice={"SPY": reprice_exp,
+            ...              "TLT": lambda dy: reprice_taylor(dy, delta=-7.2, gamma=55)},
+            ...     horizon=52,
+            ... )
+        """
+        from .utils.projection import project_scenarios, reprice_exp
+
+        instrument_names = None
+        if reprice is None:
+            reprice = reprice_exp
+        elif isinstance(reprice, dict):
+            if not isinstance(invariants, pd.DataFrame):
+                raise TypeError("Dict reprice requires DataFrame invariants with named columns.")
+            from .utils.projection import compose_repricers
+            reprice, instrument_names = compose_repricers(reprice, invariants.columns.tolist())
+
+        if instrument_names is not None:
+            # K→N mapping: project as numpy to avoid column-count mismatch,
+            # then wrap the output with instrument names.
+            inv_np = invariants.to_numpy(dtype=float) if isinstance(invariants, pd.DataFrame) else np.asarray(invariants, dtype=float)
+            p_arr = np.asarray(p, dtype=float).ravel() if p is not None else None
+            pnl_np = project_scenarios(
+                inv_np, investment_horizon=horizon, p=p_arr,
+                n_simulations=n_simulations, reprice=reprice, seed=seed,
+            )
+            pnl = pd.DataFrame(np.asarray(pnl_np, dtype=float), columns=instrument_names)
+        else:
+            pnl = project_scenarios(
+                invariants, investment_horizon=horizon, p=p,
+                n_simulations=n_simulations, reprice=reprice, seed=seed,
+            )
+        return cls.from_scenarios(
+            scenarios=pnl,
+            constraints=constraints,
+            costs=costs,
+            long_only=long_only,
+            total_weight=total_weight,
+            bounds=bounds,
+        )
+
+    def _apply_transaction_costs(self, costs: TransactionCosts) -> None:
         """Set transaction cost attributes from a :class:`TransactionCosts` instance.
 
         Args:
@@ -917,8 +1140,8 @@ class PortfolioWrapper:
 
     def _resolve_constraints(
         self,
-        constraints: Union["Constraints", Dict[str, Any], None],
-        costs: Optional["TransactionCosts"],
+        constraints: Union[Constraints, Dict[str, Any], None],
+        costs: Optional[TransactionCosts],
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray],
                Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
         """Resolve constraints and costs from method args or instance state.
@@ -979,12 +1202,17 @@ class PortfolioWrapper:
                 raise ValueError("`n_simulations` must be a positive integer.")
             if seed is None:
                 logger.warning("Scenario simulation is non-reproducible (no seed). Pass seed= for reproducibility.")
-            logger.info(
-                "No scenarios supplied. Simulating %d multivariate normal scenarios for CVaR calculations.",
+            logger.warning(
+                "No scenarios supplied; simulating %d multivariate-normal scenarios. "
+                "Normal tails systematically underestimate CVaR — provide empirical "
+                "or fat-tailed scenarios for reliable tail-risk estimation.",
                 n_simulations,
             )
             rng = np.random.default_rng(seed)
             scenarios = rng.multivariate_normal(self.dist.mu, self.dist.cov, n_simulations)
+            if self._return_type == "log":
+                from .utils.projection import convert_scenarios_compound_to_simple
+                scenarios = convert_scenarios_compound_to_simple(scenarios)
             probs = generate_uniform_probabilities(n_simulations)
         else:
             scenarios = np.asarray(scenarios, dtype=float)
@@ -1000,11 +1228,13 @@ class PortfolioWrapper:
         if not np.isclose(prob_sum, 1.0):
             probs = probs / prob_sum
 
-        expected_returns = (
-            np.asarray(self.dist.mu, dtype=float)
-            if self.dist.mu is not None
-            else scenarios.T @ probs
-        )
+        if self._return_type == "log" and self.dist.mu is not None:
+            mu_r, _ = self._report_mu_cov()
+            expected_returns = np.asarray(mu_r, dtype=float)
+        elif self.dist.mu is not None:
+            expected_returns = np.asarray(self.dist.mu, dtype=float)
+        else:
+            expected_returns = scenarios.T @ probs
 
         return scenarios, probs, expected_returns
 
@@ -1072,8 +1302,7 @@ class PortfolioWrapper:
             distribution, a CVaR overlay is added to ``alternate_risks`` to
             allow CVaR-based selection on the same weights.
         """
-        if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError("Mean-Variance optimization requires `mu` and `cov`.")
+        self._require_mu_cov("Mean-Variance optimization")
         G, h, A, b, iw, mic, pc = self._resolve_constraints(constraints, costs)
         if pc is not None:
             logger.warning("proportional_costs are ignored by mean-variance; use market_impact_costs instead.")
@@ -1087,23 +1316,12 @@ class PortfolioWrapper:
             market_impact_costs=mic
         )
         weights = optimizer.efficient_frontier(num_portfolios)
-        returns = self.dist.mu @ weights
-        risks = np.sqrt(np.sum((weights.T @ self.dist.cov) * weights.T, axis=1))
+        mu_r, cov_r = self._report_mu_cov()
+        returns = mu_r @ weights
+        risks = np.sqrt(np.sum((weights.T @ cov_r) * weights.T, axis=1))
 
-        alternate_risks: Dict[str, np.ndarray] = {}
-        if self.dist.scenarios is not None:
-            try:
-                scen = np.asarray(self.dist.scenarios, dtype=float)
-                probs = (
-                    np.asarray(self.dist.probabilities, dtype=float).reshape(-1)
-                    if self.dist.probabilities is not None
-                    else generate_uniform_probabilities(scen.shape[0])
-                )
-                alt_cvar = np.abs(np.asarray(portfolio_cvar(weights, scen, probs, confidence=0.95))).reshape(-1)
-                alternate_risks["CVaR (95%)"] = alt_cvar
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.debug("Skipping CVaR overlay for MV frontier: %s", exc)
-        
+        alternate_risks = self._cvar_overlay(weights)
+
         logger.info(f"Successfully computed Mean-Variance frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
             weights=weights, returns=returns, risks=risks,
@@ -1111,10 +1329,11 @@ class PortfolioWrapper:
             asset_names=self.dist.asset_names,
             alternate_risks=alternate_risks,
         )
-        
+
     def cvar_frontier(self, num_portfolios: int = 10, alpha: float = 0.05,
                       seed: Optional[int] = None, *,
-                      constraints=None, costs=None) -> PortfolioFrontier:
+                      constraints=None, costs=None,
+                      enforce_convexity: bool = True) -> PortfolioFrontier:
         r"""Compute the Mean-CVaR efficient frontier.
 
         Implementation Notes:
@@ -1129,13 +1348,14 @@ class PortfolioWrapper:
             constraints: Optional :class:`~pyvallocation.utils.constraints.Constraints`
                 or dict overriding the instance constraints.
             costs: Optional :class:`TransactionCosts` overriding instance costs.
+            enforce_convexity: Apply monotonicity and convex-envelope correction
+                to the frontier (default ``True``).  Set ``False`` to return raw
+                solver output.
 
         Returns:
             A :class:`PortfolioFrontier` object whose columns are sorted by
-            non-decreasing estimation risk so downstream tooling can rely on
-            the usual "left = conservative, right = aggressive" ordering. An
-            auxiliary ``alternate_risks['Volatility']`` is attached for
-            variance-based selection.
+            non-decreasing CVaR.  An auxiliary ``alternate_risks['Volatility']``
+            is attached for variance-based selection.
         """
         scenarios, probs, mu_for_frontier = self._scenario_inputs(seed=seed)
         G, h, A, b, iw, mic, pc = self._resolve_constraints(constraints, costs)
@@ -1161,45 +1381,38 @@ class PortfolioWrapper:
         except Exception as exc:  # pragma: no cover - defensive convenience
             logger.debug("Unable to compute volatility proxy for CVaR frontier: %s", exc)
 
-        # Numerical guards: enforce non-decreasing, convex CVaR frontier
+        # Sort by returns for consistent frontier ordering
         order = np.argsort(returns)
         returns, risks, weights = returns[order], risks[order], weights[:, order]
         raw_risks = raw_risks[order]
         for key, arr in list(alternate_risks.items()):
             alternate_risks[key] = np.asarray(arr, dtype=float)[order]
         alternate_risks[f"CVaR (raw, alpha={alpha:.2f})"] = raw_risks
-        # 1) monotone non-decreasing risk w.r.t. return target (feasible set shrinks)
-        risks = np.maximum.accumulate(risks)
 
-        # 2) convexify via lower convex envelope in (return, risk)
-        def _lower_convex_envelope(x: np.ndarray, y: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-            """Return indices of the lower convex envelope of (x, y) points.
+        if enforce_convexity:
+            # 1) monotone non-decreasing risk w.r.t. return target
+            risks = np.maximum.accumulate(risks)
 
-            Args:
-                x: X-coordinates (e.g., returns).
-                y: Y-coordinates (e.g., risks).
-                eps: Numerical tolerance for convexity checks.
+            # 2) convexify via lower convex envelope in (return, risk)
+            def _lower_convex_envelope(x: np.ndarray, y: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+                idx_stack: list[int] = []
+                for i in range(len(x)):
+                    while len(idx_stack) >= 2:
+                        i1, i2 = idx_stack[-2], idx_stack[-1]
+                        cross = (x[i2] - x[i1]) * (y[i] - y[i1]) - (y[i2] - y[i1]) * (x[i] - x[i1])
+                        if cross <= eps:
+                            idx_stack.pop()
+                        else:
+                            break
+                    idx_stack.append(i)
+                return np.array(idx_stack, dtype=int)
 
-            Returns:
-                np.ndarray: Indices of points on the lower envelope.
-            """
-            idx_stack: list[int] = []
-            for i in range(len(x)):
-                while len(idx_stack) >= 2:
-                    i1, i2 = idx_stack[-2], idx_stack[-1]
-                    cross = (x[i2] - x[i1]) * (y[i] - y[i1]) - (y[i2] - y[i1]) * (x[i] - x[i1])
-                    if cross <= eps:
-                        idx_stack.pop()
-                    else:
-                        break
-                idx_stack.append(i)
-            return np.array(idx_stack, dtype=int)
-
-        keep = _lower_convex_envelope(returns, risks)
-        if keep.size >= 2 and keep.size < returns.size:
-            x_env, y_env = returns[keep], risks[keep]
-            # Interpolate envelope risk onto the original grid (keeps matrix shape)
-            risks = np.interp(returns, x_env, y_env)
+            keep = _lower_convex_envelope(returns, risks)
+            if keep.size >= 2 and keep.size < returns.size:
+                x_env, y_env = returns[keep], risks[keep]
+                risks = np.interp(returns, x_env, y_env)
+                logger.info("CVaR frontier: convexity correction applied (%d of %d on envelope).",
+                            keep.size, returns.size)
 
         logger.info(f"Successfully computed Mean-CVaR frontier with {weights.shape[1]} portfolios.")
         return PortfolioFrontier(
@@ -1247,8 +1460,7 @@ class PortfolioWrapper:
         Returns:
             A :class:`PortfolioFrontier` object.
         """
-        if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError(r"Robust optimization requires `mu` (posterior mean) and `cov` (mean-uncertainty scatter S_mu).")
+        self._require_mu_cov("Robust optimization")
         logger.info(
             r"Computing robust \lambda-frontier. dist.mu = posterior mean, dist.cov = mean-uncertainty scatter S_mu (NOT posterior covariance)."
         )
@@ -1275,21 +1487,26 @@ class PortfolioWrapper:
                 else:
                     lambda_grid = np.linspace(0, max_lambda, num_portfolios)
 
+        uncertainty = self._uncertainty_cov if self._uncertainty_cov is not None else self.dist.cov
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
-            uncertainty_cov=self.dist.cov,
+            uncertainty_cov=uncertainty,
             G=G, h=h, A=A, b=b,
             initial_weights=iw,
             proportional_costs=pc
         )
         lambda_list = lambda_grid.tolist()
         returns, risks, weights = optimizer.efficient_frontier(lambda_list)
-        returns_arr = np.asarray(returns, dtype=float)
-        risks_arr = np.asarray(risks, dtype=float)
         weights_arr = np.asarray(weights, dtype=float)
+        risks_arr = np.asarray(risks, dtype=float)
+        # Convert returns to simple space for reporting
+        mu_r, _ = self._report_mu_cov()
+        returns_arr = mu_r @ weights_arr
         metadata = [{"lambda": float(lam)} for lam in lambda_list]
 
         alternate_risks: Dict[str, np.ndarray] = {}
+        if return_cov is None and self._uncertainty_cov is not None:
+            return_cov = self.dist.cov  # Sigma_ce lives in dist.cov after from_robust_posterior
         if return_cov is not None:
             try:
                 cov_ref = return_cov
@@ -1370,8 +1587,7 @@ class PortfolioWrapper:
         Raises:
             ValueError: If `mu` and `cov` are not available in the distribution.
         """
-        if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError("Mean-Variance optimization requires `mu` and `cov`.")
+        self._require_mu_cov("Mean-Variance optimization")
         G, h, A, b, iw, mic, pc = self._resolve_constraints(constraints, costs)
 
         logger.info(f"Solving for minimum variance portfolio with target return >= {return_target:.4f}")
@@ -1381,7 +1597,7 @@ class PortfolioWrapper:
             initial_weights=iw,
             market_impact_costs=mic
         )
-        
+
         try:
             # The efficient_portfolio method in the optimizer is an alias for _solve_target
             weights = optimizer.efficient_portfolio(return_target)
@@ -1390,8 +1606,9 @@ class PortfolioWrapper:
                 f"Optimization infeasible for target return {return_target}: {e}"
             ) from e
 
-        actual_return = self.dist.mu @ weights
-        risk = np.sqrt(weights.T @ self.dist.cov @ weights)
+        mu_r, cov_r = self._report_mu_cov()
+        actual_return = mu_r @ weights
+        risk = np.sqrt(weights.T @ cov_r @ weights)
 
         w_series = pd.Series(weights, index=self.dist.asset_names, name=f"MV Portfolio (Return >= {return_target:.4f})")
 
@@ -1437,7 +1654,7 @@ class PortfolioWrapper:
             initial_weights=iw,
             proportional_costs=pc
         )
-        
+
         try:
             # The efficient_portfolio method in the optimizer is an alias for _solve_target
             weights = optimizer.efficient_portfolio(return_target)
@@ -1448,7 +1665,7 @@ class PortfolioWrapper:
 
         actual_return = mu_for_cvar @ weights
         risk = float(np.abs(portfolio_cvar(weights, scenarios, probs, confidence=1.0 - alpha)))
-        
+
         w_series = pd.Series(weights, index=self.dist.asset_names, name=f"CVaR Portfolio (Return >= {return_target:.4f})")
 
         logger.info(
@@ -1523,8 +1740,7 @@ class PortfolioWrapper:
             including variance, marginal risks, risk contributions, target information,
             and any solver warning emitted during target clipping.
         """
-        if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError("Relaxed risk parity requires `mu` and `cov`.")
+        self._require_mu_cov("Relaxed risk parity")
 
         G, h, A, b, iw, mic, pc = self._resolve_constraints(constraints, costs)
         logger.info(
@@ -1544,9 +1760,10 @@ class PortfolioWrapper:
             risk_budgets=risk_budgets,
         )
 
+        mu_r, cov_r = self._report_mu_cov()
         rp_solution = optimizer.solve(lambda_reg=0.0, return_target=None)
         rp_weights = np.asarray(rp_solution.weights, dtype=float)
-        rp_return = float(self.dist.mu @ rp_weights)
+        rp_return = float(mu_r @ rp_weights)
         requested_target: Optional[float] = None
         solver_warning: Optional[str] = None
         lower_bound = max(rp_return, 0.0)
@@ -1578,8 +1795,8 @@ class PortfolioWrapper:
         name = "Relaxed Risk Parity" if solution.target_return is None else f"Relaxed Risk Parity (\\lambda={lambda_reg:.3f})"
         w_series = pd.Series(weights, index=asset_names, name=name)
 
-        achieved_return = float(self.dist.mu @ weights)
-        portfolio_variance = float(weights @ (self.dist.cov @ weights))
+        achieved_return = float(mu_r @ weights)
+        portfolio_variance = float(weights @ (cov_r @ weights))
         risk_contributions = weights * np.asarray(solution.marginal_risk, dtype=float)
         sigma_w = np.sqrt(portfolio_variance)
         risk_contributions_pct = (risk_contributions / sigma_w) / sigma_w * 100 if sigma_w > 0 else risk_contributions * 0
@@ -1660,8 +1877,7 @@ class PortfolioWrapper:
             PortfolioFrontier: Object containing weights ``(n, k)``, realised returns,
             volatility proxy (standard deviation), and diagnostic metadata for each node.
         """
-        if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError("Relaxed risk parity frontier requires `mu` and `cov`.")
+        self._require_mu_cov("Relaxed risk parity frontier")
         if lambda_reg < 0:
             raise ValueError("`lambda_reg` must be non-negative.")
         G, h, A, b, iw, mic, pc = self._resolve_constraints(constraints, costs)
@@ -1676,10 +1892,11 @@ class PortfolioWrapper:
             risk_budgets=risk_budgets,
         )
 
+        mu_r, cov_r = self._report_mu_cov()
         rp_solution = optimizer.solve(lambda_reg=0.0, return_target=None)
         rp_weights = np.asarray(rp_solution.weights, dtype=float)
-        rp_return = float(self.dist.mu @ rp_weights)
-        rp_variance = float(rp_weights @ (self.dist.cov @ rp_weights))
+        rp_return = float(mu_r @ rp_weights)
+        rp_variance = float(rp_weights @ (cov_r @ rp_weights))
         lower_bound = max(rp_return, 0.0)
 
         if target_multipliers is not None:
@@ -1727,8 +1944,8 @@ class PortfolioWrapper:
                 optimizer, lambda_reg, requested_target, lower_bound
             )
             weights = np.asarray(solution.weights, dtype=float)
-            returns = float(self.dist.mu @ weights)
-            variance = float(weights @ (self.dist.cov @ weights))
+            returns = float(mu_r @ weights)
+            variance = float(weights @ (cov_r @ weights))
 
             weights_list.append(weights)
             returns_list.append(returns)
@@ -1751,6 +1968,8 @@ class PortfolioWrapper:
         returns_array = np.array(returns_list, dtype=float)
         risks_array = np.array(risks_list, dtype=float)
 
+        alternate_risks = self._cvar_overlay(weight_matrix)
+
         logger.info(
             r"Computed relaxed risk parity frontier with %d portfolios (\lambda=%s).",
             weight_matrix.shape[1],
@@ -1763,6 +1982,7 @@ class PortfolioWrapper:
             risk_measure="Volatility (Relaxed RP)",
             asset_names=self.dist.asset_names,
             metadata=metadata,
+            alternate_risks=alternate_risks,
         )
 
     def solve_robust_gamma_portfolio(self, gamma_mu: float, gamma_sigma_sq: float, *,
@@ -1785,8 +2005,7 @@ class PortfolioWrapper:
             A tuple containing the portfolio weights, nominal return, and
             squared uncertainty radius.
         """
-        if self.dist.mu is None or self.dist.cov is None:
-            raise ValueError(r"Robust optimization requires `mu` (posterior mean) and `cov` (mean-uncertainty scatter S_mu).")
+        self._require_mu_cov("Robust optimization")
         logger.info(
             r"Solving robust \gamma-portfolio. dist.mu = posterior mean, dist.cov = mean-uncertainty scatter S_mu."
         )
@@ -1794,16 +2013,17 @@ class PortfolioWrapper:
         if iw is not None and pc is not None:
             logger.info(r"Including proportional transaction costs in robust \gamma-portfolio optimization.")
 
+        uncertainty = self._uncertainty_cov if self._uncertainty_cov is not None else self.dist.cov
         optimizer = RobustOptimizer(
             expected_return=self.dist.mu,
-            uncertainty_cov=self.dist.cov,
+            uncertainty_cov=uncertainty,
             G=G, h=h, A=A, b=b,
             initial_weights=iw,
             proportional_costs=pc
         )
 
         result = optimizer.solve_gamma_variant(gamma_mu, gamma_sigma_sq)
-        
+
         w_series = pd.Series(result.weights, index=self.dist.asset_names, name="Robust Gamma Portfolio")
         risk_value = float(result.risk) ** 2
         if risk_value > gamma_sigma_sq:
@@ -1826,18 +2046,18 @@ class PortfolioWrapper:
         *,
         optimiser: Union[
             str,
-            Callable[["PortfolioWrapper"], "PortfolioFrontier"],
-            Callable[..., "PortfolioFrontier"],
+            Callable[[PortfolioWrapper], PortfolioFrontier],
+            Callable[..., PortfolioFrontier],
         ] = "mean_variance",
         optimiser_kwargs: Optional[Dict[str, Any]] = None,
         selector: Union[
             str,
-            Callable[["PortfolioFrontier"], Union[pd.Series, Tuple[Any, ...], np.ndarray]],
+            Callable[[PortfolioFrontier], Union[pd.Series, Tuple[Any, ...], np.ndarray]],
         ] = "tangency",
         selector_kwargs: Optional[Dict[str, Any]] = None,
         frontier_selection: Optional[Sequence[int]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> "EnsembleSpec":
+    ) -> EnsembleSpec:
         """
         Convenience wrapper around :func:`pyvallocation.ensembles.make_portfolio_spec`
         that reuses the wrapper's distribution.
@@ -1868,9 +2088,9 @@ class PortfolioWrapper:
 
     def assemble_ensembles(
         self,
-        specs: Sequence["EnsembleSpec"],
+        specs: Sequence[EnsembleSpec],
         **kwargs: Any,
-    ) -> "EnsembleResult":
+    ) -> EnsembleResult:
         """Proxy to :func:`pyvallocation.ensembles.assemble_portfolio_ensemble`.
 
         Args:
